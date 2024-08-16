@@ -1,13 +1,13 @@
 {
   "files": {
-    "main.css": "/PD_RJs_WebView/static/css/main.102d72d6.css",
-    "main.js": "/PD_RJs_WebView/static/js/main.edc40551.js",
-    "index.html": "/PD_RJs_WebView/index.html",
-    "main.102d72d6.css.map": "/PD_RJs_WebView/static/css/main.102d72d6.css.map",
-    "main.edc40551.js.map": "/PD_RJs_WebView/static/js/main.edc40551.js.map"
+    "main.css": "./static/css/main.102d72d6.css",
+    "main.js": "./static/js/main.32078cf9.js",
+    "index.html": "./index.html",
+    "main.102d72d6.css.map": "./static/css/main.102d72d6.css.map",
+    "main.32078cf9.js.map": "./static/js/main.32078cf9.js.map"
   },
   "entrypoints": [
     "static/css/main.102d72d6.css",
-    "static/js/main.edc40551.js"
+    "static/js/main.32078cf9.js"
   ]
 }
