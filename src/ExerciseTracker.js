@@ -31,10 +31,26 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
         await tf.setBackend('webgl');
         await tf.ready();
         console.log("TensorFlow.js is ready");
-        const detector = await posedetection.createDetector(posedetection.SupportedModels.MoveNet, {
-          modelType: posedetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-          modelUrl: `${window.location.origin}/models/movenet/model.json`
-        });
+        
+        
+        // const detector = await posedetection.createDetector(posedetection.SupportedModels.MoveNet, {
+        //   modelType: posedetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+        //   modelUrl: `${window.location.origin}/models/movenet/model.json`
+        // });
+        
+        const modelPath = window.location.hostname === 'localhost'
+        ? `/models/movenet/model.json`
+        : `${process.env.PUBLIC_URL}/models/movenet/model.json`;
+      
+      
+      const detector = await posedetection.createDetector(posedetection.SupportedModels.MoveNet, {
+        modelType: posedetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+        modelUrl: modelPath,
+      });
+      
+      
+        
+        
         console.log("MoveNet model loaded successfully");
         detect(detector);
       } catch (error) {
