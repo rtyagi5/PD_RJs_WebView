@@ -250,7 +250,7 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
 
   return (
     <div>
-      <Webcam
+      {/* <Webcam
         ref={webcamRef}
         style={{
             position: "absolute",
@@ -279,7 +279,37 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
             width: 640,
             height: 480,
         }}
-      />
+      /> */}
+
+<Webcam
+  ref={webcamRef}
+  style={{
+    position: "absolute",
+    top: 0,  // Align to top
+    left: 0,  // Align to left
+    right: 0,
+    bottom: 0,  // Align to bottom
+    margin: "auto",  // Center it
+    width: "100vw",  // Full width
+    height: "100vh",  // Full height
+    objectFit: "cover",  // Cover the entire area
+    zindex: 9,
+  }}
+/>
+<canvas
+  ref={canvasRef}
+  style={{
+    position: "absolute",
+    top: 0,  // Align to top
+    left: 0,  // Align to left
+    right: 0,
+    bottom: 0,  // Align to bottom
+    margin: "auto",  // Center it
+    width: "100vw",  // Full width
+    height: "100vh",  // Full height
+    zindex: 9,
+  }}
+/>
       <div style={{ position: 'absolute', top: 10, left: 10, color: 'white' }}>
         FPS: {fps}
       </div>
