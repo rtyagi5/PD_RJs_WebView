@@ -21,6 +21,22 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
   useEffect(() => {
     console.log("ExerciseTracker initialized with", { side, targetReps });
 
+    const postMessageToWebView = (data) => {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(data));
+      }
+    };
+  
+    const sendUpdates = () => {
+      const data = {
+        fps,
+        repCount,
+        armAngle,
+        shoulderAngle,
+      };
+      postMessageToWebView(data);
+    };
+
     let frameCount = 0;
     let lastFpsUpdate = performance.now();
     let isComponentMounted = true;
@@ -31,12 +47,6 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
         await tf.setBackend('webgl');
         await tf.ready();
         console.log("TensorFlow.js is ready");
-        
-        
-        // const detector = await posedetection.createDetector(posedetection.SupportedModels.MoveNet, {
-        //   modelType: posedetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-        //   modelUrl: `${window.location.origin}/models/movenet/model.json`
-        // });
         
         const modelPath = window.location.hostname === 'localhost'
         ? `/models/movenet/model.json`
@@ -49,8 +59,6 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
       });
       
       
-        
-        
         console.log("MoveNet model loaded successfully");
         detect(detector);
       } catch (error) {
@@ -67,6 +75,8 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
         setFps(fps);
         frameCount = 0;
         lastFpsUpdate = currentTime;
+
+        sendUpdates();  // Send updated values to the WebView
       }
 
       if (
@@ -77,8 +87,13 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
         const video = webcamRef.current.video;
         const videoWidth = video.videoWidth;
         const videoHeight = video.videoHeight;
-        webcamRef.current.video.width = videoWidth;
-        webcamRef.current.video.height = videoHeight;
+
+        // webcamRef.current.video.width = videoWidth;
+        // webcamRef.current.video.height = videoHeight;
+        // Set the canvas dimensions to match the video dimensions
+          canvasRef.current.width = videoWidth;
+          canvasRef.current.height = videoHeight;
+
         const ctx = canvasRef.current.getContext("2d");
         ctx.clearRect(0, 0, videoWidth, videoHeight);
 
@@ -86,6 +101,8 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
         console.log("Poses estimated", poses);
         detectReps(poses);
         drawCanvas(poses, video, videoWidth, videoHeight, canvasRef);
+
+        sendUpdates();  // Send updated values to the WebView
       }
 
       if (isComponentMounted) {
@@ -95,6 +112,10 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
 
     const handleExerciseComplete = () => {
         setFeedback("Target reps achieved!");
+
+
+        // Send the final update to the WebView
+         sendUpdates();
     
         // Delay for 5 seconds before stopping detection and clearing the feedback
         setTimeout(() => {
@@ -250,19 +271,20 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
 
   return (
     <div>
-      {/* <Webcam
+      <Webcam
         ref={webcamRef}
         style={{
             position: "absolute",
             top: 0,  // Move to the top
             left: 0,
-            right: 0,
-            marginLeft: "auto",
-            marginRight: "auto",
-            textAlign: "center",
+            //right: 0,
+           // marginLeft: "auto",
+            //marginRight: "auto",
+            //textAlign: "center",
             zindex: 9,
-            width: 640,
-            height: 480,
+            width: "100%",
+            height: "auto",
+            objectFit: "contain", // Maintains the aspect ratio of the video
         }}
       />
       <canvas
@@ -271,62 +293,96 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
             position: "absolute",
             top: 0,  // Move to the top
             left: 0,
-            right: 0,
-            marginLeft: "auto",
-            marginRight: "auto",
-            textAlign: "center",
+           // right: 0,
+           // marginLeft: "auto",
+           // marginRight: "auto",
+           // textAlign: "center",
             zindex: 9,
-            width: 640,
-            height: 480,
+            width: "100%",
+            height: "auto",
         }}
-      /> */}
+      />
 
-<Webcam
-  ref={webcamRef}
-  style={{
-    position: "absolute",
-    top: 0,  // Align to top
-    left: 0,  // Align to left
-    right: 0,
-    bottom: 0,  // Align to bottom
-    margin: "auto",  // Center it
-    width: "100vw",  // Full width
-    height: "100vh",  // Full height
-    objectFit: "cover",  // Cover the entire area
-    zindex: 9,
-  }}
-/>
-<canvas
-  ref={canvasRef}
-  style={{
-    position: "absolute",
-    top: 0,  // Align to top
-    left: 0,  // Align to left
-    right: 0,
-    bottom: 0,  // Align to bottom
-    margin: "auto",  // Center it
-    width: "100vw",  // Full width
-    height: "100vh",  // Full height
-    zindex: 9,
-  }}
-/>
-      <div style={{ position: 'absolute', top: 10, left: 10, color: 'white' }}>
-        FPS: {fps}
-      </div>
-      <div style={{ position: 'absolute', top: 40, left: 10, color: 'white' }}>
-        Reps: {repCount}
-      </div>
-      <div style={{ position: 'absolute', top: 70, left: 10, color: 'white' }}>
-        {feedback}
-      </div>
-      <div style={{ position: 'absolute', top: 100, left: 10, color: 'white' }}>
-        Arm Angle: {armAngle.toFixed(2)}
-      </div>
-      <div style={{ position: 'absolute', top: 130, left: 10, color: 'white' }}>
-        Shoulder Angle: {shoulderAngle.toFixed(2)}
+
+        {/* Container for all informational elements */}
+        <div style={{ 
+        position: 'absolute', 
+        top: 10, 
+        left: 10, 
+        display: 'flex', 
+        flexDirection: 'column', 
+        alignItems: 'flex-start',  // Align all elements to the start of the flex container
+        gap: '5px',  // Reduced gap to keep elements close together
+        zIndex: 10 
+      }}>
+        {/* FPS Display */}
+        <div
+          style={{
+            color: 'white',
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            padding: '5px',
+            borderRadius: '5px',
+            textAlign: 'left',  // Align text to the left within the box
+          }}
+        >
+          FPS: {fps}
+        </div>
+  
+        {/* Reps Display */}
+        <div
+          style={{
+            color: 'white',
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            padding: '5px',
+            borderRadius: '5px',
+            textAlign: 'left',  // Align text to the left within the box
+          }}
+        >
+          Reps: {repCount}
+        </div>
+  
+        {/* Feedback Display */}
+        <div
+          style={{
+            color: 'white',
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            padding: '10px',
+            borderRadius: '5px',
+            textAlign: 'left',  // Align text to the left within the box
+          }}
+        >
+          {feedback}
+        </div>
+  
+        {/* Arm Angle Display */}
+        <div
+          style={{
+            color: 'white',
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            padding: '5px',
+            borderRadius: '5px',
+            textAlign: 'left',  // Align text to the left within the box
+          }}
+        >
+          Arm Angle: {armAngle.toFixed(2)}
+        </div>
+  
+        {/* Shoulder Angle Display */}
+        <div
+          style={{
+            color: 'white',
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            padding: '5px',
+            borderRadius: '5px',
+            textAlign: 'left',  // Align text to the left within the box
+          }}
+        >
+          Shoulder Angle: {shoulderAngle.toFixed(2)}
+        </div>
       </div>
     </div>
   );
+  
 };
 
 export default ExerciseTracker;
