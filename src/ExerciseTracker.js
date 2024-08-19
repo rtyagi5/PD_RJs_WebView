@@ -267,7 +267,7 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
     return () => {
       isComponentMounted = false;
     };
-  }, [isDetecting, repCount, targetReps, side, setIsDetecting]);
+  }, [isDetecting, repCount, targetReps, side, setIsDetecting, fps, armAngle, shoulderAngle]);
 
   return (
     <div>
