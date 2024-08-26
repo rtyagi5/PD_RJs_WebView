@@ -100,7 +100,7 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
         const poses = await detector.estimatePoses(video);
         console.log("Poses estimated", poses);
         detectReps(poses);
-        drawCanvas(poses, video, videoWidth, videoHeight, canvasRef);
+        drawCanvas(poses, videoWidth, videoHeight, ctx);
 
         sendUpdates();  // Send updated values to the WebView
       }
@@ -126,10 +126,10 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
     };
 
 
-    const drawCanvas = (poses, video, videoWidth, videoHeight, canvas) => {
-      const ctx = canvas.current.getContext("2d");
-      canvas.current.width = videoWidth;
-      canvas.current.height = videoHeight;
+    const drawCanvas = (poses, videoWidth, videoHeight, ctx) => {
+      // const ctx = canvas.current.getContext("2d");
+      // canvas.current.width = videoWidth;
+      // canvas.current.height = videoHeight;
       ctx.clearRect(0, 0, videoWidth, videoHeight);
 
       if (poses.length > 0 && poses[0].keypoints) {
@@ -297,7 +297,7 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
            // marginLeft: "auto",
            // marginRight: "auto",
            // textAlign: "center",
-            zindex: 9,
+            zindex: 10,
             width: "100%",
             height: "auto",
         }}
