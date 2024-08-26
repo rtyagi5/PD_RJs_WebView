@@ -285,12 +285,12 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
   
     // window.addEventListener('resize', handleResize);
 
-
     runMoveNet();
 
     return () => {
       isComponentMounted = false;
      // window.removeEventListener('resize', handleResize);
+     
     };
   }, [isDetecting, repCount, targetReps, side, setIsDetecting, fps, armAngle, shoulderAngle]);
 
@@ -298,6 +298,8 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
     <div>
       <Webcam
         ref={webcamRef}
+        playsInline
+        controls={false}
         style={{
             position: "absolute",
             top: 0,  // Move to the top
@@ -306,7 +308,7 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
            // marginLeft: "auto",
             //marginRight: "auto",
             //textAlign: "center",
-            zindex: 9,
+            zIndex: 9,
             width: "100%",
             height: "auto",
             //objectFit: "contain", // Maintains the aspect ratio of the video
@@ -326,7 +328,7 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
            // marginLeft: "auto",
            // marginRight: "auto",
            // textAlign: "center",
-            zindex: 10,
+            zIndex: 10,
             width: "100%",
             height: "auto",
         }}
