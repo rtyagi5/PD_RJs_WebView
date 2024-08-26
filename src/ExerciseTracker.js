@@ -94,6 +94,11 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
           canvasRef.current.width = videoWidth;
           canvasRef.current.height = videoHeight;
 
+
+          // Additional style for canvas to maintain the aspect ratio in WebView
+          canvasRef.current.style.width = '100%';
+          canvasRef.current.style.height = 'auto';
+
         const ctx = canvasRef.current.getContext("2d");
         ctx.clearRect(0, 0, videoWidth, videoHeight);
 
@@ -262,10 +267,30 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
       return angle;
     };
 
+
+    // const handleResize = () => {
+    //   if (webcamRef.current && canvasRef.current) {
+    //     const video = webcamRef.current.video;
+    //     const videoWidth = video.videoWidth;
+    //     const videoHeight = video.videoHeight;
+  
+    //     // Match canvas dimensions with video
+    //     canvasRef.current.width = videoWidth;
+    //     canvasRef.current.height = videoHeight;
+  
+    //     canvasRef.current.style.width = '100%';
+    //     canvasRef.current.style.height = 'auto';
+    //   }
+    // };
+  
+    // window.addEventListener('resize', handleResize);
+
+
     runMoveNet();
 
     return () => {
       isComponentMounted = false;
+     // window.removeEventListener('resize', handleResize);
     };
   }, [isDetecting, repCount, targetReps, side, setIsDetecting, fps, armAngle, shoulderAngle]);
 
@@ -284,8 +309,12 @@ const ExerciseTracker = ({ side, targetReps, isDetecting, setIsDetecting }) => {
             zindex: 9,
             width: "100%",
             height: "auto",
-            objectFit: "contain", // Maintains the aspect ratio of the video
-        }}
+            //objectFit: "contain", // Maintains the aspect ratio of the video
+            objectFit: "cover",  // Ensure the video covers the canvas properly
+          }}
+          videoConstraints={{
+            facingMode: "user",
+          }}
       />
       <canvas
         ref={canvasRef}
