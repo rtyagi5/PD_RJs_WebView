@@ -12,14 +12,18 @@ function App() {
   const [targetReps, setTargetReps] = useState(0);
   const [side, setSide] = useState("left");
   const query = useQuery();
+ // const exerciseType = "Side Arm Raise";
+  const [exerciseType, setExerciseType] = useState("SelectExercise"); // Default exercise type
 
   useEffect(() => {
     const repsFromURL = query.get("reps");
     const sideFromURL = query.get("side");
+    const exerciseTypeFromURL = query.get("exerciseType"); // Get exercise type from URL
 
-    if (repsFromURL && sideFromURL) {
+    if (repsFromURL && sideFromURL && exerciseTypeFromURL) {
       setTargetReps(parseInt(repsFromURL));
       setSide(sideFromURL);
+      setExerciseType(exerciseTypeFromURL); // set exercise type
       setIsDetecting(true); // Start detection automatically
     }
   }, [query]);
@@ -43,6 +47,15 @@ function App() {
               <option value="left">Left</option>
               <option value="right">Right</option>
             </select>
+            <select 
+              value={exerciseType} 
+              onChange={(e) => setExerciseType(e.target.value)}
+            >
+              <option value="SelectExercise">Select Exercise</option>
+              <option value="SideArmRaise">Side Arm Raise</option>
+              {/* <option value="Other Exercise">Other Exercise</option> */}
+              {/* Add more exercises as needed */}
+            </select>
             <button onClick={handleStartExercise}>
               Start Exercise
             </button>
@@ -50,6 +63,7 @@ function App() {
         )}
         {isDetecting && (
           <ExerciseTracker
+            exerciseType={exerciseType}
             side={side}
             targetReps={targetReps}
             isDetecting={isDetecting}

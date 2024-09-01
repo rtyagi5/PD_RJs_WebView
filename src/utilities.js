@@ -51,3 +51,67 @@ export function drawKeypoints(keypoints, minConfidence, ctx, scale = 1) {
     }
   });
 }
+
+
+export const calculateInteriorAngle = (p1, p2, p3) => {
+  const v1 = { x: p1.x - p2.x, y: p1.y - p2.y };
+  const v2 = { x: p3.x - p2.x, y: p3.y - p2.y };
+
+  const dotProduct = v1.x * v2.x + v1.y * v2.y;
+  const magnitude1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
+  const magnitude2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
+
+  if (magnitude1 === 0 || magnitude2 === 0) {
+    return NaN;
+  }
+
+  const angle = Math.acos(dotProduct / (magnitude1 * magnitude2)) * (180 / Math.PI);
+  return angle;
+};
+
+
+export const drawCanvas = (poses, videoWidth, videoHeight, ctx) => {
+  // const ctx = canvas.current.getContext("2d");
+  // canvas.current.width = videoWidth;
+  // canvas.current.height = videoHeight;
+  ctx.clearRect(0, 0, videoWidth, videoHeight);
+
+  if (poses.length > 0 && poses[0].keypoints) {
+    drawKeypoints(poses[0].keypoints, 0.3, ctx);
+    drawSkeleton(poses[0].keypoints, 0.3, ctx);
+  }
+};
+
+
+export const sendUpdates = (data, exerciseType) => {
+  // Example config to determine which data points to include based on exerciseType
+  const exerciseDataConfig = {
+    "SideArmRaise": ["armAngle", "shoulderAngle"],
+    "Squats": ["kneeAngle", "hipAngle"],
+    // Add more exercises and their specific data points here
+  };
+
+  const selectedConfig = exerciseDataConfig[exerciseType] || [];
+
+  // Include only the relevant data points
+  const filteredData = {
+    fps: data.fps,
+    repCount: data.repCount,
+    feedback: data.feedback,
+    exerciseType: exerciseType, // Include the exerciseType here
+  };
+
+  selectedConfig.forEach(param => {
+    if (data[param] !== undefined) {
+      filteredData[param] = data[param];
+    }
+  });
+
+  console.log('Sending data:', filteredData); // Add this to check the data structure
+
+  if (window.ReactNativeWebView) {
+    window.ReactNativeWebView.postMessage(JSON.stringify(filteredData));
+  } else if (window.parent) {
+    window.parent.postMessage(filteredData, "*"); // Send the message to the parent window
+  }
+};
