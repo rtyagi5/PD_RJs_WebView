@@ -12,7 +12,6 @@ function App() {
   const [targetReps, setTargetReps] = useState(0);
   const [side, setSide] = useState("left");
   const query = useQuery();
- // const exerciseType = "Side Arm Raise";
   const [exerciseType, setExerciseType] = useState("SelectExercise"); // Default exercise type
 
   useEffect(() => {
@@ -43,17 +42,23 @@ function App() {
               onChange={(e) => setTargetReps(parseInt(e.target.value))}
               placeholder="Enter number of reps"
             />
-            <select value={side} onChange={(e) => setSide(e.target.value)}>
-              <option value="left">Left</option>
-              <option value="right">Right</option>
-            </select>
+            {/* Show side selection for all exercises except "SelectExercise" */}
+            {exerciseType !== "SelectExercise" && (
+              <select value={side} onChange={(e) => setSide(e.target.value)}>
+                <option value="left">Left</option>
+                <option value="right">Right</option>
+              </select>
+            )}
             <select 
               value={exerciseType} 
               onChange={(e) => setExerciseType(e.target.value)}
             >
               <option value="SelectExercise">Select Exercise</option>
               <option value="SideArmRaise">Side Arm Raise</option>
-              {/* <option value="Other Exercise">Other Exercise</option> */}
+              <option value="SitToStand">Sit to Stand</option>
+              <option value="MiniSquats">Mini Squats</option>
+              <option value="LongArcQuad">Long Arc Quad</option>
+              <option value="StandingStraightUp">Standing Straight Up</option>  {/* New Option */}
               {/* Add more exercises as needed */}
             </select>
             <button onClick={handleStartExercise}>

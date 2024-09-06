@@ -3,6 +3,10 @@ import * as tf from "@tensorflow/tfjs";
 import * as posedetection from "@tensorflow-models/pose-detection";
 import Webcam from "react-webcam";
 import { SAR_repDetection } from "./SideArmRaise"; // Import the function here
+import { SitStand_repDetection } from './SitToStand';
+import { MiniSquats_repDetection } from './MiniSquats';
+import { LAQ_repDetection } from './LongArcQuad'; // Import the new LAQ logic
+import { StandingStraightUp_detection } from './StandingStraightUp';
 import { drawCanvas,sendUpdates } from './utilities';
 
 const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDetecting }) => {
@@ -15,14 +19,31 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
   const [repCount, setRepCount] = useState(0);
   const [armAngle, setArmAngle] = useState(0);
   const [shoulderAngle, setShoulderAngle] = useState(0);
+  const [spineAngle, setSpineAngle] = useState(0);
+  const [kneeAngle, setKneeAngle] = useState(0);
+  const [hipDistance, setHipDistance] = useState(0);    
   const [feedback, setFeedback] = useState("Initializing...");
-  const feedbackRef = useRef("Initializing...");  // Use ref instead of state for feedback
+  const [headTilt, setHeadTilt] = useState(null);
+  const [shoulderAlignment, setShoulderAlignment] = useState(null);
+  const [hipAlignment, setHipAlignment] = useState(null);
+  const [kneeAlignment, setKneeAlignment] = useState(null);
+  const [timeElapsed, setTimeElapsed] = useState(0); // New state to track elapsed time
 
+
+  const countdownRef = useRef({ started: false, value: 5 });  // Ref to track if countdown has started
+  const startTimeRef = useRef(null);  // Ref to track the actual start time
+  const feedbackRef = useRef("Initializing...");  // Use ref instead of state for feedback
   const armLoweredCountRef = useRef(0);
   const armUpCountRef = useRef(0);
   const armLoweredFlagRef = useRef(false);
   const repCountRef = useRef(repCount);
   const fpsRef = useRef(0);
+  const sitLoweredCountRef = useRef(0);   // New ref for sit-down movement
+  const sitUpCountRef = useRef(0);        // New ref for stand-up movement
+  const sitLoweredFlagRef = useRef(false); // New flag for sit-down movement
+  const elapsedTimeRef = useRef(0);
+  const currentTimeRef = useRef(0);
+  
 
 
   const detect = async () => {
@@ -63,7 +84,6 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
                 side,
                 setArmAngle,
                 setShoulderAngle,
-              //  feedback,
                 setFeedback,
                 feedbackRef,
                 armLoweredCountRef,
@@ -74,7 +94,75 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
                 targetReps,
                 handleExerciseComplete
               );
-            }
+            } else if (exerciseType === "SitToStand") {
+              exerciseData = SitStand_repDetection(
+                poses,
+                side,
+                setSpineAngle,
+                setKneeAngle,
+                setHipDistance,
+                setFeedback,
+                feedbackRef,
+                sitLoweredCountRef,
+                sitUpCountRef,
+                sitLoweredFlagRef,
+                repCountRef,
+                setRepCount,
+                targetReps,
+                handleExerciseComplete
+              );
+          } else if (exerciseType === "MiniSquats") {
+            exerciseData = MiniSquats_repDetection(
+              poses,
+              side,
+              setKneeAngle,          // Function to update knee angle in the UI
+              setSpineAngle,         // Function to update spine angle in the UI
+              setFeedback,           // Function to set feedback
+              feedbackRef,           // Reference to hold feedback state
+              sitLoweredCountRef,    // Ref to track how many times user has squatted down
+              sitUpCountRef,         // Ref to track how many times user has stood up
+              sitLoweredFlagRef,     // Ref to track if the user has squatted down
+              repCountRef,           // Reference to hold rep count
+              setRepCount,           // Function to update rep count
+              targetReps,            // Target number of reps
+              handleExerciseComplete // Function to call when target reps are complete
+            );
+          } else if (exerciseType === "LongArcQuad") {
+            exerciseData = LAQ_repDetection(
+              poses,
+              side,
+              setKneeAngle,
+              setSpineAngle,
+              setFeedback,
+              feedbackRef,
+              sitLoweredCountRef,
+              sitUpCountRef,
+              sitLoweredFlagRef,
+              repCountRef,
+              setRepCount,
+              targetReps,
+              handleExerciseComplete
+            );
+          } else if (exerciseType === "StandingStraightUp") {
+            // Timer-based logic for StandingStraightUp
+          exerciseData = StandingStraightUp_detection(
+            poses,
+            setHeadTilt,
+            setShoulderAlignment,
+            setHipAlignment,
+            setKneeAlignment,
+            startTimeRef,  // Pass the start time ref
+            setFeedback,
+            feedbackRef,
+            setTimeElapsed,
+            targetReps,
+            handleExerciseComplete,
+            countdownRef,  // Pass the countdown ref
+            elapsedTimeRef,
+            currentTimeRef
+          );
+        }
+          
             if (exerciseData) {
               setData(exerciseData);
               console.log("Updated exercise data:", exerciseData);
@@ -198,8 +286,6 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
     }, 5000);
 };
 
-
-
   return (
     <div>
        <Webcam
@@ -219,11 +305,12 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           height: "100vh",
           //objectFit: "contain", // Maintains the aspect ratio of the video
           objectFit: "fill", // Ensure the video covers the canvas properly
+          transform: "scaleX(-1)", // This flips the video horizontally
         }}
         videoConstraints={{
           facingMode: "user",
         }}
-      />
+/>
       <canvas
         ref={canvasRef}
         style={{
@@ -238,6 +325,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           width: "100%",
           height: "100vh",
           objectFit: "fill",
+          transform: "scaleX(-1)", // This flips the video horizontally
         }}
       />
 
@@ -292,34 +380,201 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           {feedback}
         </div>
   
-        {/* Arm Angle Display */}
-        <div
-          style={{
-            color: 'white',
-            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-            padding: '5px',
-            borderRadius: '5px',
-            textAlign: 'left',  // Align text to the left within the box
-          }}
-        >
-          Arm Angle: {armAngle.toFixed(2)}
-        </div>
-  
-        {/* Shoulder Angle Display */}
-        <div
-          style={{
-            color: 'white',
-            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-            padding: '5px',
-            borderRadius: '5px',
-            textAlign: 'left',  // Align text to the left within the box
-          }}
-        >
-          Shoulder Angle: {shoulderAngle.toFixed(2)}
-        </div>
-      </div>
+{/* Conditional Rendering Based on Exercise Type */}
+{exerciseType === "SideArmRaise" && (
+  <>
+    {/* Arm Angle Display */}
+    <div
+      style={{
+        color: "white",
+        backgroundColor: "rgba(0, 0, 0, 0.6)",
+        padding: "5px",
+        borderRadius: "5px",
+        textAlign: "left", // Align text to the left within the box
+      }}
+    >
+      Arm Angle: {armAngle?.toFixed(2)}
     </div>
-  );
+
+    {/* Shoulder Angle Display */}
+    <div
+      style={{
+        color: "white",
+        backgroundColor: "rgba(0, 0, 0, 0.6)",
+        padding: "5px",
+        borderRadius: "5px",
+        textAlign: "left", // Align text to the left within the box
+      }}
+    >
+      Shoulder Angle: {shoulderAngle?.toFixed(2)}
+    </div>
+  </>
+)}
+
+{exerciseType === "SitToStand" && (
+  <>
+    <div
+      style={{
+        color: 'white',
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        padding: '5px',
+        borderRadius: '5px',
+        textAlign: 'left', 
+      }}
+    >
+      Spine Angle: {spineAngle?.toFixed(2)}
+    </div>
+    <div
+      style={{
+        color: 'white',
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        padding: '5px',
+        borderRadius: '5px',
+        textAlign: 'left', 
+      }}
+    >
+      Knee Angle: {kneeAngle?.toFixed(2)}
+    </div>
+    <div
+      style={{
+        color: 'white',
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        padding: '5px',
+        borderRadius: '5px',
+        textAlign: 'left', 
+      }}
+    >
+      Hip Distance: {hipDistance?.toFixed(2)}
+    </div>
+  </>
+)}
+
+{/* Conditional Rendering Based on Exercise Type */}
+{exerciseType === "MiniSquats" && (
+  <>
+    <div
+      style={{
+        color: "white",
+        backgroundColor: "rgba(0, 0, 0, 0.6)",
+        padding: "5px",
+        borderRadius: "5px",
+        textAlign: "left", // Align text to the left within the box
+      }}
+    >
+      Knee Angle: {kneeAngle?.toFixed(2)}
+    </div>
+
+    <div
+      style={{
+        color: "white",
+        backgroundColor: "rgba(0, 0, 0, 0.6)",
+        padding: "5px",
+        borderRadius: "5px",
+        textAlign: "left", // Align text to the left within the box
+      }}
+    >
+      Spine Angle: {spineAngle?.toFixed(2)}
+    </div>
+  </>
+)}
+{/* Conditional Rendering Based on Exercise Type */}
+{exerciseType === "LongArcQuad" && (
+  <>
+    <div
+      style={{
+        color: "white",
+        backgroundColor: "rgba(0, 0, 0, 0.6)",
+        padding: "5px",
+        borderRadius: "5px",
+        textAlign: "left", // Align text to the left within the box
+      }}
+    >
+      Knee Angle: {kneeAngle?.toFixed(2)}
+    </div>
+
+    <div
+      style={{
+        color: "white",
+        backgroundColor: "rgba(0, 0, 0, 0.6)",
+        padding: "5px",
+        borderRadius: "5px",
+        textAlign: "left", // Align text to the left within the box
+      }}
+    >
+      Spine Angle: {spineAngle?.toFixed(2)}
+    </div>
+  </>
+)}
+{exerciseType === "StandingStraightUp" && (
+  <>
+    {/* Head Angle Display */}
+    <div
+      style={{
+        color: 'white',
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        padding: '5px',
+        borderRadius: '5px',
+        textAlign: 'left', // Align text to the left within the box
+      }}
+    >
+      Head Angle: {headTilt?.toFixed(2)}°
+    </div>
+
+    {/* Shoulder Alignment Display */}
+    <div
+      style={{
+        color: 'white',
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        padding: '5px',
+        borderRadius: '5px',
+        textAlign: 'left',
+      }}
+    >
+      Shoulder Alignment: {shoulderAlignment?.toFixed(2)}°
+    </div>
+
+    {/* Hip Alignment Display */}
+    <div
+      style={{
+        color: 'white',
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        padding: '5px',
+        borderRadius: '5px',
+        textAlign: 'left',
+      }}
+    >
+      Hip Alignment: {hipAlignment?.toFixed(2)}°
+    </div>
+
+    {/* Knee Alignment Display */}
+    <div
+      style={{
+        color: 'white',
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        padding: '5px',
+        borderRadius: '5px',
+        textAlign: 'left',
+      }}
+    >
+      Knee Alignment: {kneeAlignment?.toFixed(2)}°
+    </div>
+    <div
+            style={{
+              color: 'white',
+              backgroundColor: 'rgba(0, 0, 0, 0.6)',
+              padding: '5px',
+              borderRadius: '5px',
+              textAlign: 'left',
+            }}
+          >
+            Time Elapsed: {timeElapsed.toFixed(2)} seconds
+          </div>
+  </>
+)}
+
+    </div>
+  </div>
+);
   
 };
 
