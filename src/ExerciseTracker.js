@@ -43,6 +43,9 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
   const sitLoweredFlagRef = useRef(false); // New flag for sit-down movement
   const elapsedTimeRef = useRef(0);
   const currentTimeRef = useRef(0);
+  const keypointsRef = useRef([]);
+  const keypointColorsRef = useRef("aqua");
+  const segmentColorsRef = useRef("aqua");
   
 
 
@@ -92,7 +95,11 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
                 repCountRef,
                 setRepCount,  // Make sure to include this line
                 targetReps,
-                handleExerciseComplete
+                handleExerciseComplete,            
+                keypointColorsRef,      
+                segmentColorsRef,
+                //setKeypoints
+                keypointsRef
               );
             } else if (exerciseType === "SitToStand") {
               exerciseData = SitStand_repDetection(
@@ -167,8 +174,11 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
               setData(exerciseData);
               console.log("Updated exercise data:", exerciseData);
           }
-  
-       drawCanvas(poses, videoWidth, videoHeight, ctx);
+          console.log("Updated keypoints data:", keypointsRef.current);
+          console.log("Updated keypointColors data:", keypointColorsRef.current);
+          console.log("Updated segmentColors data:", segmentColorsRef.current);
+          
+       drawCanvas(poses, videoWidth, videoHeight, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
 
         frameCount++;
         const currentTime = performance.now();
@@ -331,7 +341,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
 
 
         {/* Container for all informational elements */}
-        <div style={{ 
+        {/* <div style={{ 
         position: 'absolute', 
         top: 10, 
         left: 10, 
@@ -340,9 +350,9 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
         alignItems: 'flex-start',  // Align all elements to the start of the flex container
         gap: '5px',  // Reduced gap to keep elements close together
         zIndex: 10 
-      }}>
+      }}> */}
         {/* FPS Display */}
-        <div
+        {/* <div
           style={{
             color: 'white',
             backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -352,10 +362,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           }}
         >
           FPS: {fps}
-        </div>
+        </div> */}
   
         {/* Reps Display */}
-        <div
+        {/* <div
           style={{
             color: 'white',
             backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -365,10 +375,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           }}
         >
           Reps: {repCount}
-        </div>
+        </div> */}
   
         {/* Feedback Display */}
-        <div
+        {/* <div
           style={{
             color: 'white',
             backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -378,13 +388,13 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           }}
         >
           {feedback}
-        </div>
+        </div> */}
   
 {/* Conditional Rendering Based on Exercise Type */}
-{exerciseType === "SideArmRaise" && (
+{/* {exerciseType === "SideArmRaise" && ( */}
   <>
     {/* Arm Angle Display */}
-    <div
+    {/* <div
       style={{
         color: "white",
         backgroundColor: "rgba(0, 0, 0, 0.6)",
@@ -394,10 +404,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       }}
     >
       Arm Angle: {armAngle?.toFixed(2)}
-    </div>
+    </div> */}
 
     {/* Shoulder Angle Display */}
-    <div
+    {/* <div
       style={{
         color: "white",
         backgroundColor: "rgba(0, 0, 0, 0.6)",
@@ -407,13 +417,13 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       }}
     >
       Shoulder Angle: {shoulderAngle?.toFixed(2)}
-    </div>
+    </div> */}
   </>
-)}
+{/* )} */}
 
-{exerciseType === "SitToStand" && (
+{/* {exerciseType === "SitToStand" && ( */}
   <>
-    <div
+    {/* <div
       style={{
         color: 'white',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -445,14 +455,14 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       }}
     >
       Hip Distance: {hipDistance?.toFixed(2)}
-    </div>
+    </div> */}
   </>
-)}
+{/* )} */}
 
 {/* Conditional Rendering Based on Exercise Type */}
-{exerciseType === "MiniSquats" && (
+{/* {exerciseType === "MiniSquats" && ( */}
   <>
-    <div
+    {/* <div
       style={{
         color: "white",
         backgroundColor: "rgba(0, 0, 0, 0.6)",
@@ -474,13 +484,13 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       }}
     >
       Spine Angle: {spineAngle?.toFixed(2)}
-    </div>
+    </div> */}
   </>
-)}
+{/* )} */}
 {/* Conditional Rendering Based on Exercise Type */}
-{exerciseType === "LongArcQuad" && (
+{/* {exerciseType === "LongArcQuad" && ( */}
   <>
-    <div
+    {/* <div
       style={{
         color: "white",
         backgroundColor: "rgba(0, 0, 0, 0.6)",
@@ -502,13 +512,13 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       }}
     >
       Spine Angle: {spineAngle?.toFixed(2)}
-    </div>
+    </div> */}
   </>
-)}
-{exerciseType === "StandingStraightUp" && (
+{/* )} */}
+ {/* {exerciseType === "StandingStraightUp" && ( */}
   <>
     {/* Head Angle Display */}
-    <div
+    {/* <div
       style={{
         color: 'white',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -518,10 +528,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       }}
     >
       Head Angle: {headTilt?.toFixed(2)}°
-    </div>
+    </div> */}
 
     {/* Shoulder Alignment Display */}
-    <div
+    {/* <div
       style={{
         color: 'white',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -531,10 +541,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       }}
     >
       Shoulder Alignment: {shoulderAlignment?.toFixed(2)}°
-    </div>
+    </div> */}
 
     {/* Hip Alignment Display */}
-    <div
+    {/* <div
       style={{
         color: 'white',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -544,10 +554,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       }}
     >
       Hip Alignment: {hipAlignment?.toFixed(2)}°
-    </div>
+    </div> */}
 
     {/* Knee Alignment Display */}
-    <div
+    {/* <div
       style={{
         color: 'white',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -557,8 +567,8 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       }}
     >
       Knee Alignment: {kneeAlignment?.toFixed(2)}°
-    </div>
-    <div
+    </div> */}
+    {/* <div
             style={{
               color: 'white',
               backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -568,11 +578,11 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
             }}
           >
             Time Elapsed: {timeElapsed.toFixed(2)} seconds
-          </div>
+          </div> */}
   </>
-)}
+ {/* )} */}
 
-    </div>
+     {/* </div> */}
   </div>
 );
   

@@ -14,7 +14,10 @@ export const SAR_repDetection = (
     repCountRef,
     setRepCount,  // Ensure this is passed correctly
     targetReps,
-    handleExerciseComplete
+    handleExerciseComplete,
+    keypointColorsRef,      
+    segmentColorsRef,
+    keypointsRef
   ) => {
 
     let armAngle= null;
@@ -26,8 +29,11 @@ export const SAR_repDetection = (
       const elbow = keypoints.find(k => k.name === `${side}_elbow`);
       const wrist = keypoints.find(k => k.name === `${side}_wrist`);
       const hip = keypoints.find(k => k.name === `${side}_hip`);
+    
   
       if (shoulder && elbow && wrist && hip) {
+        keypointsRef.current = [shoulder.name, elbow.name, wrist.name, hip.name];
+        
         const allKeyPointsDetected = [shoulder, elbow, wrist, hip].every(k => k.score > 0.3);
   
         if (allKeyPointsDetected) {
@@ -45,6 +51,9 @@ export const SAR_repDetection = (
   
             // Arm Lowered Logic
             if (shoulderAngle > 0 && shoulderAngle < 30) {
+              keypointColorsRef.current="green";
+              segmentColorsRef.current="green";
+
               if (!newArmLoweredFlag) {
                 newArmLoweredFlag = true;
                 if (newArmLoweredCount === 0) {
@@ -63,6 +72,8 @@ export const SAR_repDetection = (
   
             // Intermediate Range Logic (30 to 70 degrees)
             else if (shoulderAngle >= 30 && shoulderAngle <= 70) {
+              keypointColorsRef.current="green";
+              segmentColorsRef.current="green";
             setFeedback("Intermediate range");
             feedbackRef.current="Intermediate range";
               console.log("Intermediate Range Logic (30 to 70 degrees) newArmLoweredCount", newArmLoweredCount);
@@ -72,6 +83,8 @@ export const SAR_repDetection = (
   
             // Arm Up Logic
             else if (shoulderAngle > 70 && shoulderAngle <= 90) {
+              keypointColorsRef.current="green";
+              segmentColorsRef.current="green";
               if (newArmLoweredCount === 1) {
                 if (newArmUpCount === 0) {
                   newArmUpCount = 1;
@@ -81,6 +94,10 @@ export const SAR_repDetection = (
                 }
               }
               newArmLoweredFlag = false;
+            }
+            else if (shoulderAngle > 90) {
+              keypointColorsRef.current="red";
+              segmentColorsRef.current="red";
             }
   
             // Rep Count Logic
