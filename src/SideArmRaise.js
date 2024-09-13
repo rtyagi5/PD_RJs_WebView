@@ -32,11 +32,13 @@ export const SAR_repDetection = (
     
   
       if (shoulder && elbow && wrist && hip) {
-        keypointsRef.current = [shoulder.name, elbow.name, wrist.name, hip.name];
+       // keypointsRef.current = [shoulder.name, elbow.name, wrist.name, hip.name];
         
         const allKeyPointsDetected = [shoulder, elbow, wrist, hip].every(k => k.score > 0.3);
   
         if (allKeyPointsDetected) {
+          keypointsRef.current = [shoulder.name, elbow.name, wrist.name, hip.name];
+
           armAngle = calculateInteriorAngle(shoulder, elbow, wrist);
           shoulderAngle = calculateInteriorAngle(hip, shoulder, elbow);
         
@@ -60,12 +62,12 @@ export const SAR_repDetection = (
                   newArmLoweredCount = 1;
                   setFeedback("Arm lowered 1");
                   console.log("Arm lowered 1 detected");
-                  feedbackRef.current = "Arm lowered 1";
+                  //feedbackRef.current = "Arm lowered 1";
                 } else if (newArmLoweredCount === 1 && newArmUpCount === 1) {
                   newArmLoweredCount = 2;
                   setFeedback("Arm lowered 2");
                   console.log("Arm lowered 2 detected");
-                  feedbackRef.current = "Arm lowered 2";
+                 // feedbackRef.current = "Arm lowered 2";
                 }
               }
             }
@@ -74,11 +76,11 @@ export const SAR_repDetection = (
             else if (shoulderAngle >= 30 && shoulderAngle <= 70) {
               keypointColorsRef.current="green";
               segmentColorsRef.current="green";
-            setFeedback("Intermediate range");
-            feedbackRef.current="Intermediate range";
-              console.log("Intermediate Range Logic (30 to 70 degrees) newArmLoweredCount", newArmLoweredCount);
-              console.log("Intermediate Range Logic (30 to 70 degrees) newArmLoweredFlag", newArmLoweredFlag);
-              console.log("Intermediate Range Logic (30 to 70 degrees) newArmUpCount", newArmUpCount);
+              setFeedback("Intermediate range");
+             // feedbackRef.current="Intermediate range";
+              // console.log("Intermediate Range Logic (30 to 70 degrees) newArmLoweredCount", newArmLoweredCount);
+              // console.log("Intermediate Range Logic (30 to 70 degrees) newArmLoweredFlag", newArmLoweredFlag);
+              // console.log("Intermediate Range Logic (30 to 70 degrees) newArmUpCount", newArmUpCount);
             }
   
             // Arm Up Logic
@@ -98,6 +100,9 @@ export const SAR_repDetection = (
             else if (shoulderAngle > 90) {
               keypointColorsRef.current="red";
               segmentColorsRef.current="red";
+              setFeedback("Arm raise too high");
+              console.log("Arm raise too high");
+              feedbackRef.current="Arm raise too high";
             }
   
             // Rep Count Logic
@@ -105,9 +110,9 @@ export const SAR_repDetection = (
               if (repCountRef.current < targetReps) {
                 repCountRef.current++;
                 setRepCount(repCountRef.current);  // Update the state
-                feedbackRef.current="Repetition completed";
-                setFeedback("Repetition completed");
-                console.log("Repetition completed");
+                feedbackRef.current=`${repCountRef.current} Rep completed`;
+                setFeedback(`${repCountRef.current} Rep completed`);
+                console.log(`${repCountRef.current} Rep completed`);
                 
               }
               newArmLoweredCount = 0;
@@ -125,11 +130,11 @@ export const SAR_repDetection = (
             armUpCountRef.current = newArmUpCount;
             armLoweredFlagRef.current = newArmLoweredFlag;
   
-            // Debugging logs
-            console.log("armDown flag value", armLoweredFlagRef.current);
-            console.log("outside any if condition armUpCount value", armUpCountRef.current);
-            console.log("outside any if condition armLoweredCount value", armLoweredCountRef.current);
-            console.log("current repCount value", repCountRef.current);
+            // // Debugging logs
+            // console.log("armDown flag value", armLoweredFlagRef.current);
+            // console.log("outside any if condition armUpCount value", armUpCountRef.current);
+            // console.log("outside any if condition armLoweredCount value", armLoweredCountRef.current);
+            // console.log("current repCount value", repCountRef.current);
           } else {
             setFeedback("Invalid angles detected");
              feedbackRef.current="Invalid angles detected";

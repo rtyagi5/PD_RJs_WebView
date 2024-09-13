@@ -13,7 +13,10 @@ export const MiniSquats_repDetection = (
     repCountRef,
     setRepCount,
     targetReps,
-    handleExerciseComplete
+    handleExerciseComplete,
+    keypointColorsRef,      
+    segmentColorsRef,
+    keypointsRef
 ) => {
 
     let kneeAngle = null;
@@ -30,6 +33,7 @@ export const MiniSquats_repDetection = (
             const allKeyPointsDetected = [hip, knee, ankle, shoulder].every(k => k.score > 0.3);
 
             if (allKeyPointsDetected) {
+                keypointsRef.current = [hip.name, knee.name, ankle.name, shoulder.name];
                 // Calculate angles
                 kneeAngle = calculateInteriorAngle(hip, knee, ankle);
                 spineAngle = calculateInteriorAngle(shoulder, hip, knee);
@@ -44,12 +48,16 @@ export const MiniSquats_repDetection = (
 
                 // Standing Position (Initial): Knee angle between 170° to 180°
                 if (kneeAngle >= 170 && kneeAngle <= 180) {
+                    keypointColorsRef.current="green";
+                    segmentColorsRef.current="green";
                     setFeedback("Good standing position");
                     feedbackRef.current = "Good standing position";
                 }
 
                 // Squat Movement: Knee angle between 150° to 140°
                 if (kneeAngle >= 140 && kneeAngle <= 150) {
+                    keypointColorsRef.current="green";
+                    segmentColorsRef.current="green";
                     if (!newSitLoweredFlag) {
                         newSitLoweredFlag = true;
                         if (newSitLoweredCount === 0) {
@@ -66,12 +74,16 @@ export const MiniSquats_repDetection = (
 
                 // Intermediate Range: Knee angle between 150° to 170°
                 else if (kneeAngle > 150 && kneeAngle < 170) {
+                    keypointColorsRef.current="green";
+                    segmentColorsRef.current="green";
                     setFeedback("Intermediate range");
                     feedbackRef.current = "Intermediate range";
                 }
 
                 // Standing Up Movement: Knee angle returns to 170° to 180°
                 else if (kneeAngle > 170) {
+                    keypointColorsRef.current="green";
+                    segmentColorsRef.current="green";
                     if (newSitLoweredCount === 1) {
                         if (newSitUpCount === 0) {
                             newSitUpCount = 1;
@@ -81,6 +93,15 @@ export const MiniSquats_repDetection = (
                     }
                     newSitLoweredFlag = false;
                 }
+                else if (kneeAngle <= 70 || kneeAngle > 180) {
+                    keypointColorsRef.current="red";
+                    segmentColorsRef.current="red";
+                  }
+                  else if ( spineAngle < 70 || spineAngle > 110 ) {
+                    keypointColorsRef.current="red";
+                    segmentColorsRef.current="red";
+                  }
+
 
                 // Rep Count Logic: When squat and stand-up complete
                 if (newSitUpCount === 1 && newSitLoweredCount === 2 && kneeAngle > 140 && kneeAngle < 150) {

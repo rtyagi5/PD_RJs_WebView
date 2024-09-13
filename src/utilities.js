@@ -133,7 +133,7 @@ export const calculateInteriorAngle = (p1, p2, p3) => {
   }
 
   const angle = Math.acos(dotProduct / (magnitude1 * magnitude2)) * (180 / Math.PI);
-  return angle;
+  return Math.round(angle);  // Round the angle to the nearest integer
 };
 
 // export const calculateInteriorAngle = (p1, p2, p3) => {
@@ -200,6 +200,7 @@ export const sendUpdates = (data, exerciseType) => {
     repCount: data.repCount,
     feedback: data.feedback,
     exerciseType: exerciseType, // Include the exerciseType here
+    completionStatusRef: data.completionStatusRef,
   };
 
   selectedConfig.forEach(param => {

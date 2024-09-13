@@ -14,7 +14,10 @@ export const SitStand_repDetection = (
     repCountRef,
     setRepCount, 
     targetReps,
-    handleExerciseComplete
+    handleExerciseComplete,
+    keypointColorsRef,      
+    segmentColorsRef,
+    keypointsRef
 ) => {
   
     let spineAngle = null;
@@ -32,6 +35,7 @@ export const SitStand_repDetection = (
             const allKeyPointsDetected = [hip, knee, ankle, shoulder].every(k => k.score > 0.3);
 
             if (allKeyPointsDetected) {
+                keypointsRef.current = [hip.name, knee.name, ankle.name, shoulder.name];
                 spineAngle = calculateInteriorAngle(shoulder, hip, knee);
                 kneeAngle = calculateInteriorAngle(hip, knee, ankle);
                 hipDistance = calculateDistance(hip, knee);
@@ -48,6 +52,8 @@ export const SitStand_repDetection = (
                     // Sit Lowered Logic (when sitting down)
                     if (kneeAngle > 70 && kneeAngle < 110 && 
                         spineAngle >= 70 && spineAngle <= 110) {
+                            keypointColorsRef.current="green";
+                            segmentColorsRef.current="green";
                         if (!newSitLoweredFlag) {
                             newSitLoweredFlag = true;
                             if (newSitLoweredCount === 0) {
@@ -66,12 +72,16 @@ export const SitStand_repDetection = (
 
                     // Intermediate Range Logic (kneeAngle between 100 and 150 degrees)
                     else if (kneeAngle > 110 && kneeAngle <= 150) {
+                        keypointColorsRef.current="green";
+                        segmentColorsRef.current="green";
                         setFeedback("Intermediate range");
                         feedbackRef.current = "Intermediate range";
                     }
 
                     // Sit Up Logic (when standing up)
                     else if (kneeAngle > 150 && kneeAngle <= 180) {
+                        keypointColorsRef.current="green";
+                        segmentColorsRef.current="green";
                         if (newSitLoweredCount === 1) {
                             if (newSitUpCount === 0) {
                                 newSitUpCount = 1;
@@ -81,6 +91,14 @@ export const SitStand_repDetection = (
                         }
                         newSitLoweredFlag = false;
                     }
+                    else if (kneeAngle <= 70 || kneeAngle > 180) {
+                        keypointColorsRef.current="red";
+                        segmentColorsRef.current="red";
+                      }
+                      else if ( spineAngle < 70 || spineAngle > 110 ) {
+                        keypointColorsRef.current="red";
+                        segmentColorsRef.current="red";
+                      }
 
                     // Rep Count Logic
                     if (newSitUpCount === 1 && newSitLoweredCount === 2 && kneeAngle > 70 && kneeAngle < 100) {

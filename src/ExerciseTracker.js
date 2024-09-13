@@ -46,6 +46,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
   const keypointsRef = useRef([]);
   const keypointColorsRef = useRef("aqua");
   const segmentColorsRef = useRef("aqua");
+  const completionStatusRef = useRef(false);  // Use ref instead of state for feedback
   
 
 
@@ -98,7 +99,6 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
                 handleExerciseComplete,            
                 keypointColorsRef,      
                 segmentColorsRef,
-                //setKeypoints
                 keypointsRef
               );
             } else if (exerciseType === "SitToStand") {
@@ -116,7 +116,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
                 repCountRef,
                 setRepCount,
                 targetReps,
-                handleExerciseComplete
+                handleExerciseComplete, 
+                keypointColorsRef,      
+                segmentColorsRef,
+                keypointsRef
               );
           } else if (exerciseType === "MiniSquats") {
             exerciseData = MiniSquats_repDetection(
@@ -132,7 +135,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
               repCountRef,           // Reference to hold rep count
               setRepCount,           // Function to update rep count
               targetReps,            // Target number of reps
-              handleExerciseComplete // Function to call when target reps are complete
+              handleExerciseComplete ,// Function to call when target reps are complete
+              keypointColorsRef,      
+              segmentColorsRef,
+              keypointsRef
             );
           } else if (exerciseType === "LongArcQuad") {
             exerciseData = LAQ_repDetection(
@@ -148,7 +154,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
               repCountRef,
               setRepCount,
               targetReps,
-              handleExerciseComplete
+              handleExerciseComplete,
+              keypointColorsRef,      
+              segmentColorsRef,
+              keypointsRef
             );
           } else if (exerciseType === "StandingStraightUp") {
             // Timer-based logic for StandingStraightUp
@@ -166,7 +175,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
             handleExerciseComplete,
             countdownRef,  // Pass the countdown ref
             elapsedTimeRef,
-            currentTimeRef
+            currentTimeRef,
+            keypointColorsRef,      
+            segmentColorsRef,
+            keypointsRef
           );
         }
           
@@ -191,6 +203,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           const finalData1 = {
             fps: calculatedFps, // Directly use calculated FPS
             feedback:feedbackRef.current,
+            completionStatusRef:completionStatusRef.current,
             ...exerciseData,
           };
           sendUpdates(finalData1, exerciseType);
@@ -283,6 +296,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
        fps: fpsRef.current,
       ...data, // Send the latest data available
       feedback: "Target reps achieved!",
+      completionStatusRef: true,
     };
 
     sendUpdates(finalData, exerciseType);

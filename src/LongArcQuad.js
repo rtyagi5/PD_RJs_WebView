@@ -13,7 +13,10 @@ export const LAQ_repDetection = (
     repCountRef,
     setRepCount,
     targetReps,
-    handleExerciseComplete
+    handleExerciseComplete,
+    keypointColorsRef,      
+    segmentColorsRef,
+    keypointsRef
 ) => {
     let kneeAngle = null;
     let spineAngle = null;
@@ -29,6 +32,7 @@ export const LAQ_repDetection = (
             const allKeyPointsDetected = [hip, knee, ankle, shoulder].every(k => k.score > 0.3);
 
             if (allKeyPointsDetected) {
+                keypointsRef.current = [hip.name, knee.name, ankle.name, shoulder.name];
                 kneeAngle = calculateInteriorAngle(hip, knee, ankle);
                 spineAngle = calculateInteriorAngle(shoulder, hip, knee);
 
@@ -42,18 +46,24 @@ export const LAQ_repDetection = (
 
                     // Starting Position Check
                     if (spineAngle >= 80 && spineAngle <= 130 && kneeAngle >= 85 && kneeAngle <= 95) {
+                        keypointColorsRef.current="green";
+                        segmentColorsRef.current="green";
                         setFeedback("Good starting position!");
                         feedbackRef.current = "Good starting position!";
                     }
 
                     // Intermediate Movement Logic (kneeAngle between 95 and 170 degrees)
                     if (kneeAngle > 95 && kneeAngle <= 170) {
+                        keypointColorsRef.current="green";
+                        segmentColorsRef.current="green";
                         setFeedback("Intermediate range");
                         feedbackRef.current = "Intermediate range";
                     }
 
                     // Leg Lowered Logic (starting position)
                     if (kneeAngle >= 85 && kneeAngle <= 95) {
+                        keypointColorsRef.current="green";
+                        segmentColorsRef.current="green";
                         if (!newSitLoweredFlag) {
                             newSitLoweredFlag = true;
                             if (newSitLoweredCount === 0) {
@@ -69,9 +79,10 @@ export const LAQ_repDetection = (
                             }
                         }
                     }
-
                     // Leg Up Logic (end position when kneeAngle is between 170 and 180)
                     if (kneeAngle >= 170 && kneeAngle <= 180) {
+                        keypointColorsRef.current="green";
+                        segmentColorsRef.current="green";
                         if (newSitLoweredCount === 1) {
                             if (newSitUpCount === 0) {
                                 newSitUpCount = 1;
@@ -81,6 +92,12 @@ export const LAQ_repDetection = (
                             }
                         }
                         newSitLoweredFlag = false;
+                    }
+
+                    if (spineAngle < 80 || spineAngle > 130 || kneeAngle < 85) {
+                        keypointColorsRef.current="red";
+                        segmentColorsRef.current="red";
+                     
                     }
 
                     // Rep Count Logic

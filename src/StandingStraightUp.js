@@ -12,7 +12,10 @@ export const StandingStraightUp_detection = (
     handleExerciseComplete,
     countdownRef,    // Ref to track countdown state
     elapsedTimeRef,
-    currentTimeRef
+    currentTimeRef,
+    keypointColorsRef,      
+    segmentColorsRef,
+    keypointsRef
 ) => {
 
     let headTilt = null;
@@ -37,7 +40,7 @@ export const StandingStraightUp_detection = (
             const allKeyPointsDetected = [leftShoulder, rightShoulder, leftHip, rightHip, leftKnee, rightKnee, leftAnkle, rightAnkle, head].every(k => k.score > 0.3);
 
             if (allKeyPointsDetected) {
-                
+               
                 // If countdown hasn't started, start it
                 if (!countdownRef.current.started && countdownRef.current.value === 5) {
                     countdownRef.current.started = true;  // Mark countdown as started
@@ -72,49 +75,44 @@ export const StandingStraightUp_detection = (
                     setHipAlignment(hipAlignment);
                     setKneeAlignment(kneeAlignment);
 
-                    // currentTimeRef.current = new Date().getTime();
-                    // elapsedTimeRef.current = (currentTimeRef.current - startTimeRef.current) / 1000;  // Convert to seconds
-                //    // setTimeElapsed(elapsedTimeRef.current);
-                //     console.log(`Start Time: ${startTimeRef.current}`);
-                //     console.log(`Current Time: ${new Date().getTime()}`);
-                //     console.log(`Elapsed Time: ${elapsedTimeRef.current}`);
-
-                    // if (elapsedTimeRef.current < targetReps) {
-                    // console.log(`Elapsed Time: ${elapsedTimeRef.current}, Target Reps: ${targetReps}`);
-                    // // Update feedback with the time remaining
-                    // setFeedback(`Hold steady... ${Math.max(0, targetReps - elapsedTimeRef.current).toFixed(2)} seconds left`);
-                    // feedbackRef.current = `Hold steady... ${Math.max(0, targetReps - elapsedTimeRef.current).toFixed(2)} seconds left`;
-
                     // Provide alignment feedback
-                    if (headTilt > 10) {
+                    if (headTilt > 15) {
+                        keypointsRef.current = [head.name];
+                        keypointColorsRef.current="red";
+                        segmentColorsRef.current="red";          
                         setFeedback("Keep your head straight.");
                         feedbackRef.current = "Keep your head straight.";
-                    } else if (shoulderAlignment > 5) {
+                    } else if (shoulderAlignment > 15) {
+                        keypointsRef.current = [leftShoulder.name, rightShoulder.name];
+                        keypointColorsRef.current="red";
+                        segmentColorsRef.current="red";  
                         setFeedback("Level your shoulders.");
                         feedbackRef.current = "Level your shoulders.";
-                    } else if (hipAlignment > 5) {
+                    } else if (hipAlignment > 15) {
+                        keypointsRef.current = [leftHip.name, rightHip.name];
+                        keypointColorsRef.current="red";
+                        segmentColorsRef.current="red";  
                         setFeedback("Align your hips.");
                         feedbackRef.current = "Align your hips.";
-                    } else if (kneeAlignment > 5) {
+                    } else if (kneeAlignment > 15) {
+                        keypointsRef.current = [leftKnee.name, rightKnee.name];
+                        keypointColorsRef.current="red";
+                        segmentColorsRef.current="red";  
                         setFeedback("Align your knees.");
                         feedbackRef.current = "Align your knees.";
-                    } else if (ankleAlignment < 10 || ankleAlignment > 30) {
+                    } else if (ankleAlignment < 5 || ankleAlignment > 40) {
+                        keypointsRef.current = [leftAnkle.name, rightAnkle.name];
+                        keypointColorsRef.current="red";
+                        segmentColorsRef.current="red";  
                         setFeedback("Keep your feet hip-width apart.");
                         feedbackRef.current = "Keep your feet hip-width apart.";
                     }
-                    
-                // } else{
-                //     // Check if the time is up
-                   
-                //         handleExerciseComplete();
-                //         setFeedback("Exercise complete!");
-                //         feedbackRef.current = "Exercise complete!";
-                //         console.log("Exercise complete!");
-                //         console.log(`Start Time: ${startTimeRef.current}`);
-                //         console.log(`Current Time: ${new Date().getTime()}`);
-                //         console.log(`Elapsed Time: ${elapsedTimeRef.current}`);
-                //         return; // Exit function to stop further processing
-                //     }
+                    else{
+                        keypointsRef.current = [leftShoulder.name, rightShoulder.name, leftHip.name, rightHip.name,
+                            leftKnee.name, rightKnee.name, leftAnkle.name, rightAnkle.name,head.name];        
+                        keypointColorsRef.current="green";
+                        segmentColorsRef.current="green"; 
+                    }
                 }
 
             } else {
