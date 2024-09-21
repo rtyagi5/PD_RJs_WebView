@@ -92,7 +92,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
          // Calculate elapsed time since detection started
       const elapsedTimeSinceDetectionStart = performance.now() - detectionStartTimeRef.current;
 
-      const INITIAL_DELAY = 5000; // 5000 milliseconds = 5 seconds
+      const INITIAL_DELAY = 10000; // 5000 milliseconds = 5 seconds
       let exerciseData = {};
       if (elapsedTimeSinceDetectionStart < INITIAL_DELAY) {
         // During initial delay, display "Get ready..." message
