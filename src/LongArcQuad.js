@@ -16,7 +16,8 @@ export const LAQ_repDetection = (
     handleExerciseComplete,
     keypointColorsRef,      
     segmentColorsRef,
-    keypointsRef
+    keypointsRef,
+    feedbackLockRef  // Add this parameter
 ) => {
     let kneeAngle = null;
     let spineAngle = null;
@@ -43,6 +44,8 @@ export const LAQ_repDetection = (
                     let newSitLoweredCount = sitLoweredCountRef.current;
                     let newSitUpCount = sitUpCountRef.current;
                     let newSitLoweredFlag = sitLoweredFlagRef.current;
+
+                    if (!feedbackLockRef.current) {
 
                     // Starting Position Check
                     if (spineAngle >= 80 && spineAngle <= 130 && kneeAngle >= 85 && kneeAngle <= 95) {
@@ -99,16 +102,27 @@ export const LAQ_repDetection = (
                         segmentColorsRef.current="red";
                      
                     }
-
+                }
                     // Rep Count Logic
                     if (newSitUpCount === 1 && newSitLoweredCount === 2 && kneeAngle >= 85 && kneeAngle <= 95) {
                         if (repCountRef.current < targetReps) {
                             repCountRef.current++;
                             setRepCount(repCountRef.current);  // Update the state
-                            feedbackRef.current = "Repetition completed";
+                            feedbackRef.current = `${repCountRef.current} Rep`;
                             setFeedback("Repetition completed");
                             console.log("Repetition completed");
                         }
+
+                        // Activate the feedback lock
+                        feedbackLockRef.current = true;
+
+                        // Release the lock after 2 seconds
+                        setTimeout(() => {
+                            feedbackLockRef.current = false;
+                        }, 2000); // Adjust the duration as needed
+
+
+
                         newSitLoweredCount = 0;
                         newSitUpCount = 0;
                         newSitLoweredFlag = false;
@@ -125,20 +139,28 @@ export const LAQ_repDetection = (
                     sitUpCountRef.current = newSitUpCount;
                     sitLoweredFlagRef.current = newSitLoweredFlag;
                 } else {
+                    if (!feedbackLockRef.current) {
                     setFeedback("Invalid angles detected");
                     feedbackRef.current = "Invalid angles detected";
+                    }
                 }
             } else {
+                if (!feedbackLockRef.current) {
                 setFeedback("Make sure all key points are visible");
                 feedbackRef.current = "Make sure all key points are visible";
+                }
             }
         } else {
+            if (!feedbackLockRef.current) {
             setFeedback(`Move your ${side} leg into the frame`);
             feedbackRef.current = `Move your ${side} leg into the frame`;
+            }
         }
     } else {
+        if (!feedbackLockRef.current) {
         setFeedback("No person detected");
         feedbackRef.current = "No person detected";
+        }
     }
 
     return { 

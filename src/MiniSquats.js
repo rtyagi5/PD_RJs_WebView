@@ -16,7 +16,8 @@ export const MiniSquats_repDetection = (
     handleExerciseComplete,
     keypointColorsRef,      
     segmentColorsRef,
-    keypointsRef
+    keypointsRef,
+    feedbackLockRef  // Add this parameter
 ) => {
 
     let kneeAngle = null;
@@ -46,6 +47,8 @@ export const MiniSquats_repDetection = (
                 let newSitUpCount = sitUpCountRef.current;
                 let newSitLoweredFlag = sitLoweredFlagRef.current;
 
+                if (!feedbackLockRef.current) {
+
                 // Standing Position (Initial): Knee angle between 170° to 180°
                 if (kneeAngle >= 170 && kneeAngle <= 180) {
                     keypointColorsRef.current="green";
@@ -55,7 +58,7 @@ export const MiniSquats_repDetection = (
                 }
 
                 // Squat Movement: Knee angle between 150° to 140°
-                if (kneeAngle >= 140 && kneeAngle <= 150) {
+                if (kneeAngle >= 110 && kneeAngle <= 120) {
                     keypointColorsRef.current="green";
                     segmentColorsRef.current="green";
                     if (!newSitLoweredFlag) {
@@ -73,7 +76,7 @@ export const MiniSquats_repDetection = (
                 }
 
                 // Intermediate Range: Knee angle between 150° to 170°
-                else if (kneeAngle > 150 && kneeAngle < 170) {
+                else if (kneeAngle > 120 && kneeAngle < 170) {
                     keypointColorsRef.current="green";
                     segmentColorsRef.current="green";
                     setFeedback("Intermediate range");
@@ -101,7 +104,7 @@ export const MiniSquats_repDetection = (
                     keypointColorsRef.current="red";
                     segmentColorsRef.current="red";
                   }
-
+                }
 
                 // Rep Count Logic: When squat and stand-up complete
                 if (newSitUpCount === 1 && newSitLoweredCount === 2 && kneeAngle > 140 && kneeAngle < 150) {
@@ -109,8 +112,18 @@ export const MiniSquats_repDetection = (
                         repCountRef.current++;
                         setRepCount(repCountRef.current);  // Update the state
                         setFeedback("Repetition completed");
-                        feedbackRef.current = "Repetition completed";
+                        feedbackRef.current = `${repCountRef.current} Rep`;
                     }
+
+                     // Activate the feedback lock
+                    feedbackLockRef.current = true;
+
+                    // Release the lock after 2 seconds
+                    setTimeout(() => {
+                        feedbackLockRef.current = false;
+                    }, 2000); // Adjust the duration as needed
+                    
+
                     newSitLoweredCount = 0;
                     newSitUpCount = 0;
                     newSitLoweredFlag = false;
@@ -134,16 +147,22 @@ export const MiniSquats_repDetection = (
                 console.log("current repCount value", repCountRef.current);
 
             } else {
+                if (!feedbackLockRef.current) {
                 setFeedback("Make sure all key points are visible");
                 feedbackRef.current = "Make sure all key points are visible";
+                }
             }
         } else {
+            if (!feedbackLockRef.current) {
             setFeedback(`Move your ${side} side into the frame`);
             feedbackRef.current = `Move your ${side} side into the frame`;
+            }
         }
     } else {
+        if (!feedbackLockRef.current) {
         setFeedback("No person detected");
         feedbackRef.current = "No person detected";
+        }
     }
 
     return { 

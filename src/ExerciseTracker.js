@@ -160,7 +160,8 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
                 handleExerciseComplete, 
                 keypointColorsRef,      
                 segmentColorsRef,
-                keypointsRef
+                keypointsRef,
+                feedbackLockRef
               );
           } else if (exerciseType === "MiniSquats") {
             exerciseData = MiniSquats_repDetection(
@@ -179,7 +180,8 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
               handleExerciseComplete ,// Function to call when target reps are complete
               keypointColorsRef,      
               segmentColorsRef,
-              keypointsRef
+              keypointsRef,
+              feedbackLockRef
             );
           } else if (exerciseType === "LongArcQuad") {
             exerciseData = LAQ_repDetection(
@@ -198,7 +200,8 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
               handleExerciseComplete,
               keypointColorsRef,      
               segmentColorsRef,
-              keypointsRef
+              keypointsRef,
+              feedbackLockRef
             );
           } else if (exerciseType === "StandingStraightUp") {
             // Timer-based logic for StandingStraightUp
@@ -219,7 +222,8 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
             currentTimeRef,
             keypointColorsRef,      
             segmentColorsRef,
-            keypointsRef
+            keypointsRef,
+            feedbackLockRef
           );
         }
           

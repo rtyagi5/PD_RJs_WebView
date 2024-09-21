@@ -15,7 +15,8 @@ export const StandingStraightUp_detection = (
     currentTimeRef,
     keypointColorsRef,      
     segmentColorsRef,
-    keypointsRef
+    keypointsRef,
+    feedbackLockRef  // Add this parameter
 ) => {
 
     let headTilt = null;
@@ -42,28 +43,28 @@ export const StandingStraightUp_detection = (
             if (allKeyPointsDetected) {
                
                 // If countdown hasn't started, start it
-                if (!countdownRef.current.started && countdownRef.current.value === 5) {
-                    countdownRef.current.started = true;  // Mark countdown as started
-                    //countdownRef.current.value = 5;  // Set initial countdown value
+                // if (!countdownRef.current.started && countdownRef.current.value === 5) {
+                //     countdownRef.current.started = true;  // Mark countdown as started
+                //     //countdownRef.current.value = 5;  // Set initial countdown value
 
-                    const countdownInterval = setInterval(() => {
-                        if (countdownRef.current.value > 0) {
-                            setFeedback(`Detection will start in ${countdownRef.current.value} seconds`);
-                            feedbackRef.current = `Detection will start in ${countdownRef.current.value} seconds`;
-                            countdownRef.current.value--;
-                        } else {
-                            clearInterval(countdownInterval);
-                            startTimeRef.current = new Date().getTime();  // Set the start time
-                            setFeedback("Detection started! Hold steady...");
-                            feedbackRef.current = "Detection started! Hold steady...";
-                            countdownRef.current.value = 0;  // Reset countdown value for potential future use
-                        }
-                    }, 1000);
+                //     const countdownInterval = setInterval(() => {
+                //         if (countdownRef.current.value > 0) {
+                //             setFeedback(`Detection will start in ${countdownRef.current.value} seconds`);
+                //             feedbackRef.current = `Detection will start in ${countdownRef.current.value} seconds`;
+                //             countdownRef.current.value--;
+                //         } else {
+                //             clearInterval(countdownInterval);
+                //             startTimeRef.current = new Date().getTime();  // Set the start time
+                //             setFeedback("Detection started! Hold steady...");
+                //             feedbackRef.current = "Detection started! Hold steady...";
+                //             countdownRef.current.value = 0;  // Reset countdown value for potential future use
+                //         }
+                //     }, 1000);
 
-                    return;  // Exit the function, wait for countdown to complete
-                }
+                //     return;  // Exit the function, wait for countdown to complete
+                // }
                 // Once countdown is complete, proceed with the detection logic
-                if (countdownRef.current.value === 0) {
+              //  if (countdownRef.current.value === 0) {
                     headTilt = Math.abs(head.x - ((leftShoulder.x + rightShoulder.x) / 2));
                     shoulderAlignment = Math.abs(leftShoulder.y - rightShoulder.y);
                     hipAlignment = Math.abs(leftHip.y - rightHip.y);
@@ -75,6 +76,7 @@ export const StandingStraightUp_detection = (
                     setHipAlignment(hipAlignment);
                     setKneeAlignment(kneeAlignment);
 
+                    if (!feedbackLockRef.current) {
                     // Provide alignment feedback
                     if (headTilt > 15) {
                         keypointsRef.current = [head.name];
@@ -114,18 +116,25 @@ export const StandingStraightUp_detection = (
                         segmentColorsRef.current="green"; 
                     }
                 }
+               // }
 
             } else {
+                if (!feedbackLockRef.current) {
                 setFeedback("Make sure all key points are visible.");
                 feedbackRef.current = "Make sure all key points are visible.";
+                }
             }
         } else {
+            if (!feedbackLockRef.current) {
             setFeedback("Move your body into the frame.");
             feedbackRef.current = "Move your body into the frame.";
+            }
         }
     } else {
+        if (!feedbackLockRef.current) {
         setFeedback("No person detected.");
         feedbackRef.current = "No person detected.";
+        }
     }
 
     return {

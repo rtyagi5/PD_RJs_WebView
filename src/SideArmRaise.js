@@ -138,8 +138,10 @@ export const SAR_repDetection = (
           armUpCountRef.current = newArmUpCount;
           armLoweredFlagRef.current = newArmLoweredFlag;
         } else {
+          if (!feedbackLockRef.current) {
           setFeedback("Invalid angles detected");
           feedbackRef.current = "Invalid angles detected";
+          }
         }
       } else {
         if (!feedbackLockRef.current) {
@@ -148,8 +150,10 @@ export const SAR_repDetection = (
         }
       }
     } else {
+      if (!feedbackLockRef.current) {
       setFeedback(`Move your ${side} arm into the frame`);
       feedbackRef.current = `Move your ${side} arm into the frame`;
+      }
     }
   } else {
     if (!feedbackLockRef.current) {
