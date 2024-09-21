@@ -49,6 +49,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
   const completionStatusRef = useRef(false);  // Use ref instead of state for feedback
   const lastFeedbackSentRef = useRef(null);
   const feedbackLockRef = useRef(false);
+  const detectionStartTimeRef = useRef(null);
   
   
 
@@ -59,6 +60,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       console.log("Detector not available or detection not started.");
       return;
     }
+     // Set the detection start time if it's not already set
+      if (!detectionStartTimeRef.current) {
+        detectionStartTimeRef.current = performance.now();
+      }
 
     let frameCount = 0;
     let lastFpsUpdate = performance.now();
@@ -82,8 +87,22 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
         console.log("Running pose detection...");
         const poses = await detector.estimatePoses(video);
         console.log("Poses estimated", poses);
+
+
+         // Calculate elapsed time since detection started
+      const elapsedTimeSinceDetectionStart = performance.now() - detectionStartTimeRef.current;
+
+      const INITIAL_DELAY = 5000; // 5000 milliseconds = 5 seconds
+      let exerciseData = {};
+      if (elapsedTimeSinceDetectionStart < INITIAL_DELAY) {
+        // During initial delay, display "Get ready..." message
+        const remainingTime = Math.ceil((INITIAL_DELAY - elapsedTimeSinceDetectionStart) / 1000);
+        setFeedback(`Get ready... ${remainingTime}`);
+        feedbackRef.current = `Get ready... ${remainingTime}`;
+
+      }
+      else{        
         
-        let exerciseData = {};
          // Add the condition here
          if (exerciseType === "SideArmRaise") {
     // Pass the required config as an object
@@ -191,6 +210,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
               setData(exerciseData);
               console.log("Updated exercise data:", exerciseData);
           }
+        }
           console.log("Updated keypoints data:", keypointsRef.current);
           console.log("Updated keypointColors data:", keypointColorsRef.current);
           console.log("Updated segmentColors data:", segmentColorsRef.current);
@@ -213,14 +233,12 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           };
 
 
-          // Only send updates if feedback has changed
-          if (feedbackRef.current !== lastFeedbackSentRef.current) {
-            lastFeedbackSentRef.current = feedbackRef.current;
-
-            // Send updates
-            sendUpdates(finalData1, exerciseType);
-          }
-
+          // Only send feedback if initial delay has passed
+            if (feedbackRef.current !== lastFeedbackSentRef.current) {
+              lastFeedbackSentRef.current = feedbackRef.current;
+              sendUpdates(finalData1, exerciseType);
+            }
+          
     
           frameCount = 0;
           lastFpsUpdate = currentTime;

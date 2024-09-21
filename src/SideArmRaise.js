@@ -49,7 +49,7 @@ export const SAR_repDetection = (
 
           if (!feedbackLockRef.current) {
           // Arm Lowered Logic
-          if (shoulderAngle > 0 && shoulderAngle < 30) {
+          if (shoulderAngle > 0 && shoulderAngle < 35) {
             keypointColorsRef.current = "green";
             segmentColorsRef.current = "green";
             feedbackRef.current = "Start The movement";
@@ -70,7 +70,7 @@ export const SAR_repDetection = (
           }
 
           // Intermediate Range Logic (30 to 70 degrees)
-          else if (shoulderAngle >= 30 && shoulderAngle <= 70) {
+          else if (shoulderAngle >= 35 && shoulderAngle <= 70) {
             keypointColorsRef.current = "green";
             segmentColorsRef.current = "green";
             setFeedback("Intermediate range");
@@ -103,7 +103,7 @@ export const SAR_repDetection = (
             newArmUpCount === 1 &&
             newArmLoweredCount === 2 &&
             shoulderAngle > 0 &&
-            shoulderAngle < 30
+            shoulderAngle < 35
           ) {
             if (repCountRef.current < targetReps) {
               repCountRef.current++;
