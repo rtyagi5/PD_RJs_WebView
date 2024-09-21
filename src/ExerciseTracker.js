@@ -50,6 +50,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
   const lastFeedbackSentRef = useRef(null);
   const feedbackLockRef = useRef(false);
   const detectionStartTimeRef = useRef(null);
+  const previousRemainingTimeRef = useRef(null);
   
   
 
@@ -94,14 +95,30 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
 
       const INITIAL_DELAY = 10000; // 5000 milliseconds = 5 seconds
       let exerciseData = {};
-      if (elapsedTimeSinceDetectionStart < INITIAL_DELAY) {
+      if (elapsedTimeSinceDetectionStart < INITIAL_DELAY) {        
         // During initial delay, display "Get ready..." message
         const remainingTime = Math.ceil((INITIAL_DELAY - elapsedTimeSinceDetectionStart) / 1000);
-        setFeedback(`Get ready... ${remainingTime}`);
-        feedbackRef.current = `Get ready... ${remainingTime}`;
-
+        // setFeedback(`Get ready... ${remainingTime}`);
+        // feedbackRef.current = `Get ready in ... ${remainingTime}`;
+         // Determine the feedback message
+         let feedbackMessage;
+         if (remainingTime === INITIAL_DELAY / 1000) {
+           feedbackMessage = `Get ready in ${remainingTime}`;
+         } else {
+           feedbackMessage = `${remainingTime}`;
+         }
+ 
+         // Update feedback only when the remaining time changes
+         if (remainingTime !== previousRemainingTimeRef.current) {
+           setFeedback(feedbackMessage);
+           feedbackRef.current = feedbackMessage;
+           previousRemainingTimeRef.current = remainingTime;
+         }
+      
       }
-      else{        
+      else{   
+         // Reset previousRemainingTimeRef after countdown
+         previousRemainingTimeRef.current = null;    
         
          // Add the condition here
          if (exerciseType === "SideArmRaise") {
@@ -333,6 +350,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
 
     sendUpdates(finalData, exerciseType);
     setIsDetecting(false);
+
+    // Reset detection start time and countdown refs
+    detectionStartTimeRef.current = null;
+    previousRemainingTimeRef.current = null;
     // Delay for 5 seconds before stopping detection and clearing the feedback
     // setTimeout(() => {
     //     setIsDetecting(false); // Stop detection after 5 seconds
