@@ -47,6 +47,9 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
   const keypointColorsRef = useRef("aqua");
   const segmentColorsRef = useRef("aqua");
   const completionStatusRef = useRef(false);  // Use ref instead of state for feedback
+  const lastFeedbackSentRef = useRef(null);
+  const feedbackLockRef = useRef(false);
+  
   
 
 
@@ -84,7 +87,8 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
          // Add the condition here
          if (exerciseType === "SideArmRaise") {
     // Pass the required config as an object
-           exerciseData =  SAR_repDetection(poses,
+           exerciseData =  SAR_repDetection(
+                poses,
                 side,
                 setArmAngle,
                 setShoulderAngle,
@@ -99,7 +103,8 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
                 handleExerciseComplete,            
                 keypointColorsRef,      
                 segmentColorsRef,
-                keypointsRef
+                keypointsRef,
+                feedbackLockRef  
               );
             } else if (exerciseType === "SitToStand") {
               exerciseData = SitStand_repDetection(
@@ -206,7 +211,16 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
             completionStatusRef:completionStatusRef.current,
             ...exerciseData,
           };
-          sendUpdates(finalData1, exerciseType);
+
+
+          // Only send updates if feedback has changed
+          if (feedbackRef.current !== lastFeedbackSentRef.current) {
+            lastFeedbackSentRef.current = feedbackRef.current;
+
+            // Send updates
+            sendUpdates(finalData1, exerciseType);
+          }
+
     
           frameCount = 0;
           lastFpsUpdate = currentTime;
