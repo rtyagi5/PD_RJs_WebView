@@ -314,14 +314,14 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
     };
 
     sendUpdates(finalData, exerciseType);
-
+    setIsDetecting(false);
     // Delay for 5 seconds before stopping detection and clearing the feedback
-    setTimeout(() => {
-        setIsDetecting(false); // Stop detection after 5 seconds
-        setFeedback(""); // Clear feedback message
-        //setData({}); // Clear data
-        setRepCount(0); // Reset rep count
-    }, 5000);
+    // setTimeout(() => {
+    //     setIsDetecting(false); // Stop detection after 5 seconds
+    //     setFeedback(""); // Clear feedback message
+    //     //setData({}); // Clear data
+    //     setRepCount(0); // Reset rep count
+    // }, 5000);
 };
 
   return (

@@ -58,12 +58,12 @@ export const SAR_repDetection = (
               if (newArmLoweredCount === 0) {
                 newArmLoweredCount = 1;
                 setFeedback("Arm lowered 1");
-                feedbackRef.current = "Good Start Position";
+               // feedbackRef.current = "Good Start Position";
                 console.log("Arm lowered 1 detected");
               } else if (newArmLoweredCount === 1 && newArmUpCount === 1) {
                 newArmLoweredCount = 2;
                 setFeedback("Arm lowered 2");
-                feedbackRef.current = "Arm lowered 2";
+              //  feedbackRef.current = "Arm lowered 2";
                 console.log("Arm lowered 2 detected");
               }
             }
@@ -109,7 +109,7 @@ export const SAR_repDetection = (
               repCountRef.current++;
               setRepCount(repCountRef.current);
               setFeedback(`${repCountRef.current} Rep completed`);
-              feedbackRef.current = `${repCountRef.current} Rep completed`;
+              feedbackRef.current = `${repCountRef.current} Rep`;
               console.log(`${repCountRef.current} Rep completed`);
             }
 
