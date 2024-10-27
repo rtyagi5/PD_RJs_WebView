@@ -50,8 +50,8 @@ export const SAR_repDetection = (
           if (!feedbackLockRef.current) {
           // Arm Lowered Logic
           if (shoulderAngle > 0 && shoulderAngle < 35) {
-            keypointColorsRef.current = "green";
-            segmentColorsRef.current = "green";
+            keypointColorsRef.current = "#66FF00";
+            segmentColorsRef.current = "#66FF00";
             feedbackRef.current = "Start The movement";
             if (!newArmLoweredFlag) {
               newArmLoweredFlag = true;
@@ -71,16 +71,16 @@ export const SAR_repDetection = (
 
           // Intermediate Range Logic (30 to 70 degrees)
           else if (shoulderAngle >= 35 && shoulderAngle <= 70) {
-            keypointColorsRef.current = "green";
-            segmentColorsRef.current = "green";
+            keypointColorsRef.current = "#66FF00";
+            segmentColorsRef.current = "#66FF00";
             setFeedback("Intermediate range");
             feedbackRef.current = "Keep Going";
           }
 
           // Arm Up Logic
           else if (shoulderAngle > 70 && shoulderAngle <= 90) {
-            keypointColorsRef.current = "green";
-            segmentColorsRef.current = "green";
+            keypointColorsRef.current = "#66FF00";
+            segmentColorsRef.current = "#66FF00";
             if (newArmLoweredCount === 1) {
               if (newArmUpCount === 0) {
                 newArmUpCount = 1;
@@ -140,7 +140,8 @@ export const SAR_repDetection = (
         } else {
           if (!feedbackLockRef.current) {
           setFeedback("Invalid angles detected");
-          feedbackRef.current = "Invalid angles detected";
+          //feedbackRef.current = "Invalid angles detected";
+          feedbackRef.current = "Make sure all key points are visible";
           }
         }
       } else {
@@ -152,13 +153,15 @@ export const SAR_repDetection = (
     } else {
       if (!feedbackLockRef.current) {
       setFeedback(`Move your ${side} arm into the frame`);
-      feedbackRef.current = `Move your ${side} arm into the frame`;
+      //feedbackRef.current = `Move your ${side} arm into the frame`;
+      feedbackRef.current = "Make sure all key points are visible";
       }
     }
   } else {
     if (!feedbackLockRef.current) {
       setFeedback("No person detected");
-      feedbackRef.current = "No person detected";
+      //feedbackRef.current = "No person detected";
+      feedbackRef.current = "Make sure all key points are visible";
     }
   }
 

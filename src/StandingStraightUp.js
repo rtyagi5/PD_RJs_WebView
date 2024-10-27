@@ -112,8 +112,8 @@ export const StandingStraightUp_detection = (
                     else{
                         keypointsRef.current = [leftShoulder.name, rightShoulder.name, leftHip.name, rightHip.name,
                             leftKnee.name, rightKnee.name, leftAnkle.name, rightAnkle.name,head.name];        
-                        keypointColorsRef.current="green";
-                        segmentColorsRef.current="green"; 
+                        keypointColorsRef.current="#66FF00";
+                        segmentColorsRef.current="#66FF00"; 
                     }
                 }
                // }

@@ -51,16 +51,16 @@ export const MiniSquats_repDetection = (
 
                 // Standing Position (Initial): Knee angle between 170° to 180°
                 if (kneeAngle >= 170 && kneeAngle <= 180) {
-                    keypointColorsRef.current="green";
-                    segmentColorsRef.current="green";
+                    keypointColorsRef.current="#66FF00";
+                    segmentColorsRef.current="#66FF00";
                     setFeedback("Good standing position");
                     feedbackRef.current = "Good standing position";
                 }
 
                 // Squat Movement: Knee angle between 150° to 140°
                 if (kneeAngle >= 110 && kneeAngle <= 120) {
-                    keypointColorsRef.current="green";
-                    segmentColorsRef.current="green";
+                    keypointColorsRef.current="#66FF00";
+                    segmentColorsRef.current="#66FF00";
                     if (!newSitLoweredFlag) {
                         newSitLoweredFlag = true;
                         if (newSitLoweredCount === 0) {
@@ -77,16 +77,16 @@ export const MiniSquats_repDetection = (
 
                 // Intermediate Range: Knee angle between 150° to 170°
                 else if (kneeAngle > 120 && kneeAngle < 170) {
-                    keypointColorsRef.current="green";
-                    segmentColorsRef.current="green";
+                    keypointColorsRef.current="#66FF00";
+                    segmentColorsRef.current="#66FF00";
                     setFeedback("Intermediate range");
                     feedbackRef.current = "Intermediate range";
                 }
 
                 // Standing Up Movement: Knee angle returns to 170° to 180°
                 else if (kneeAngle > 170) {
-                    keypointColorsRef.current="green";
-                    segmentColorsRef.current="green";
+                    keypointColorsRef.current="#66FF00";
+                    segmentColorsRef.current="#66FF00";
                     if (newSitLoweredCount === 1) {
                         if (newSitUpCount === 0) {
                             newSitUpCount = 1;
