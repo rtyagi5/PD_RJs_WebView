@@ -2,14 +2,16 @@ import React, { useRef, useEffect, useState } from "react";
 import * as tf from "@tensorflow/tfjs";
 import * as posedetection from "@tensorflow-models/pose-detection";
 import Webcam from "react-webcam";
-import { SAR_repDetection } from "./SideArmRaise"; // Import the function here
+import { SAR_repDetection } from "./SideArmRaise"; 
 import { SitStand_repDetection } from './SitToStand';
 import { MiniSquats_repDetection } from './MiniSquats';
-import { LAQ_repDetection } from './LongArcQuad'; // Import the new LAQ logic
+import { LAQ_repDetection } from './LongArcQuad'; 
 import { StandingStraightUp_detection } from './StandingStraightUp';
 import { drawCanvas,sendUpdates } from './utilities';
+import VideoRecorder from './VideoRecorder'; 
+import SkeletonRecorder from './SkeletonRecorder'; 
 
-const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDetecting }) => {
+const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDetecting, isVideoRecording, setIsVideoRecording, isSkeletonRecording, setIsSkeletonRecording }) => {
 
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
@@ -28,6 +30,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
   const [hipAlignment, setHipAlignment] = useState(null);
   const [kneeAlignment, setKneeAlignment] = useState(null);
   const [timeElapsed, setTimeElapsed] = useState(0); // New state to track elapsed time
+  
 
 
   const countdownRef = useRef({ started: false, value: 5 });  // Ref to track if countdown has started
@@ -51,7 +54,9 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
   const feedbackLockRef = useRef(false);
   const detectionStartTimeRef = useRef(null);
   const previousRemainingTimeRef = useRef(null);
-  
+  const videoRecorderRef = useRef(null); // Ref for the video recorder
+  const skeletonRecorderRef = useRef(null); // Ref for the video recorder
+
   
 
 
@@ -84,6 +89,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
 
         const ctx = canvasRef.current.getContext("2d");
         ctx.clearRect(0, 0, videoWidth, videoHeight);
+
 
         console.log("Running pose detection...");
         const poses = await detector.estimatePoses(video);
@@ -238,6 +244,17 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           
        drawCanvas(poses, videoWidth, videoHeight, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
 
+      // Update the hidden canvas for video recording
+      if (videoRecorderRef.current && videoRecorderRef.current.updateFrame) {
+        videoRecorderRef.current.updateFrame(poses, videoWidth, videoHeight);
+      }
+
+        // Update the hidden canvas for skeleton recording
+        if (skeletonRecorderRef.current && skeletonRecorderRef.current.updateFrame) {
+          skeletonRecorderRef.current.updateFrame(poses, videoWidth, videoHeight);
+        }
+
+
         frameCount++;
         const currentTime = performance.now();
         if (currentTime - lastFpsUpdate > 100) {
@@ -354,6 +371,8 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
 
     sendUpdates(finalData, exerciseType);
     setIsDetecting(false);
+    setIsVideoRecording(false);  // This triggers the video recorder to stop
+    setIsSkeletonRecording(false);  // This triggers the video recorder to stop
 
     // Reset detection start time and countdown refs
     detectionStartTimeRef.current = null;
@@ -366,6 +385,23 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
     //     setRepCount(0); // Reset rep count
     // }, 5000);
 };
+
+const handleVideoRecordingComplete = (videoUrl) => {
+  console.log("Video recording complete. URL:", videoUrl);
+  const a = document.createElement('a');
+  a.href = videoUrl;
+  a.download = 'exercise_video_recording.webm';
+  a.click();
+};
+
+const handleSkeletonRecordingComplete = (videoUrl) => {
+  console.log("Skeleton recording complete. URL:", videoUrl);
+  const a = document.createElement('a');
+  a.href = videoUrl;
+  a.download = 'exercise_skeleton_recording.webm';
+  a.click();
+};
+
 
   return (
     <div>
@@ -409,8 +445,28 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           transform: "scaleX(-1)", // This flips the video horizontally
         }}
       />
-
-
+      {/* Invisible VideoRecorder Component */}
+      <VideoRecorder
+              ref={videoRecorderRef}
+              webcamRef={webcamRef}
+              canvasRef={canvasRef}         // <-- add this
+              keypointsRef={keypointsRef}
+              keypointColorsRef={keypointColorsRef}
+              segmentColorsRef={segmentColorsRef}
+              isVideoRecording={isVideoRecording} 
+              onRecordingComplete={handleVideoRecordingComplete}
+            />
+      {/* Invisible SkeletonRecorder Component */}
+      <SkeletonRecorder
+                    ref={skeletonRecorderRef}
+                    webcamRef={webcamRef}
+                    canvasRef={canvasRef}         // <-- add this
+                    keypointsRef={keypointsRef}
+                    keypointColorsRef={keypointColorsRef}
+                    segmentColorsRef={segmentColorsRef}
+                    isSkeletonRecording={isSkeletonRecording}
+                    onRecordingComplete={handleSkeletonRecordingComplete}
+                  />
         {/* Container for all informational elements */}
         {/* <div style={{ 
         position: 'absolute', 

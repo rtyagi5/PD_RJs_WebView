@@ -13,22 +13,30 @@ function App() {
   const [side, setSide] = useState("left");
   const query = useQuery();
   const [exerciseType, setExerciseType] = useState("SelectExercise"); // Default exercise type
+  const [isVideoRecording, setIsVideoRecording] = useState(false);
+  const [isSkeletonRecording, setIsSkeletonRecording] = useState(false);
 
   useEffect(() => {
     const repsFromURL = query.get("reps");
     const sideFromURL = query.get("side");
     const exerciseTypeFromURL = query.get("exerciseType"); // Get exercise type from URL
+    const videoRecordFromURL = query.get("video"); // get recording mode
+    const skeletonRecordFromURL = query.get("skeleton"); // get recording mode
 
-    if (repsFromURL && sideFromURL && exerciseTypeFromURL) {
+    if (repsFromURL && sideFromURL && exerciseTypeFromURL && videoRecordFromURL && skeletonRecordFromURL) {
       setTargetReps(parseInt(repsFromURL));
       setSide(sideFromURL);
       setExerciseType(exerciseTypeFromURL); // set exercise type
       setIsDetecting(true); // Start detection automatically
+      setIsVideoRecording(videoRecordFromURL==="true");   // video recording
+      setIsSkeletonRecording(skeletonRecordFromURL==="true");   // skeleton recording
     }
   }, [query]);
 
   const handleStartExercise = () => {
     setIsDetecting(true); // Start detection
+    setIsSkeletonRecording(true);   // new line
+    setIsVideoRecording(false);   // new line
   };
 
   return (
@@ -73,6 +81,10 @@ function App() {
             targetReps={targetReps}
             isDetecting={isDetecting}
             setIsDetecting={setIsDetecting}
+            isVideoRecording={isVideoRecording}
+            setIsVideoRecording={setIsVideoRecording}  
+            isSkeletonRecording={isSkeletonRecording}
+            setIsSkeletonRecording={setIsSkeletonRecording}
           />
         )}
       </header>
