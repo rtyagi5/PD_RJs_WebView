@@ -1,3 +1,5 @@
+import axios from "axios"
+import { SERVICE_URL } from "./config";
 const color = "aqua";
 const lineWidth = 2;  // Adjusted line width
 
@@ -181,7 +183,7 @@ export const drawCanvas = (poses, videoWidth, videoHeight, ctx, keypoints, keypo
 };
 
 
-export const sendUpdates = (data, exerciseType) => {
+export const sendUpdates = async (data, exerciseType) => {
   // Example config to determine which data points to include based on exerciseType
   const exerciseDataConfig = {
     "SideArmRaise": ["armAngle", "shoulderAngle"],
@@ -209,7 +211,20 @@ export const sendUpdates = (data, exerciseType) => {
     }
   });
 
-  console.log('Sending data:', filteredData); // Add this to check the data structure
+  const query = new URLSearchParams(window.location.search);
+
+  await axios.post(`${SERVICE_URL.EXERCISE_SERVICE}/activities/exercise-data`, {
+    ...filteredData,
+    activity: query.get("activity"),
+  }, {
+    headers: {
+      Authorization: `Bearer ${query.get("authToken")}`
+    }
+  }).catch((err)=> {
+    console.log("failed in sending the data to server");
+  }).then((res)=> {
+    console.log("server sync success");
+  })
 
   if (window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage(JSON.stringify(filteredData));

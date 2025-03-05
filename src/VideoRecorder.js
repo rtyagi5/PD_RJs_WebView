@@ -65,7 +65,7 @@ const VideoRecorder = forwardRef(
                 const url = URL.createObjectURL(blob);
                 console.log('VideoRecorder: onstop fired. URL is', url);
                 if (onRecordingComplete) {
-                onRecordingComplete(url);
+                onRecordingComplete(blob);
                 }
                 // Clear chunks for next recording
                 recordedChunksRef.current = [];

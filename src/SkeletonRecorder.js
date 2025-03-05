@@ -65,7 +65,7 @@ const SkeletonRecorder = forwardRef(
               const url = URL.createObjectURL(blob);
               console.log('SkeletonRecorder: onstop fired. URL is', url);
               if (onRecordingComplete) {
-                onRecordingComplete(url);
+                onRecordingComplete(blob);
               }
               // Clear chunks for next recording
               recordedChunksRef.current = [];

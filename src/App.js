@@ -3,7 +3,7 @@ import "./App.css";
 import ExerciseTracker from "./ExerciseTracker";
 import { useLocation } from "react-router-dom";
 
-function useQuery() {
+export function useQuery() {
   return new URLSearchParams(useLocation().search);
 }
 
@@ -36,7 +36,7 @@ function App() {
   const handleStartExercise = () => {
     setIsDetecting(true); // Start detection
     setIsSkeletonRecording(true);   // new line
-    setIsVideoRecording(false);   // new line
+    setIsVideoRecording(true);   // new line
   };
 
   return (

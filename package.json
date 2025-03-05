@@ -16,6 +16,7 @@
     "@testing-library/jest-dom": "^6.4.8",
     "@testing-library/react": "^14.0.0",
     "@testing-library/user-event": "^14.5.2",
+    "axios": "^1.8.1",
     "gh-pages": "^6.1.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -24,10 +25,10 @@
     "react-webcam": "^7.2.0"
   },
   "scripts": {
-  "start": "react-scripts start",
-  "build": "react-scripts build",
-  "predeploy": "yarn build",
-  "deploy": "gh-pages -d build"
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "predeploy": "yarn build",
+    "deploy": "gh-pages -d build"
   },
   "eslintConfig": {
     "extends": "react-app"
@@ -45,7 +46,7 @@
     ]
   },
   "devDependencies": {
-    "ajv": "^7.2.4",
-    "@babel/plugin-proposal-private-property-in-object": "^7.14.5"
+    "@babel/plugin-proposal-private-property-in-object": "^7.14.5",
+    "ajv": "^7.2.4"
   }
 }

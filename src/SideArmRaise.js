@@ -1,7 +1,7 @@
 // SideArmRaise.js
 import { calculateInteriorAngle } from './utilities';
 
-export const SAR_repDetection = (
+export const SAR_repDetection = async (
   poses,
   side,
   setArmAngle,
@@ -128,7 +128,7 @@ export const SAR_repDetection = (
 
             // Check if target reps achieved
             if (repCountRef.current >= targetReps) {
-              handleExerciseComplete();
+              await handleExerciseComplete();
               return { armAngle, shoulderAngle, repCount: repCountRef.current }; // Exit the function
             }
           }

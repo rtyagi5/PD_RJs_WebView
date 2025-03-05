@@ -10,6 +10,8 @@ import { StandingStraightUp_detection } from './StandingStraightUp';
 import { drawCanvas,sendUpdates } from './utilities';
 import VideoRecorder from './VideoRecorder'; 
 import SkeletonRecorder from './SkeletonRecorder'; 
+import axios from "axios";
+import { SERVICE_URL } from "./config";
 
 const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDetecting, isVideoRecording, setIsVideoRecording, isSkeletonRecording, setIsSkeletonRecording }) => {
 
@@ -129,7 +131,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
          // Add the condition here
          if (exerciseType === "SideArmRaise") {
     // Pass the required config as an object
-           exerciseData =  SAR_repDetection(
+           exerciseData = await SAR_repDetection(
                 poses,
                 side,
                 setArmAngle,
@@ -274,7 +276,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           // Only send feedback if initial delay has passed
             if (feedbackRef.current !== lastFeedbackSentRef.current) {
               lastFeedbackSentRef.current = feedbackRef.current;
-              sendUpdates(finalData1, exerciseType);
+              await sendUpdates(finalData1, exerciseType);
             }
           
     
@@ -357,7 +359,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
   }, [isDetecting]); // Ensure `detect` is called when `isDetecting` changes
 
 
-  const handleExerciseComplete = () => {
+  const handleExerciseComplete = async () => {
     setFeedback("Target reps achieved!");
 
     // Send the final update to the WebView
@@ -369,7 +371,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       completionStatusRef: true,
     };
 
-    sendUpdates(finalData, exerciseType);
+    await sendUpdates(finalData, exerciseType);
     setIsDetecting(false);
     setIsVideoRecording(false);  // This triggers the video recorder to stop
     setIsSkeletonRecording(false);  // This triggers the video recorder to stop
@@ -386,21 +388,49 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
     // }, 5000);
 };
 
-const handleVideoRecordingComplete = (videoUrl) => {
+const handleVideoRecordingComplete = async(videoUrl) => {
   console.log("Video recording complete. URL:", videoUrl);
-  const a = document.createElement('a');
-  a.href = videoUrl;
-  a.download = 'exercise_video_recording.webm';
-  a.click();
+  // const a = document.createElement('a');
+  // a.href = videoUrl;
+  // a.download = 'exercise_video_recording.webm';
+  // a.click();
+  await uploadVideo(videoUrl, "videoRecording")
 };
 
-const handleSkeletonRecordingComplete = (videoUrl) => {
+const handleSkeletonRecordingComplete = async (videoUrl) => {
   console.log("Skeleton recording complete. URL:", videoUrl);
-  const a = document.createElement('a');
-  a.href = videoUrl;
-  a.download = 'exercise_skeleton_recording.webm';
-  a.click();
+  // const a = document.createElement('a');
+  // a.href = videoUrl;
+  // a.download = 'exercise_skeleton_recording.webm';
+  // a.click();
+  await uploadVideo(videoUrl, "skeleton")
+  
 };
+
+async function uploadVideo(file, type) {
+  const query = new URLSearchParams(window.location.search);
+  try {
+    const response = await axios.post(
+      `${SERVICE_URL.USER_SERVICE}/files/stream`,
+      file,
+      {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+        },
+        params: {
+          fileName: `${query.get("activity")}_${type}_${Date.now()}.webm`,
+        },
+      }
+    );
+
+    console.log('Upload successful: ', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error uploading video: ', error);
+    throw error;
+  }
+}
+
 
 
   return (
