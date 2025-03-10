@@ -418,7 +418,8 @@ async function uploadVideo(file, type) {
           'Content-Type': 'application/octet-stream',
         },
         params: {
-          fileName: `${query.get("activity")}_${type}_${Date.now()}.webm`,
+          fileName: `${query.get("activity")}_${type}_${Date.now()}_exercise.webm`,
+          isExerciseSync: true
         },
       }
     );

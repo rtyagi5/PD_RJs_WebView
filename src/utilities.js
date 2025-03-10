@@ -216,6 +216,7 @@ export const sendUpdates = async (data, exerciseType) => {
   await axios.post(`${SERVICE_URL.EXERCISE_SERVICE}/activities/exercise-data`, {
     ...filteredData,
     activity: query.get("activity"),
+    activityType: "exercise"
   }, {
     headers: {
       Authorization: `Bearer ${query.get("authToken")}`
