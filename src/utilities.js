@@ -205,27 +205,30 @@ export const sendUpdates = async (data, exerciseType) => {
     completionStatusRef: data.completionStatusRef,
   };
 
+  let sync = filteredData.repCount > 0
   selectedConfig.forEach(param => {
     if (data[param] !== undefined) {
       filteredData[param] = data[param];
     }
   });
 
-  const query = new URLSearchParams(window.location.search);
-
-  await axios.post(`${SERVICE_URL.EXERCISE_SERVICE}/activities/exercise-data`, {
-    ...filteredData,
-    activity: query.get("activity"),
-    activityType: "exercise"
-  }, {
-    headers: {
-      Authorization: `Bearer ${query.get("authToken")}`
-    }
-  }).catch((err)=> {
-    console.log("failed in sending the data to server");
-  }).then((res)=> {
-    console.log("server sync success");
-  })
+  if(sync) {
+    const query = new URLSearchParams(window.location.search);
+    axios.post(`${SERVICE_URL.EXERCISE_SERVICE}/activities/exercise-data`, {
+      ...filteredData,
+      activity: query.get("activity"),
+      activityType: "exercise"
+    }, {
+      headers: {
+        Authorization: `Bearer ${query.get("authToken")}`
+      }
+    }).catch((err)=> {
+      console.log("failed in sending the data to server");
+    }).then((res)=> {
+      console.log("server sync success");
+    })
+  }
+ 
 
   if (window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage(JSON.stringify(filteredData));
