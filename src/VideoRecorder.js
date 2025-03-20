@@ -62,8 +62,8 @@ const VideoRecorder = forwardRef(
           mediaRecorderRef.current.onstop = () => {
             if (recordedChunksRef.current.length > 0) { // Ensure data exists
                 const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-                const url = URL.createObjectURL(blob);
-                console.log('VideoRecorder: onstop fired. URL is', url);
+                // const url = URL.createObjectURL(blob);
+                // console.log('VideoRecorder: onstop fired. URL is', url);
                 if (onRecordingComplete) {
                 onRecordingComplete(blob);
                 }
@@ -74,7 +74,7 @@ const VideoRecorder = forwardRef(
               }
           };
 
-          console.log('VideoRecorder: Start recording...');
+          // console.log('VideoRecorder: Start recording...');
           mediaRecorderRef.current.start();
         }
       }

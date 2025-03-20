@@ -93,9 +93,9 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
         ctx.clearRect(0, 0, videoWidth, videoHeight);
 
 
-        console.log("Running pose detection...");
+        // console.log("Running pose detection...");
         const poses = await detector.estimatePoses(video);
-        console.log("Poses estimated", poses);
+        // console.log("Poses estimated", poses);
 
 
          // Calculate elapsed time since detection started
@@ -237,12 +237,12 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           
             if (exerciseData) {
               setData(exerciseData);
-              console.log("Updated exercise data:", exerciseData);
+              // console.log("Updated exercise data:", exerciseData);
           }
         }
-          console.log("Updated keypoints data:", keypointsRef.current);
-          console.log("Updated keypointColors data:", keypointColorsRef.current);
-          console.log("Updated segmentColors data:", segmentColorsRef.current);
+          // console.log("Updated keypoints data:", keypointsRef.current);
+          // console.log("Updated keypointColors data:", keypointColorsRef.current);
+          // console.log("Updated segmentColors data:", segmentColorsRef.current);
           
        drawCanvas(poses, videoWidth, videoHeight, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
 
@@ -297,10 +297,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
   useEffect(() => {
     const initializeModel = async () => {
       try {
-        console.log("Initializing MoveNet");
+        // console.log("Initializing MoveNet");
         await tf.setBackend('webgl');
         await tf.ready();
-        console.log("TensorFlow.js is ready");
+        // console.log("TensorFlow.js is ready");
 
         const modelPath = window.location.hostname === 'localhost'
           ? `/models/movenet/model.json`
@@ -311,7 +311,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
           modelUrl: modelPath,
         });
 
-        console.log("MoveNet model loaded successfully");
+        // console.log("MoveNet model loaded successfully");
 
         if (isDetecting) {
           detect(); // Start detection after model is loaded
@@ -324,12 +324,12 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
     // Handle WebGL context loss and restoration
     const handleContextLost = (event) => {
       event.preventDefault();
-      console.log("WebGL context lost. Stopping detection...");
+      // console.log("WebGL context lost. Stopping detection...");
       setIsDetecting(false); // Stop detection
     };
 
     const handleContextRestored = () => {
-      console.log("WebGL context restored. Reinitializing model...");
+      // console.log("WebGL context restored. Reinitializing model...");
       initializeModel(); // Reinitialize the model
     };
 
