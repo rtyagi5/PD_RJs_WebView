@@ -2,7 +2,9 @@ import React, { useState, useEffect } from "react";
 import "./App.css";
 import ExerciseTracker from "./ExerciseTracker";
 import { useLocation } from "react-router-dom";
-
+import {jwtDecode} from "jwt-decode";
+import axios from "axios";
+import { getServiceUrl } from "./config";
 export function useQuery() {
   return new URLSearchParams(useLocation().search);
 }
@@ -15,23 +17,49 @@ function App() {
   const [exerciseType, setExerciseType] = useState("SelectExercise"); // Default exercise type
   const [isVideoRecording, setIsVideoRecording] = useState(false);
   const [isSkeletonRecording, setIsSkeletonRecording] = useState(false);
+  const [displayMessage, setDisplayMessage] = useState()
+  const [activityData, setActivityData] = useState({})
 
   useEffect(() => {
-    const repsFromURL = query.get("reps");
-    const sideFromURL = query.get("side");
-    const exerciseTypeFromURL = query.get("exerciseType"); // Get exercise type from URL
-    const videoRecordFromURL = query.get("video"); // get recording mode
-    const skeletonRecordFromURL = query.get("skeleton"); // get recording mode
+    manageExerciseData()
+  }, []);
 
-    if (repsFromURL && sideFromURL && exerciseTypeFromURL && videoRecordFromURL && skeletonRecordFromURL) {
-      setTargetReps(parseInt(repsFromURL));
-      setSide(sideFromURL);
-      setExerciseType(exerciseTypeFromURL); // set exercise type
-      setIsDetecting(true); // Start detection automatically
-      setIsVideoRecording(videoRecordFromURL==="true");   // video recording
-      setIsSkeletonRecording(skeletonRecordFromURL==="true");   // skeleton recording
+  const manageExerciseData = async () => {
+    try {
+      const token = query.get("token");
+      const decodeResponse = jwtDecode(token)
+      if(decodeResponse) {
+        const repsFromURL = decodeResponse?.reps
+        const sideFromURL = decodeResponse?.side
+        const exerciseTypeFromURL = decodeResponse?.exerciseType
+        const videoRecordFromURL = decodeResponse?.video
+        const skeletonRecordFromURL = decodeResponse?.skeleton
+        const activity = await axios.get(`${getServiceUrl(decodeResponse).EXERCISE_SERVICE}/assigned-exercises/${decodeResponse?.activity}`, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+        // if(activity.data?.data?.status != "pending") {
+        //   setDisplayMessage("Activity is either completed or was not completed in first attempt. Please start other exercise.")
+        //   return
+        // }
+        
+        setActivityData(decodeResponse);
+        if (repsFromURL && sideFromURL && exerciseTypeFromURL && videoRecordFromURL && skeletonRecordFromURL) {
+          setTargetReps(parseInt(repsFromURL));
+          setSide(sideFromURL);
+          setExerciseType("SideArmRaise"); // set exercise type
+          setIsDetecting(true); // Start detection automatically
+          setIsVideoRecording(videoRecordFromURL);   // video recording
+          setIsSkeletonRecording(skeletonRecordFromURL);   // skeleton recording
+        }
+      } else {
+        setDisplayMessage("Cannot initate exercise. Please contact support")
+      }
+    } catch(err) {
+      setDisplayMessage("Cannot initate exercise. Please contact support")
     }
-  }, [query]);
+  }
 
   const handleStartExercise = () => {
     setIsDetecting(true); // Start detection
@@ -42,7 +70,8 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        {!isDetecting && (
+      {displayMessage ? displayMessage : 
+        !isDetecting && (
           <div style={{ position: "absolute", bottom: 10, left: 10 }}>
             <input
               type="number"
@@ -85,9 +114,11 @@ function App() {
             setIsVideoRecording={setIsVideoRecording}  
             isSkeletonRecording={isSkeletonRecording}
             setIsSkeletonRecording={setIsSkeletonRecording}
+            setDisplayMessage={setDisplayMessage}
+            activityData={activityData}
           />
         )}
-      </header>
+     </header>
     </div>
   );
 }

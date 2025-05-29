@@ -1,6 +1,5 @@
 // SkeletonRecorder.js
 import React, { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
-import { drawCanvas } from './utilities'; // or wherever your drawCanvas is
 
 const SkeletonRecorder = forwardRef(
   (
@@ -62,8 +61,6 @@ const SkeletonRecorder = forwardRef(
           mediaRecorderRef.current.onstop = () => {
             if (recordedChunksRef.current.length > 0) { // Ensure data exists
               const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-              const url = URL.createObjectURL(blob);
-              console.log('SkeletonRecorder: onstop fired. URL is', url);
               if (onRecordingComplete) {
                 onRecordingComplete(blob);
               }

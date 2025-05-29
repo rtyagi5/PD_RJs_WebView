@@ -4,15 +4,11 @@ import { calculateInteriorAngle } from './utilities';
 export const SAR_repDetection = async (
   poses,
   side,
-  setArmAngle,
-  setShoulderAngle,
-  setFeedback,
   feedbackRef,
   armLoweredCountRef,
   armUpCountRef,
   armLoweredFlagRef,
   repCountRef,
-  setRepCount,
   targetReps,
   handleExerciseComplete,
   keypointColorsRef,
@@ -40,9 +36,6 @@ export const SAR_repDetection = async (
         shoulderAngle = calculateInteriorAngle(hip, shoulder, elbow);
 
         if (!isNaN(armAngle) && !isNaN(shoulderAngle)) {
-          setArmAngle(armAngle);
-          setShoulderAngle(shoulderAngle);
-
           let newArmLoweredCount = armLoweredCountRef.current;
           let newArmUpCount = armUpCountRef.current;
           let newArmLoweredFlag = armLoweredFlagRef.current;
@@ -57,14 +50,12 @@ export const SAR_repDetection = async (
               newArmLoweredFlag = true;
               if (newArmLoweredCount === 0) {
                 newArmLoweredCount = 1;
-                setFeedback("Arm lowered 1");
-               // feedbackRef.current = "Good Start Position";
-                console.log("Arm lowered 1 detected");
+               feedbackRef.current = "Good Start Position";
+                // console.log("Arm lowered 1 detected");
               } else if (newArmLoweredCount === 1 && newArmUpCount === 1) {
                 newArmLoweredCount = 2;
-                setFeedback("Arm lowered 2");
-              //  feedbackRef.current = "Arm lowered 2";
-                console.log("Arm lowered 2 detected");
+               feedbackRef.current = "Arm lowered 2";
+                // console.log("Arm lowered 2 detected");
               }
             }
           }
@@ -73,7 +64,6 @@ export const SAR_repDetection = async (
           else if (shoulderAngle >= 35 && shoulderAngle <= 70) {
             keypointColorsRef.current = "#66FF00";
             segmentColorsRef.current = "#66FF00";
-            setFeedback("Intermediate range");
             feedbackRef.current = "Keep Going";
           }
 
@@ -84,18 +74,16 @@ export const SAR_repDetection = async (
             if (newArmLoweredCount === 1) {
               if (newArmUpCount === 0) {
                 newArmUpCount = 1;
-                setFeedback("Arm up detected");
                 feedbackRef.current = "Arm up detected";
-                console.log("Arm up detected");
+                // console.log("Arm up detected");
               }
             }
             newArmLoweredFlag = false;
           } else if (shoulderAngle > 90) {
             keypointColorsRef.current = "red";
             segmentColorsRef.current = "red";
-            setFeedback("Arm raise too high");
             feedbackRef.current = "Arm raise too high";
-            console.log("Arm raise too high");
+            // console.log("Arm raise too high");
           }
         }
           // Rep Count Logic
@@ -107,10 +95,8 @@ export const SAR_repDetection = async (
           ) {
             if (repCountRef.current < targetReps) {
               repCountRef.current++;
-              setRepCount(repCountRef.current);
-              setFeedback(`${repCountRef.current} Rep completed`);
               feedbackRef.current = `${repCountRef.current} Rep`;
-              console.log(`${repCountRef.current} Rep completed`);
+              // console.log(`${repCountRef.current} Rep completed`);
             }
 
               // Activate the feedback lock
@@ -139,27 +125,23 @@ export const SAR_repDetection = async (
           armLoweredFlagRef.current = newArmLoweredFlag;
         } else {
           if (!feedbackLockRef.current) {
-          setFeedback("Invalid angles detected");
           //feedbackRef.current = "Invalid angles detected";
           feedbackRef.current = "Make sure all key points are visible";
           }
         }
       } else {
         if (!feedbackLockRef.current) {
-          setFeedback("Make sure all key points are visible");
           feedbackRef.current = "Make sure all key points are visible";
         }
       }
     } else {
       if (!feedbackLockRef.current) {
-      setFeedback(`Move your ${side} arm into the frame`);
       //feedbackRef.current = `Move your ${side} arm into the frame`;
       feedbackRef.current = "Make sure all key points are visible";
       }
     }
   } else {
     if (!feedbackLockRef.current) {
-      setFeedback("No person detected");
       //feedbackRef.current = "No person detected";
       feedbackRef.current = "Make sure all key points are visible";
     }

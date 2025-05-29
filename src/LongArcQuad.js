@@ -3,15 +3,11 @@ import { calculateInteriorAngle } from './utilities';
 export const LAQ_repDetection = (
     poses,
     side,
-    setKneeAngle,
-    setSpineAngle,
-    setFeedback,
     feedbackRef,
     sitLoweredCountRef,
     sitUpCountRef,
     sitLoweredFlagRef,
     repCountRef,
-    setRepCount,
     targetReps,
     handleExerciseComplete,
     keypointColorsRef,      
@@ -38,8 +34,6 @@ export const LAQ_repDetection = (
                 spineAngle = calculateInteriorAngle(shoulder, hip, knee);
 
                 if (!isNaN(kneeAngle) && !isNaN(spineAngle)) {
-                    setKneeAngle(kneeAngle);
-                    setSpineAngle(spineAngle);
 
                     let newSitLoweredCount = sitLoweredCountRef.current;
                     let newSitUpCount = sitUpCountRef.current;
@@ -51,7 +45,6 @@ export const LAQ_repDetection = (
                     if (spineAngle >= 80 && spineAngle <= 130 && kneeAngle >= 85 && kneeAngle <= 95) {
                         keypointColorsRef.current="green";
                         segmentColorsRef.current="green";
-                        setFeedback("Good starting position!");
                         feedbackRef.current = "Good starting position!";
                     }
 
@@ -59,7 +52,6 @@ export const LAQ_repDetection = (
                     if (kneeAngle > 95 && kneeAngle <= 170) {
                         keypointColorsRef.current="green";
                         segmentColorsRef.current="green";
-                        setFeedback("Intermediate range");
                         feedbackRef.current = "Intermediate range";
                     }
 
@@ -71,13 +63,11 @@ export const LAQ_repDetection = (
                             newSitLoweredFlag = true;
                             if (newSitLoweredCount === 0) {
                                 newSitLoweredCount = 1;
-                                setFeedback("Leg lowered 1");
-                                console.log("Leg lowered 1 detected");
+                                // console.log("Leg lowered 1 detected");
                                 feedbackRef.current = "Leg lowered 1";
                             } else if (newSitLoweredCount === 1 && newSitUpCount === 1) {
                                 newSitLoweredCount = 2;
-                                setFeedback("Leg lowered 2");
-                                console.log("Leg lowered 2 detected");
+                                // console.log("Leg lowered 2 detected");
                                 feedbackRef.current = "Leg lowered 2";
                             }
                         }
@@ -89,8 +79,7 @@ export const LAQ_repDetection = (
                         if (newSitLoweredCount === 1) {
                             if (newSitUpCount === 0) {
                                 newSitUpCount = 1;
-                                setFeedback("Leg up detected");
-                                console.log("Leg up detected");
+                                // console.log("Leg up detected");
                                 feedbackRef.current = "Leg up detected";
                             }
                         }
@@ -107,10 +96,8 @@ export const LAQ_repDetection = (
                     if (newSitUpCount === 1 && newSitLoweredCount === 2 && kneeAngle >= 85 && kneeAngle <= 95) {
                         if (repCountRef.current < targetReps) {
                             repCountRef.current++;
-                            setRepCount(repCountRef.current);  // Update the state
                             feedbackRef.current = `${repCountRef.current} Rep`;
-                            setFeedback("Repetition completed");
-                            console.log("Repetition completed");
+                            // console.log("Repetition completed");
                         }
 
                         // Activate the feedback lock
@@ -140,25 +127,21 @@ export const LAQ_repDetection = (
                     sitLoweredFlagRef.current = newSitLoweredFlag;
                 } else {
                     if (!feedbackLockRef.current) {
-                    setFeedback("Invalid angles detected");
                     feedbackRef.current = "Invalid angles detected";
                     }
                 }
             } else {
                 if (!feedbackLockRef.current) {
-                setFeedback("Make sure all key points are visible");
                 feedbackRef.current = "Make sure all key points are visible";
                 }
             }
         } else {
             if (!feedbackLockRef.current) {
-            setFeedback(`Move your ${side} leg into the frame`);
             feedbackRef.current = `Move your ${side} leg into the frame`;
             }
         }
     } else {
         if (!feedbackLockRef.current) {
-        setFeedback("No person detected");
         feedbackRef.current = "No person detected";
         }
     }

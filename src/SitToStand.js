@@ -3,16 +3,11 @@ import { calculateInteriorAngle, calculateDistance } from './utilities';
 export const SitStand_repDetection = (
     poses,
     side,
-    setSpineAngle,
-    setKneeAngle,
-    setHipDistance,
-    setFeedback,
     feedbackRef,
     sitLoweredCountRef,
     sitUpCountRef,
     sitLoweredFlagRef,
     repCountRef,
-    setRepCount, 
     targetReps,
     handleExerciseComplete,
     keypointColorsRef,      
@@ -42,9 +37,6 @@ export const SitStand_repDetection = (
                 hipDistance = calculateDistance(hip, knee);
 
                 if (!isNaN(spineAngle) && !isNaN(kneeAngle) && !isNaN(hipDistance)) {
-                    setSpineAngle(spineAngle);
-                    setKneeAngle(kneeAngle);
-                    setHipDistance(hipDistance);
 
                     let newSitLoweredCount = sitLoweredCountRef.current;
                     let newSitUpCount = sitUpCountRef.current;
@@ -61,14 +53,12 @@ export const SitStand_repDetection = (
                             newSitLoweredFlag = true;
                             if (newSitLoweredCount === 0) {
                                 newSitLoweredCount = 1;
-                                setFeedback("Sit-down started");
                                 feedbackRef.current = "Sit-down started";
-                                console.log("Sit-down 1 detected");
+                                // console.log("Sit-down 1 detected");
                             } else if (newSitLoweredCount === 1 && newSitUpCount === 1) {
                                 newSitLoweredCount = 2;
-                                setFeedback("Sit-down complete");
                                 feedbackRef.current = "Sit-down complete";
-                                console.log("Sit-down 2 detected");
+                                // console.log("Sit-down 2 detected");
                             }
                         }
                     }
@@ -77,7 +67,6 @@ export const SitStand_repDetection = (
                     else if (kneeAngle > 110 && kneeAngle <= 150) {
                         keypointColorsRef.current="#66FF00";
                         segmentColorsRef.current="#66FF00";
-                        setFeedback("Intermediate range");
                         feedbackRef.current = "Intermediate range";
                     }
 
@@ -88,7 +77,6 @@ export const SitStand_repDetection = (
                         if (newSitLoweredCount === 1) {
                             if (newSitUpCount === 0) {
                                 newSitUpCount = 1;
-                                setFeedback("Standing detected");
                                 feedbackRef.current = "Standing detected";
                             }
                         }
@@ -107,8 +95,6 @@ export const SitStand_repDetection = (
                     if (newSitUpCount === 1 && newSitLoweredCount === 2 && kneeAngle > 70 && kneeAngle < 100) {
                         if (repCountRef.current < targetReps) {
                             repCountRef.current++;
-                            setRepCount(repCountRef.current);
-                            setFeedback("Repetition completed");
                             feedbackRef.current = `${repCountRef.current} Rep`;
                             console.log("Repetition completed");
                         }
@@ -139,25 +125,21 @@ export const SitStand_repDetection = (
                     sitLoweredFlagRef.current = newSitLoweredFlag;
                 } else {
                     if (!feedbackLockRef.current) {
-                    setFeedback("Invalid angles detected");
                     feedbackRef.current = "Invalid angles detected";
                     }
                 }
             } else {
                 if (!feedbackLockRef.current) {
-                setFeedback("Make sure all key points are visible");
                 feedbackRef.current = "Make sure all key points are visible";
                 }
             }
         } else {
             if (!feedbackLockRef.current) {
-            setFeedback(`Move your ${side} side into the frame`);
             feedbackRef.current = `Move your ${side} side into the frame`;
             }
         }
     } else {
         if (!feedbackLockRef.current) {
-        setFeedback("No person detected");
         feedbackRef.current = "No person detected";
         }
     }

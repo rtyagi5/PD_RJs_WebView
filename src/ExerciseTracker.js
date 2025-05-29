@@ -11,43 +11,30 @@ import { drawCanvas,sendUpdates } from './utilities';
 import VideoRecorder from './VideoRecorder'; 
 import SkeletonRecorder from './SkeletonRecorder'; 
 import axios from "axios";
-import { SERVICE_URL } from "./config";
+import { getServiceUrl } from "./config";
 
-const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDetecting, isVideoRecording, setIsVideoRecording, isSkeletonRecording, setIsSkeletonRecording }) => {
+const ExerciseTracker = ({ 
+  exerciseType, side, 
+  targetReps, isDetecting, 
+  setIsDetecting, isVideoRecording, 
+  setIsVideoRecording, isSkeletonRecording, 
+  setIsSkeletonRecording, setDisplayMessage,
+  activityData
+ }) => {
 
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
   const detectorRef = useRef(null); // Store the detector here
-  const [fps, setFps] = useState(0);
   const [data, setData] = useState({}); // Store dynamic data here
-  const [repCount, setRepCount] = useState(0);
-  const [armAngle, setArmAngle] = useState(0);
-  const [shoulderAngle, setShoulderAngle] = useState(0);
-  const [spineAngle, setSpineAngle] = useState(0);
-  const [kneeAngle, setKneeAngle] = useState(0);
-  const [hipDistance, setHipDistance] = useState(0);    
-  const [feedback, setFeedback] = useState("Initializing...");
-  const [headTilt, setHeadTilt] = useState(null);
-  const [shoulderAlignment, setShoulderAlignment] = useState(null);
-  const [hipAlignment, setHipAlignment] = useState(null);
-  const [kneeAlignment, setKneeAlignment] = useState(null);
-  const [timeElapsed, setTimeElapsed] = useState(0); // New state to track elapsed time
-  
-
-
-  const countdownRef = useRef({ started: false, value: 5 });  // Ref to track if countdown has started
-  const startTimeRef = useRef(null);  // Ref to track the actual start time
   const feedbackRef = useRef("Initializing...");  // Use ref instead of state for feedback
   const armLoweredCountRef = useRef(0);
   const armUpCountRef = useRef(0);
   const armLoweredFlagRef = useRef(false);
-  const repCountRef = useRef(repCount);
+  const repCountRef = useRef(0);
   const fpsRef = useRef(0);
   const sitLoweredCountRef = useRef(0);   // New ref for sit-down movement
   const sitUpCountRef = useRef(0);        // New ref for stand-up movement
   const sitLoweredFlagRef = useRef(false); // New flag for sit-down movement
-  const elapsedTimeRef = useRef(0);
-  const currentTimeRef = useRef(0);
   const keypointsRef = useRef([]);
   const keypointColorsRef = useRef("aqua");
   const segmentColorsRef = useRef("aqua");
@@ -118,7 +105,6 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
  
          // Update feedback only when the remaining time changes
          if (remainingTime !== previousRemainingTimeRef.current) {
-           setFeedback(feedbackMessage);
            feedbackRef.current = feedbackMessage;
            previousRemainingTimeRef.current = remainingTime;
          }
@@ -134,15 +120,11 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
            exerciseData = await SAR_repDetection(
                 poses,
                 side,
-                setArmAngle,
-                setShoulderAngle,
-                setFeedback,
                 feedbackRef,
                 armLoweredCountRef,
                 armUpCountRef,
                 armLoweredFlagRef,
                 repCountRef,
-                setRepCount,  // Make sure to include this line
                 targetReps,
                 handleExerciseComplete,            
                 keypointColorsRef,      
@@ -154,16 +136,11 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
               exerciseData = SitStand_repDetection(
                 poses,
                 side,
-                setSpineAngle,
-                setKneeAngle,
-                setHipDistance,
-                setFeedback,
                 feedbackRef,
                 sitLoweredCountRef,
                 sitUpCountRef,
                 sitLoweredFlagRef,
                 repCountRef,
-                setRepCount,
                 targetReps,
                 handleExerciseComplete, 
                 keypointColorsRef,      
@@ -175,15 +152,11 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
             exerciseData = MiniSquats_repDetection(
               poses,
               side,
-              setKneeAngle,          // Function to update knee angle in the UI
-              setSpineAngle,         // Function to update spine angle in the UI
-              setFeedback,           // Function to set feedback
               feedbackRef,           // Reference to hold feedback state
               sitLoweredCountRef,    // Ref to track how many times user has squatted down
               sitUpCountRef,         // Ref to track how many times user has stood up
               sitLoweredFlagRef,     // Ref to track if the user has squatted down
               repCountRef,           // Reference to hold rep count
-              setRepCount,           // Function to update rep count
               targetReps,            // Target number of reps
               handleExerciseComplete ,// Function to call when target reps are complete
               keypointColorsRef,      
@@ -195,15 +168,11 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
             exerciseData = LAQ_repDetection(
               poses,
               side,
-              setKneeAngle,
-              setSpineAngle,
-              setFeedback,
               feedbackRef,
               sitLoweredCountRef,
               sitUpCountRef,
               sitLoweredFlagRef,
               repCountRef,
-              setRepCount,
               targetReps,
               handleExerciseComplete,
               keypointColorsRef,      
@@ -215,19 +184,7 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
             // Timer-based logic for StandingStraightUp
           exerciseData = StandingStraightUp_detection(
             poses,
-            setHeadTilt,
-            setShoulderAlignment,
-            setHipAlignment,
-            setKneeAlignment,
-            startTimeRef,  // Pass the start time ref
-            setFeedback,
             feedbackRef,
-            setTimeElapsed,
-            targetReps,
-            handleExerciseComplete,
-            countdownRef,  // Pass the countdown ref
-            elapsedTimeRef,
-            currentTimeRef,
             keypointColorsRef,      
             segmentColorsRef,
             keypointsRef,
@@ -261,7 +218,6 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
         const currentTime = performance.now();
         if (currentTime - lastFpsUpdate > 100) {
           const calculatedFps = Math.round((frameCount / (currentTime - lastFpsUpdate)) * 1000);
-          setFps(calculatedFps); // This updates the FPS state for display
           fpsRef.current = calculatedFps; // Store in ref for immediate access
 
           // Send the update every second
@@ -270,13 +226,14 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
             feedback:feedbackRef.current,
             completionStatusRef:completionStatusRef.current,
             ...exerciseData,
+            repCount: repCountRef.current
           };
 
 
           // Only send feedback if initial delay has passed
             if (feedbackRef.current !== lastFeedbackSentRef.current) {
               lastFeedbackSentRef.current = feedbackRef.current;
-              await sendUpdates(finalData1, exerciseType);
+              await sendUpdates(finalData1, exerciseType, activityData);
             }
           
     
@@ -360,8 +317,6 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
 
 
   const handleExerciseComplete = async () => {
-    setFeedback("Target reps achieved!");
-
     // Send the final update to the WebView
     // sendUpdates();
     const finalData = {
@@ -369,9 +324,10 @@ const ExerciseTracker = ({ exerciseType, side, targetReps, isDetecting, setIsDet
       ...data, // Send the latest data available
       feedback: "Target reps achieved!",
       completionStatusRef: true,
+      repCount: repCountRef.current
     };
 
-    await sendUpdates(finalData, exerciseType);
+    await sendUpdates(finalData, exerciseType, activityData);
     setIsDetecting(false);
     setIsVideoRecording(false);  // This triggers the video recorder to stop
     setIsSkeletonRecording(false);  // This triggers the video recorder to stop
@@ -394,7 +350,9 @@ const handleVideoRecordingComplete = async(videoUrl) => {
   // a.href = videoUrl;
   // a.download = 'exercise_video_recording.webm';
   // a.click();
+  setDisplayMessage("Syncing video. Please wait...")
   await uploadVideo(videoUrl, "videoRecording")
+  setDisplayMessage("Exericise video synced successfully!!")
 };
 
 const handleSkeletonRecordingComplete = async (videoUrl) => {
@@ -403,22 +361,25 @@ const handleSkeletonRecordingComplete = async (videoUrl) => {
   // a.href = videoUrl;
   // a.download = 'exercise_skeleton_recording.webm';
   // a.click();
+  setDisplayMessage("Syncing skeleton video. Please wait...")
   await uploadVideo(videoUrl, "skeleton")
-  
+  setDisplayMessage("Skeleton video synced successfully!!")
 };
 
 async function uploadVideo(file, type) {
   const query = new URLSearchParams(window.location.search);
   try {
     const response = await axios.post(
-      `${SERVICE_URL.USER_SERVICE}/files/stream`,
+      `${getServiceUrl(activityData).USER_SERVICE}/files/stream`,
       file,
       {
         headers: {
           'Content-Type': 'application/octet-stream',
+          Authorization: `Bearer ${query.get("token")}`,
+          tenantId: activityData?.tenant
         },
         params: {
-          fileName: `${query.get("activity")}_${type}_${Date.now()}_exercise.webm`,
+          fileName: `${activityData?.activity}_${type}_${Date.now()}_exercise.webm`,
           isExerciseSync: true
         },
       }

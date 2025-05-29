@@ -1,18 +1,6 @@
 export const StandingStraightUp_detection = (
     poses,
-    setHeadTilt,
-    setShoulderAlignment,
-    setHipAlignment,
-    setKneeAlignment,
-    startTimeRef,  
-    setFeedback,
     feedbackRef,
-    setTimeElapsed,  
-    targetReps,     
-    handleExerciseComplete,
-    countdownRef,    // Ref to track countdown state
-    elapsedTimeRef,
-    currentTimeRef,
     keypointColorsRef,      
     segmentColorsRef,
     keypointsRef,
@@ -49,13 +37,11 @@ export const StandingStraightUp_detection = (
 
                 //     const countdownInterval = setInterval(() => {
                 //         if (countdownRef.current.value > 0) {
-                //             setFeedback(`Detection will start in ${countdownRef.current.value} seconds`);
                 //             feedbackRef.current = `Detection will start in ${countdownRef.current.value} seconds`;
                 //             countdownRef.current.value--;
                 //         } else {
                 //             clearInterval(countdownInterval);
                 //             startTimeRef.current = new Date().getTime();  // Set the start time
-                //             setFeedback("Detection started! Hold steady...");
                 //             feedbackRef.current = "Detection started! Hold steady...";
                 //             countdownRef.current.value = 0;  // Reset countdown value for potential future use
                 //         }
@@ -71,42 +57,32 @@ export const StandingStraightUp_detection = (
                     kneeAlignment = Math.abs(leftKnee.y - rightKnee.y);
                     ankleAlignment = Math.abs(leftAnkle.x - rightAnkle.x);
 
-                    setHeadTilt(headTilt);
-                    setShoulderAlignment(shoulderAlignment);
-                    setHipAlignment(hipAlignment);
-                    setKneeAlignment(kneeAlignment);
-
                     if (!feedbackLockRef.current) {
                     // Provide alignment feedback
                     if (headTilt > 15) {
                         keypointsRef.current = [head.name];
                         keypointColorsRef.current="red";
                         segmentColorsRef.current="red";          
-                        setFeedback("Keep your head straight.");
                         feedbackRef.current = "Keep your head straight.";
                     } else if (shoulderAlignment > 15) {
                         keypointsRef.current = [leftShoulder.name, rightShoulder.name];
                         keypointColorsRef.current="red";
                         segmentColorsRef.current="red";  
-                        setFeedback("Level your shoulders.");
                         feedbackRef.current = "Level your shoulders.";
                     } else if (hipAlignment > 15) {
                         keypointsRef.current = [leftHip.name, rightHip.name];
                         keypointColorsRef.current="red";
                         segmentColorsRef.current="red";  
-                        setFeedback("Align your hips.");
                         feedbackRef.current = "Align your hips.";
                     } else if (kneeAlignment > 15) {
                         keypointsRef.current = [leftKnee.name, rightKnee.name];
                         keypointColorsRef.current="red";
                         segmentColorsRef.current="red";  
-                        setFeedback("Align your knees.");
                         feedbackRef.current = "Align your knees.";
                     } else if (ankleAlignment < 5 || ankleAlignment > 40) {
                         keypointsRef.current = [leftAnkle.name, rightAnkle.name];
                         keypointColorsRef.current="red";
                         segmentColorsRef.current="red";  
-                        setFeedback("Keep your feet hip-width apart.");
                         feedbackRef.current = "Keep your feet hip-width apart.";
                     }
                     else{
@@ -120,19 +96,16 @@ export const StandingStraightUp_detection = (
 
             } else {
                 if (!feedbackLockRef.current) {
-                setFeedback("Make sure all key points are visible.");
                 feedbackRef.current = "Make sure all key points are visible.";
                 }
             }
         } else {
             if (!feedbackLockRef.current) {
-            setFeedback("Move your body into the frame.");
             feedbackRef.current = "Move your body into the frame.";
             }
         }
     } else {
         if (!feedbackLockRef.current) {
-        setFeedback("No person detected.");
         feedbackRef.current = "No person detected.";
         }
     }

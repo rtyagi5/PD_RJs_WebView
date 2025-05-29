@@ -1,11 +1,7 @@
 import axios from "axios"
-import { SERVICE_URL } from "./config";
-const color = "aqua";
+import { getServiceUrl } from "./config";
 const lineWidth = 2;  // Adjusted line width
-
-function toTuple({ y, x }) {
-  return [y, x];
-}
+let messageCache = {}
 
 export function drawPoint(ctx, y, x, r, color) {
   ctx.beginPath();
@@ -183,8 +179,12 @@ export const drawCanvas = (poses, videoWidth, videoHeight, ctx, keypoints, keypo
 };
 
 
-export const sendUpdates = async (data, exerciseType) => {
+export const sendUpdates = async (data, exerciseType, activityData) => {
   // Example config to determine which data points to include based on exerciseType
+  const cacheKey = `${data.repCount}_${data?.feedback}`
+  if(messageCache[cacheKey]) {
+    return
+  }
   const exerciseDataConfig = {
     "SideArmRaise": ["armAngle", "shoulderAngle"],
     "Squats": ["kneeAngle", "hipAngle"],
@@ -214,13 +214,14 @@ export const sendUpdates = async (data, exerciseType) => {
 
   if(sync) {
     const query = new URLSearchParams(window.location.search);
-    axios.post(`${SERVICE_URL.EXERCISE_SERVICE}/activities/exercise-data`, {
+    axios.post(`${getServiceUrl(activityData).EXERCISE_SERVICE}/activities/exercise-data`, {
       ...filteredData,
-      activity: query.get("activity"),
+      activity: activityData?.activity,
       activityType: "exercise"
     }, {
       headers: {
-        Authorization: `Bearer ${query.get("authToken")}`
+        Authorization: `Bearer ${query.get("token")}`,
+        tenantId: activityData?.tenant
       }
     }).catch((err)=> {
       console.log("failed in sending the data to server");
@@ -229,6 +230,7 @@ export const sendUpdates = async (data, exerciseType) => {
     })
   }
  
+  messageCache[cacheKey] = 1
 
   if (window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage(JSON.stringify(filteredData));
