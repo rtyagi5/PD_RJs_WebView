@@ -15,8 +15,8 @@ function App() {
   const [side, setSide] = useState("left");
   const query = useQuery();
   const [exerciseType, setExerciseType] = useState("SelectExercise"); // Default exercise type
-  const [isVideoRecording, setIsVideoRecording] = useState(false);
-  const [isSkeletonRecording, setIsSkeletonRecording] = useState(false);
+  const [isVideoRecording, setIsVideoRecording] = useState(true);
+  const [isSkeletonRecording, setIsSkeletonRecording] = useState(true);
   const [displayMessage, setDisplayMessage] = useState()
   const [activityData, setActivityData] = useState({})
 
@@ -40,18 +40,18 @@ function App() {
           }
         });
         // if(activity.data?.data?.status != "pending") {
-        //   setDisplayMessage("Activity is either completed or was not completed in first attempt. Please start other exercise.")
-        //   return
+        //    setDisplayMessage("Activity is either completed or was not completed in first attempt. Please start other exercise.")
+        //    return
         // }
         
         setActivityData(decodeResponse);
-        if (repsFromURL && sideFromURL && exerciseTypeFromURL && videoRecordFromURL && skeletonRecordFromURL) {
+        if (repsFromURL && sideFromURL && exerciseTypeFromURL) {
           setTargetReps(parseInt(repsFromURL));
           setSide(sideFromURL);
-          setExerciseType("SideArmRaise"); // set exercise type
+          setExerciseType(exerciseTypeFromURL); // set exercise type
           setIsDetecting(true); // Start detection automatically
-          setIsVideoRecording(videoRecordFromURL);   // video recording
-          setIsSkeletonRecording(skeletonRecordFromURL);   // skeleton recording
+          // setIsVideoRecording(videoRecordFromURL);   // video recording
+          // setIsSkeletonRecording(skeletonRecordFromURL);   // skeleton recording
         }
       } else {
         setDisplayMessage("Cannot initate exercise. Please contact support")
