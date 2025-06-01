@@ -15,8 +15,8 @@ function App() {
   const [side, setSide] = useState("left");
   const query = useQuery();
   const [exerciseType, setExerciseType] = useState("SelectExercise"); // Default exercise type
-  const [isVideoRecording, setIsVideoRecording] = useState(true);
-  const [isSkeletonRecording, setIsSkeletonRecording] = useState(true);
+  const [isVideoRecording, setIsVideoRecording] = useState(false);
+  const [isSkeletonRecording, setIsSkeletonRecording] = useState(false);
   const [displayMessage, setDisplayMessage] = useState()
   const [activityData, setActivityData] = useState({})
 
@@ -32,17 +32,16 @@ function App() {
         const repsFromURL = decodeResponse?.reps
         const sideFromURL = decodeResponse?.side
         const exerciseTypeFromURL = decodeResponse?.exerciseType
-        const videoRecordFromURL = decodeResponse?.video
-        const skeletonRecordFromURL = decodeResponse?.skeleton
         const activity = await axios.get(`${getServiceUrl(decodeResponse).EXERCISE_SERVICE}/assigned-exercises/${decodeResponse?.activity}`, {
           headers: {
             Authorization: `Bearer ${token}`
           }
         });
-        // if(activity.data?.data?.status != "pending") {
-        //    setDisplayMessage("Activity is either completed or was not completed in first attempt. Please start other exercise.")
-        //    return
-        // }
+        const details = activity.data
+        if(details?.data?.status == "completed") {
+           setDisplayMessage("Activity is either completed or expired. Please start other exercise.")
+           return
+        }
         
         setActivityData(decodeResponse);
         if (repsFromURL && sideFromURL && exerciseTypeFromURL) {
@@ -50,8 +49,8 @@ function App() {
           setSide(sideFromURL);
           setExerciseType(exerciseTypeFromURL); // set exercise type
           setIsDetecting(true); // Start detection automatically
-          // setIsVideoRecording(videoRecordFromURL);   // video recording
-          // setIsSkeletonRecording(skeletonRecordFromURL);   // skeleton recording
+          setIsVideoRecording(details?.patient?.allowExerciseVideo ?? true);   // video recording
+          setIsSkeletonRecording(details?.patient?.allowSkeletonVideo ?? true);   // skeleton recording
         }
       } else {
         setDisplayMessage("Cannot initate exercise. Please contact support")
