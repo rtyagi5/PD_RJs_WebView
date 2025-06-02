@@ -37,8 +37,8 @@ function App() {
             Authorization: `Bearer ${token}`
           }
         });
-        const details = activity.data
-        if(details?.data?.status == "completed") {
+        const details = activity.data?.data
+        if(details?.status == "completed") {
            setDisplayMessage("Activity is either completed or expired. Please start other exercise.")
            return
         }
