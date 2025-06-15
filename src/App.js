@@ -25,58 +25,29 @@ function App() {
   }, []);
 
   const manageExerciseData = async () => {
-    // For local development - bypass token check
-    if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
-      const defaultReps = parseInt(process.env.REACT_APP_DEFAULT_REPS) || 5;
-      const defaultSide = process.env.REACT_APP_DEFAULT_SIDE || 'left';
-      const defaultExercise = process.env.REACT_APP_DEFAULT_EXERCISE || 'SideArmRaise';
-      
-      setTargetReps(defaultReps);
-      setSide(defaultSide);
-      setExerciseType(defaultExercise);
-      setIsVideoRecording(process.env.REACT_APP_ALLOW_VIDEO_RECORDING === 'true');
-      setIsSkeletonRecording(process.env.REACT_APP_ALLOW_SKELETON_RECORDING === 'true');
-      
-      setActivityData({
-        reps: defaultReps,
-        side: defaultSide,
-        exerciseType: defaultExercise,
-        // Add any other required fields here
-      });
-      
-      return;
-    }
-    
-    // Original token processing for production
     try {
       const token = query.get("token");
-      if (!token) {
-        setDisplayMessage("No authentication token provided");
-        return;
-      }
-      
-      const decodeResponse = jwtDecode(token);
-      if (decodeResponse) {
-        const repsFromURL = decodeResponse?.reps;
-        const sideFromURL = decodeResponse?.side;
-        const exerciseTypeFromURL = decodeResponse?.exerciseType;
-        
-        const activity = await axios.get(
-          `${getServiceUrl(decodeResponse).EXERCISE_SERVICE}/assigned-exercises/${decodeResponse?.activity}`, 
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        
-        const details = activity.data?.data;
-        if (details?.status === "completed") {
-          setDisplayMessage("Activity is either completed or expired. Please start another exercise.");
-          return;
+      const decodeResponse = jwtDecode(token)
+      if(decodeResponse) {
+        const repsFromURL = decodeResponse?.reps
+        const sideFromURL = decodeResponse?.side
+        const exerciseTypeFromURL = decodeResponse?.exerciseType
+        const activity = await axios.get(`${getServiceUrl(decodeResponse).EXERCISE_SERVICE}/assigned-exercises/${decodeResponse?.activity}`, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+        const details = activity.data?.data
+        if(details?.status == "completed") {
+           setDisplayMessage("Activity is either completed or expired. Please start other exercise.")
+           return
         }
         
         setActivityData(decodeResponse);
         if (repsFromURL && sideFromURL && exerciseTypeFromURL) {
           setTargetReps(parseInt(repsFromURL));
           setSide(sideFromURL);
-          setExerciseType(exerciseTypeFromURL);
+          setExerciseType(exerciseTypeFromURL); // set exercise type
           setIsDetecting(true); // Start detection automatically
           setIsVideoRecording(details?.patient?.allowExerciseVideo ?? true);   // video recording
           setIsSkeletonRecording(details?.patient?.allowSkeletonVideo ?? true);   // skeleton recording

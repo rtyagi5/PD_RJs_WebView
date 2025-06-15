@@ -181,10 +181,10 @@ export const drawCanvas = (poses, videoWidth, videoHeight, ctx, keypoints, keypo
 
 export const sendUpdates = async (data, exerciseType, activityData) => {
   // Skip API calls in development mode
-  if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
-    console.log('[DEV] Skipping API call in development mode');
-    return;
-  }
+  // if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
+  //   console.log('[DEV] Skipping API call in development mode');
+  //   return;
+  // }
   
   // Example config to determine which data points to include based on exerciseType
   const cacheKey = `${data.repCount}_${data?.feedback}`
