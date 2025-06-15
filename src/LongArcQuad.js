@@ -1,6 +1,6 @@
 import { calculateInteriorAngle } from './utilities';
 
-export const LAQ_repDetection = (
+export const LAQ_repDetection = async (
     poses,
     side,
     feedbackRef,
@@ -13,7 +13,7 @@ export const LAQ_repDetection = (
     keypointColorsRef,      
     segmentColorsRef,
     keypointsRef,
-    feedbackLockRef  // Add this parameter
+    feedbackLockRef
 ) => {
     let kneeAngle = null;
     let spineAngle = null;
@@ -34,90 +34,78 @@ export const LAQ_repDetection = (
                 spineAngle = calculateInteriorAngle(shoulder, hip, knee);
 
                 if (!isNaN(kneeAngle) && !isNaN(spineAngle)) {
-
                     let newSitLoweredCount = sitLoweredCountRef.current;
                     let newSitUpCount = sitUpCountRef.current;
                     let newSitLoweredFlag = sitLoweredFlagRef.current;
 
+                    // Set default colors to green
+                    keypointColorsRef.current = "#66FF00";
+                    segmentColorsRef.current = "#66FF00";
+
                     if (!feedbackLockRef.current) {
-
-                    // Starting Position Check
-                    if (spineAngle >= 80 && spineAngle <= 130 && kneeAngle >= 85 && kneeAngle <= 95) {
-                        keypointColorsRef.current="green";
-                        segmentColorsRef.current="green";
-                        feedbackRef.current = "Good starting position!";
-                    }
-
-                    // Intermediate Movement Logic (kneeAngle between 95 and 170 degrees)
-                    if (kneeAngle > 95 && kneeAngle <= 170) {
-                        keypointColorsRef.current="green";
-                        segmentColorsRef.current="green";
-                        feedbackRef.current = "Intermediate range";
-                    }
-
-                    // Leg Lowered Logic (starting position)
-                    if (kneeAngle >= 85 && kneeAngle <= 95) {
-                        keypointColorsRef.current="green";
-                        segmentColorsRef.current="green";
-                        if (!newSitLoweredFlag) {
-                            newSitLoweredFlag = true;
-                            if (newSitLoweredCount === 0) {
-                                newSitLoweredCount = 1;
-                                // console.log("Leg lowered 1 detected");
-                                feedbackRef.current = "Leg lowered 1";
-                            } else if (newSitLoweredCount === 1 && newSitUpCount === 1) {
-                                newSitLoweredCount = 2;
-                                // console.log("Leg lowered 2 detected");
-                                feedbackRef.current = "Leg lowered 2";
+                        // Check for proper form first
+                        if (spineAngle < 70 || spineAngle > 140) {
+                            keypointColorsRef.current = "red";
+                            segmentColorsRef.current = "red";
+                            feedbackRef.current = "Keep your back straight";
+                        }
+                        // Leg Lowered Logic (starting position)
+                        else if (kneeAngle >= 85 && kneeAngle <= 95) {
+                            if (!newSitLoweredFlag) {
+                                newSitLoweredFlag = true;
+                                if (newSitLoweredCount === 0) {
+                                    newSitLoweredCount = 1;
+                                    feedbackRef.current = "Good start position";
+                                    console.log(`[START] Leg lowered 1 - Knee: ${kneeAngle.toFixed(1)}°`);
+                                } else if (newSitLoweredCount === 1 && newSitUpCount === 1) {
+                                    newSitLoweredCount = 2;
+                                    feedbackRef.current = "Leg returned to start";
+                                    console.log(`[RETURN] Leg lowered 2 - Knee: ${kneeAngle.toFixed(1)}°`);
+                                    
+                                    // Count the rep when returning to start position
+                                    if (repCountRef.current < targetReps) {
+                                        repCountRef.current++;
+                                        feedbackRef.current = `${repCountRef.current} Rep`;
+                                        console.log(`[REP] Count: ${repCountRef.current} of ${targetReps}`);
+                                        
+                                        // Activate feedback lock to prevent double counting
+                                        feedbackLockRef.current = true;
+                                        
+                                        // Reset after a short delay
+                                        setTimeout(() => {
+                                            sitLoweredCountRef.current = 0;
+                                            sitUpCountRef.current = 0;
+                                            sitLoweredFlagRef.current = false;
+                                            feedbackLockRef.current = false;
+                                            console.log("[RESET] Ready for next rep");
+                                        }, 300);
+                                        
+                                        // Reset local variables
+                                        newSitLoweredCount = 0;
+                                        newSitUpCount = 0;
+                                        newSitLoweredFlag = false;
+                                        
+                                        // Check if target reps achieved
+                                        if (repCountRef.current >= targetReps) {
+                                            await handleExerciseComplete();
+                                            return { kneeAngle, spineAngle, repCount: repCountRef.current };
+                                        }
+                                    }
+                                }
                             }
                         }
-                    }
-                    // Leg Up Logic (end position when kneeAngle is between 170 and 180)
-                    if (kneeAngle >= 170 && kneeAngle <= 180) {
-                        keypointColorsRef.current="green";
-                        segmentColorsRef.current="green";
-                        if (newSitLoweredCount === 1) {
-                            if (newSitUpCount === 0) {
+                        // Leg Up Logic (end position)
+                        else if (kneeAngle >= 150 && kneeAngle <= 180) {
+                            if (newSitLoweredCount === 1 && newSitUpCount === 0) {
                                 newSitUpCount = 1;
-                                // console.log("Leg up detected");
-                                feedbackRef.current = "Leg up detected";
+                                feedbackRef.current = "Leg raised";
+                                console.log(`[LIFT] Leg raised - Knee: ${kneeAngle.toFixed(1)}°`);
                             }
+                            newSitLoweredFlag = false;
                         }
-                        newSitLoweredFlag = false;
-                    }
-
-                    if (spineAngle < 80 || spineAngle > 130 || kneeAngle < 85) {
-                        keypointColorsRef.current="red";
-                        segmentColorsRef.current="red";
-                     
-                    }
-                }
-                    // Rep Count Logic
-                    if (newSitUpCount === 1 && newSitLoweredCount === 2 && kneeAngle >= 85 && kneeAngle <= 95) {
-                        if (repCountRef.current < targetReps) {
-                            repCountRef.current++;
-                            feedbackRef.current = `${repCountRef.current} Rep`;
-                            // console.log("Repetition completed");
-                        }
-
-                        // Activate the feedback lock
-                        feedbackLockRef.current = true;
-
-                        // Release the lock after 2 seconds
-                        setTimeout(() => {
-                            feedbackLockRef.current = false;
-                        }, 2000); // Adjust the duration as needed
-
-
-
-                        newSitLoweredCount = 0;
-                        newSitUpCount = 0;
-                        newSitLoweredFlag = false;
-
-                        // Check if target reps achieved
-                        if (repCountRef.current >= targetReps) {
-                            handleExerciseComplete();
-                            return { kneeAngle, spineAngle, repCount: repCountRef.current }; // Exit the function
+                        // Intermediate Movement Feedback
+                        else if (kneeAngle > 95 && kneeAngle < 150) {
+                            feedbackRef.current = newSitLoweredCount === 1 ? "Raising leg..." : "Lowering leg...";
                         }
                     }
 
@@ -127,22 +115,22 @@ export const LAQ_repDetection = (
                     sitLoweredFlagRef.current = newSitLoweredFlag;
                 } else {
                     if (!feedbackLockRef.current) {
-                    feedbackRef.current = "Invalid angles detected";
+                        feedbackRef.current = "Make sure all key points are visible";
                     }
                 }
             } else {
                 if (!feedbackLockRef.current) {
-                feedbackRef.current = "Make sure all key points are visible";
+                    feedbackRef.current = "Make sure all key points are visible";
                 }
             }
         } else {
             if (!feedbackLockRef.current) {
-            feedbackRef.current = `Move your ${side} leg into the frame`;
+                feedbackRef.current = `Move your ${side} leg into the frame`;
             }
         }
     } else {
         if (!feedbackLockRef.current) {
-        feedbackRef.current = "No person detected";
+            feedbackRef.current = "No person detected";
         }
     }
 

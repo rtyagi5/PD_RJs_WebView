@@ -41,83 +41,95 @@ export const SAR_repDetection = async (
           let newArmLoweredFlag = armLoweredFlagRef.current;
 
           if (!feedbackLockRef.current) {
-          // Arm Lowered Logic
-          if (shoulderAngle > 0 && shoulderAngle < 35) {
+          // Arm Lowered Logic - More lenient angle range for faster movements
+          if (shoulderAngle > 0 && shoulderAngle < 45) {  // Increased from 35 to 45 degrees
             keypointColorsRef.current = "#66FF00";
             segmentColorsRef.current = "#66FF00";
-            feedbackRef.current = "Start The movement";
+            
+            // Only update feedback if we're not in the middle of a rep
+            if (newArmUpCount === 0 || newArmUpCount === 1) {
+              feedbackRef.current = newArmLoweredCount === 0 ? "Start The movement" : "Lowering arm";
+            }
+            
             if (!newArmLoweredFlag) {
               newArmLoweredFlag = true;
               if (newArmLoweredCount === 0) {
                 newArmLoweredCount = 1;
-               feedbackRef.current = "Good Start Position";
-                // console.log("Arm lowered 1 detected");
+                feedbackRef.current = "Good Start Position";
+                console.log(`Arm lowered 1 detected - Angle: ${shoulderAngle.toFixed(1)}°`);
+                console.log(`State - Lowered: ${newArmLoweredCount}, Raised: ${newArmUpCount}, Flag: ${newArmLoweredFlag}`);
               } else if (newArmLoweredCount === 1 && newArmUpCount === 1) {
                 newArmLoweredCount = 2;
-               feedbackRef.current = "Arm lowered 2";
-                // console.log("Arm lowered 2 detected");
+                feedbackRef.current = "Arm lowered 2";
+                console.log(`Arm lowered 2 detected - Angle: ${shoulderAngle.toFixed(1)}°`);
+                console.log(`State - Lowered: ${newArmLoweredCount}, Raised: ${newArmUpCount}, Flag: ${newArmLoweredFlag}`);
+                
+                // Check for rep completion when arm is lowered the second time
+                if (repCountRef.current < targetReps) {
+                  repCountRef.current++;
+                  feedbackRef.current = `${repCountRef.current} Rep`;
+                  console.log(`[REP COUNT] ${repCountRef.current} of ${targetReps} completed`);
+                  
+                  // Activate the feedback lock to prevent double counting
+                  feedbackLockRef.current = true;
+                  
+                  // Reset the movement tracking after a very short delay
+                  setTimeout(() => {
+                    armLoweredCountRef.current = 0;
+                    armUpCountRef.current = 0;
+                    armLoweredFlagRef.current = false;
+                    feedbackLockRef.current = false;
+                    console.log("Reset movement tracking");
+                  }, 300); // Reduced from 500ms to 300ms for even faster response
+                  
+                  // Reset local variables after successful rep count
+                  newArmLoweredCount = 0;
+                  newArmUpCount = 0;
+                  newArmLoweredFlag = false;
+                  
+                  // Check if target reps achieved
+                  if (repCountRef.current >= targetReps) {
+                    await handleExerciseComplete();
+                    return { armAngle, shoulderAngle, repCount: repCountRef.current };
+                  }
+                }
               }
             }
           }
-
           // Intermediate Range Logic (30 to 70 degrees)
           else if (shoulderAngle >= 35 && shoulderAngle <= 70) {
             keypointColorsRef.current = "#66FF00";
             segmentColorsRef.current = "#66FF00";
             feedbackRef.current = "Keep Going";
           }
-
-          // Arm Up Logic
-          else if (shoulderAngle > 70 && shoulderAngle <= 90) {
+          // Arm Up Logic - More responsive to faster movements
+          else if (shoulderAngle > 65 && shoulderAngle <= 100) {  // Increased range from 70-90 to 65-100
             keypointColorsRef.current = "#66FF00";
             segmentColorsRef.current = "#66FF00";
-            if (newArmLoweredCount === 1) {
-              if (newArmUpCount === 0) {
-                newArmUpCount = 1;
-                feedbackRef.current = "Arm up detected";
-                // console.log("Arm up detected");
-              }
+            
+            // Only update state if we're coming from a lowered position
+            if (newArmLoweredCount === 1 && newArmUpCount === 0) {
+              newArmUpCount = 1;
+              feedbackRef.current = "Arm up detected";
+              console.log("Arm up detected - Shoulder angle:", shoulderAngle.toFixed(1));
+              
+              // Log the current state for debugging
+              console.log(`State - Lowered: ${newArmLoweredCount}, Raised: ${newArmUpCount}, Flag: ${newArmLoweredFlag}`);
             }
+            
+            // Reset the lowered flag when arm is raised
             newArmLoweredFlag = false;
-          } else if (shoulderAngle > 90) {
-            keypointColorsRef.current = "red";
-            segmentColorsRef.current = "red";
-            feedbackRef.current = "Arm raise too high";
-            // console.log("Arm raise too high");
+          } 
+          // Arm Too High - Only show warning if we're not in the middle of a rep
+          else if (shoulderAngle > 100) {  // Increased from 90 to 100 degrees
+            if (feedbackRef.current !== "Arm raise too high") {
+              keypointColorsRef.current = "orange";  // Changed from red to orange for less severity
+              segmentColorsRef.current = "orange";
+              feedbackRef.current = "Arm raise too high";
+              console.log("Arm raise too high - Shoulder angle:", shoulderAngle.toFixed(1));
+            }
           }
         }
-          // Rep Count Logic
-          if (
-            newArmUpCount === 1 &&
-            newArmLoweredCount === 2 &&
-            shoulderAngle > 0 &&
-            shoulderAngle < 35
-          ) {
-            if (repCountRef.current < targetReps) {
-              repCountRef.current++;
-              feedbackRef.current = `${repCountRef.current} Rep`;
-              // console.log(`${repCountRef.current} Rep completed`);
-            }
-
-              // Activate the feedback lock
-              feedbackLockRef.current = true;
-
-              // Release the lock after 2 seconds
-              setTimeout(() => {
-                feedbackLockRef.current = false;
-              }, 2000); // Adjust the duration as needed
-            
-
-            newArmLoweredCount = 0;
-            newArmUpCount = 0;
-            newArmLoweredFlag = false;
-
-            // Check if target reps achieved
-            if (repCountRef.current >= targetReps) {
-              await handleExerciseComplete();
-              return { armAngle, shoulderAngle, repCount: repCountRef.current }; // Exit the function
-            }
-          }
 
           // Update state at the end
           armLoweredCountRef.current = newArmLoweredCount;
