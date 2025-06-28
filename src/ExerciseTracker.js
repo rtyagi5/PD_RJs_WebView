@@ -7,6 +7,7 @@ import { SitStand_repDetection } from './SitToStand';
 import { MiniSquats_repDetection } from './MiniSquats';
 import { LAQ_repDetection } from './LongArcQuad'; 
 import { StandingStraightUp_detection } from './StandingStraightUp';
+import { SeatedMarch_repDetection } from './SeatedMarch';
 import { drawCanvas,sendUpdates } from './utilities';
 import VideoRecorder from './VideoRecorder'; 
 import SkeletonRecorder from './SkeletonRecorder'; 
@@ -32,9 +33,15 @@ const ExerciseTracker = ({
   const armLoweredFlagRef = useRef(false);
   const repCountRef = useRef(0);
   const fpsRef = useRef(0);
-  const sitLoweredCountRef = useRef(0);   // New ref for sit-down movement
-  const sitUpCountRef = useRef(0);        // New ref for stand-up movement
-  const sitLoweredFlagRef = useRef(false); // New flag for sit-down movement
+  // Refs for general exercise tracking
+  const sitLoweredCountRef = useRef(0);   // For sit-down movement
+  const sitUpCountRef = useRef(0);        // For stand-up movement
+  const sitLoweredFlagRef = useRef(false); // For sit-down movement
+  
+  // Refs specifically for Seated March
+  const leftLegCountRef = useRef(0);      // Track left leg lifts
+  const rightLegCountRef = useRef(0);     // Track right leg lifts
+  const lastLegRef = useRef('right');      // Start with right so first lift is left
   const keypointsRef = useRef([]);
   const keypointColorsRef = useRef("aqua");
   const segmentColorsRef = useRef("aqua");
@@ -182,15 +189,31 @@ const ExerciseTracker = ({
             );
           } else if (exerciseType === "StandingStraightUp") {
             // Timer-based logic for StandingStraightUp
-          exerciseData = StandingStraightUp_detection(
-            poses,
-            feedbackRef,
-            keypointColorsRef,      
-            segmentColorsRef,
-            keypointsRef,
-            feedbackLockRef
-          );
-        }
+            exerciseData = StandingStraightUp_detection(
+              poses,
+              feedbackRef,
+              keypointColorsRef,      
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef
+            );
+          } else if (exerciseType === "SeatedMarch") {
+            exerciseData = await SeatedMarch_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              leftLegCountRef,      // Pass left leg counter
+              rightLegCountRef,     // Pass right leg counter
+              lastLegRef,           // Pass last leg reference
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,      
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef
+            );
+          }
           
             if (exerciseData) {
               setData(exerciseData);
