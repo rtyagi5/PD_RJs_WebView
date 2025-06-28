@@ -6,7 +6,7 @@ export const StandingMarch_repDetection = async (
     feedbackRef,
     leftLegCountRef,  // Track left leg lifts
     rightLegCountRef, // Track right leg lifts
-    lastLegRef,       // Track which leg was last lifted ('left' or 'right')
+    lastLegRef,       // Refs for managing state without re-renders
     repCountRef,
     targetReps,
     handleExerciseComplete,
@@ -15,20 +15,18 @@ export const StandingMarch_repDetection = async (
     keypointsRef,
     feedbackLockRef
 ) => {
+    // Initialize refs if they don't exist
+    if (lastLegRef.current === undefined) {
+        lastLegRef.current = 'none'; // Start with no leg lifted
+    }
+    if (!feedbackLockRef.current) {
+        feedbackLockRef.current = { lastLiftTime: 0, locked: false };
+    }
+
     // Keypoints for both sides
     const keypoints = {
-        left: {
-            hip: null,
-            knee: null,
-            ankle: null,
-            shoulder: null
-        },
-        right: {
-            hip: null,
-            knee: null,
-            ankle: null,
-            shoulder: null
-        }
+        left: { hip: null, knee: null, ankle: null, shoulder: null },
+        right: { hip: null, knee: null, ankle: null, shoulder: null }
     };
 
     // Reset colors to default
@@ -67,66 +65,75 @@ export const StandingMarch_repDetection = async (
                 right: calculateLegAngle(keypoints.right)
             };
 
-            // Determine which leg should move next
-            // If both counts are 0, we're starting a new rep - use left leg first
-            const nextLeg = (leftLegCountRef.current === 0 && rightLegCountRef.current === 0) 
-                ? 'left' 
-                : (lastLegRef.current === 'left' ? 'right' : 'left');
-            const otherLeg = nextLeg === 'left' ? 'right' : 'left';
-            
-            console.log(`Next leg to move: ${nextLeg}, Last leg: ${lastLegRef.current}, Left count: ${leftLegCountRef.current}, Right count: ${rightLegCountRef.current}, Angles: L ${angles.left.toFixed(1)}°, R ${angles.right.toFixed(1)}°`);
+            // Determine which leg is currently lifted (if any)
+            const leftAngle = angles.left;
+            const rightAngle = angles.right;
+            const currentLeg = lastLegRef.current === 'none' ? 'left' : 
+                             lastLegRef.current === 'left' ? 'right' : 'left';
+            const otherLeg = currentLeg === 'left' ? 'right' : 'left';
+            const currentLegAngle = currentLeg === 'left' ? leftAngle : rightAngle;
+            const otherLegAngle = otherLeg === 'left' ? leftAngle : rightAngle;
 
-            // Check if the next leg is lifted high enough (knee above hip) and the other leg is down
-            const isLegLifted = angles[nextLeg] > 70;  // Higher threshold for standing
-            const isOtherLegDown = angles[otherLeg] < 30;
-            
+            console.log(`--- STATE ---`);
+            console.log(`Current leg to lift: ${currentLeg}`);
+            console.log(`Angles - Left: ${leftAngle.toFixed(1)}° (${leftAngle < 120 ? 'LIFTED' : 'down'}), Right: ${rightAngle.toFixed(1)}° (${rightAngle < 120 ? 'LIFTED' : 'down'})`);
+
+            // Check if we should switch legs
+            const isLegLifted = currentLegAngle < 120; // Threshold for lifted leg
+            const isOtherLegDown = otherLegAngle > 150; // Threshold for down leg
+
+            // Check if we're ready to detect a lift
             if (isLegLifted && isOtherLegDown) {
-                if (!feedbackLockRef.current) {
-                    // Count the leg lift
-                    if (nextLeg === 'left') leftLegCountRef.current++;
-                    else rightLegCountRef.current++;
-
-                    // Toggle the last leg reference
-                    lastLegRef.current = nextLeg;
-
-                    // Check if we've completed a full rep (both legs lifted)
-                    if (leftLegCountRef.current > 0 && rightLegCountRef.current > 0) {
-                        // Only increment the rep count when we complete a full Left-Right cycle
-                        repCountRef.current++;
-                        
-                        // Reset the leg counts for the next rep
-                        leftLegCountRef.current = 0;
-                        rightLegCountRef.current = 0;
-                        
-                        // Set up for the next rep to start with left leg
-                        lastLegRef.current = 'right';
-                        
-                        if (repCountRef.current >= targetReps) {
-                            handleExerciseComplete();
-                        } else {
-                            feedbackRef.current = `Good! ${repCountRef.current} reps completed. Next rep: left leg first`;
-                        }
-                    }
-
-                    // Update the feedback to show which leg to lift next
-                    if (leftLegCountRef.current === 1 && rightLegCountRef.current === 0) {
-                        feedbackRef.current = 'Good! Now right leg next';
-                    } else if (leftLegCountRef.current === 0 && rightLegCountRef.current === 0) {
-                        feedbackRef.current = `Rep ${repCountRef.current + 1}: Lift your left knee`;
-                    }
-                    feedbackLockRef.current = true;
-                    setTimeout(() => { feedbackLockRef.current = false; }, 1000);
+                // Count the lift
+                if (currentLeg === 'left') {
+                    leftLegCountRef.current++;
+                    console.log(`Left leg lifted! Count: ${leftLegCountRef.current}`);
+                    feedbackRef.current = 'Good! Now lift your right knee';
+                } else {
+                    rightLegCountRef.current++;
+                    console.log(`Right leg lifted! Count: ${rightLegCountRef.current}`);
+                    feedbackRef.current = 'Good! Now lift your left knee';
                 }
-            } else if (!feedbackLockRef.current) {
-                feedbackRef.current = `Lift your ${nextLeg} knee higher`;
+                
+                // Update the last lifted leg
+                lastLegRef.current = currentLeg;
+                
+                // Check if we've completed a full rep (both legs lifted in sequence)
+                if (leftLegCountRef.current > 0 && rightLegCountRef.current > 0) {
+                    // Complete one full rep
+                    repCountRef.current++;
+                    console.log(`Rep ${repCountRef.current} completed!`);
+                    feedbackRef.current = `Great! Rep ${repCountRef.current} done. Next rep: lift your left knee`;
+                    
+                    // Reset the state for the next rep
+                    leftLegCountRef.current = 0;
+                    rightLegCountRef.current = 0;
+                    lastLegRef.current = 'none';  // Reset to start new rep
+                    
+                    // If we've reached the target reps, complete the exercise
+                    if (repCountRef.current >= targetReps) {
+                        handleExerciseComplete(repCountRef.current);
+                        return; // Exit early if exercise is complete
+                    } else {
+                        feedbackRef.current = `Good! ${repCountRef.current} reps completed. Next rep: left leg first`;
+                        console.log('--- STARTING NEW REP ---');
+                    }
+                }
+            } else {
+                // Only show "lift higher" if the leg is partially raised
+                if (currentLegAngle < 150 && currentLegAngle >= 120) {
+                    feedbackRef.current = `Lift your ${currentLeg} knee higher!`;
+                } else if (currentLegAngle >= 150 && otherLegAngle < 120) {
+                    // If the other leg is lifted when it shouldn't be
+                    feedbackRef.current = `Keep your ${otherLeg} leg down while lifting your ${currentLeg} knee`;
+                } else if (lastLegRef.current === 'none') {
+                    // Initial state - tell user to start with left leg
+                    feedbackRef.current = 'Start by lifting your left knee';
+                } else {
+                    // Default instruction
+                    feedbackRef.current = `Lift your ${currentLeg} knee`;
+                };
             }
-
-            // Visual feedback - highlight the leg that should move next
-            keypointColorsRef.current = {
-                [`${nextLeg}_hip`]: "#FF0000",
-                [`${nextLeg}_knee`]: "#FF0000",
-                [`${nextLeg}_ankle`]: "#FF0000"
-            };
         } else {
             feedbackRef.current = "Please ensure your hips and knees are visible in the frame";
             keypointsRef.current = [];
@@ -145,7 +152,7 @@ export const StandingMarch_repDetection = async (
 
 // Helper function to calculate leg angle (hip-knee-ankle)
 const calculateLegAngle = (leg) => {
-    if (!leg.hip || !leg.knee || !leg.ankle) return 0;
+    if (!leg.hip || !leg.knee || !leg.ankle) return 180;
     
     const angle = calculateInteriorAngle(
         { x: leg.hip.x, y: leg.hip.y },
@@ -153,7 +160,7 @@ const calculateLegAngle = (leg) => {
         { x: leg.ankle.x, y: leg.ankle.y }
     );
     
-    return angle || 0;
+    return isNaN(angle) ? 180 : angle;
 };
 
 export default StandingMarch_repDetection;
