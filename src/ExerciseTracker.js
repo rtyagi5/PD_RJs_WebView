@@ -42,7 +42,7 @@ const ExerciseTracker = ({
   // Refs specifically for Seated March
   const leftLegCountRef = useRef(0);      // Track left leg lifts
   const rightLegCountRef = useRef(0);     // Track right leg lifts
-  const lastLegRef = useRef('right');      // Start with 'right' so the first prompt is 'left' leg
+  const lastLegRef = useRef('left');      // Start with 'right' so the first prompt is 'left' leg
   const keypointsRef = useRef([]);
   const keypointColorsRef = useRef("aqua");
   const segmentColorsRef = useRef("aqua");
