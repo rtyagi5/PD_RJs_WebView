@@ -34,6 +34,8 @@ export const SeatedMarch_repDetection = async (
     // Reset colors to default
     keypointColorsRef.current = "#66FF00";
     segmentColorsRef.current = "#66FF00";
+    
+    let angles = { left: 0, right: 0 };
 
     if (poses.length > 0 && poses[0].keypoints) {
         const poseKeypoints = poses[0].keypoints;
@@ -57,7 +59,7 @@ export const SeatedMarch_repDetection = async (
             ];
 
             // Calculate angles for both legs
-            const angles = {
+            angles = {
                 left: calculateLegAngle(keypoints.left),
                 right: calculateLegAngle(keypoints.right)
             };
