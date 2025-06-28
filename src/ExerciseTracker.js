@@ -8,6 +8,7 @@ import { MiniSquats_repDetection } from './MiniSquats';
 import { LAQ_repDetection } from './LongArcQuad'; 
 import { StandingStraightUp_detection } from './StandingStraightUp';
 import { SeatedMarch_repDetection } from './SeatedMarch';
+import { StandingMarch_repDetection } from './StandingMarch';
 import { drawCanvas,sendUpdates } from './utilities';
 import VideoRecorder from './VideoRecorder'; 
 import SkeletonRecorder from './SkeletonRecorder'; 
@@ -41,7 +42,7 @@ const ExerciseTracker = ({
   // Refs specifically for Seated March
   const leftLegCountRef = useRef(0);      // Track left leg lifts
   const rightLegCountRef = useRef(0);     // Track right leg lifts
-  const lastLegRef = useRef('right');      // Start with right so first lift is left
+  const lastLegRef = useRef('right');      // Start with 'right' so the first prompt is 'left' leg
   const keypointsRef = useRef([]);
   const keypointColorsRef = useRef("aqua");
   const segmentColorsRef = useRef("aqua");
@@ -199,6 +200,22 @@ const ExerciseTracker = ({
             );
           } else if (exerciseType === "SeatedMarch") {
             exerciseData = await SeatedMarch_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              leftLegCountRef,      // Pass left leg counter
+              rightLegCountRef,     // Pass right leg counter
+              lastLegRef,           // Pass last leg reference
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,      
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef
+            );
+          } else if (exerciseType === "StandingMarch") {
+            exerciseData = await StandingMarch_repDetection(
               poses,
               side,
               feedbackRef,

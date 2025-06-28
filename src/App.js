@@ -95,7 +95,8 @@ function App() {
               <option value="MiniSquats">Mini Squats</option>
               <option value="LongArcQuad">Long Arc Quad</option>
               <option value="SeatedMarch">Seated March</option>
-              <option value="StandingStraightUp">Standing Straight Up</option>  {/* New Option */}
+              <option value="StandingMarch">Standing March</option>
+              <option value="StandingStraightUp">Standing Straight Up</option>
               {/* Add more exercises as needed */}
             </select>
             <button onClick={handleStartExercise}>

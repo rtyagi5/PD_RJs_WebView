@@ -2,7 +2,7 @@ import { calculateInteriorAngle } from './utilities';
 
 export const SeatedMarch_repDetection = async (
     poses,
-    side,  // We'll still receive side for initial setup, but will track both
+    side,  // Not used in this exercise since we alternate legs automatically
     feedbackRef,
     leftLegCountRef,  // Track left leg lifts
     rightLegCountRef, // Track right leg lifts
@@ -62,9 +62,11 @@ export const SeatedMarch_repDetection = async (
                 right: calculateLegAngle(keypoints.right)
             };
 
-            // Determine which leg should move next
+            // Determine which leg should move next (alternate from last moved leg)
             const nextLeg = lastLegRef.current === 'left' ? 'right' : 'left';
             const otherLeg = nextLeg === 'left' ? 'right' : 'left';
+            
+            console.log(`Next leg to move: ${nextLeg}, Last leg: ${lastLegRef.current}`);
 
             // Check if the next leg is lifted high enough and the other leg is down
             if (angles[nextLeg] > 60 && angles[otherLeg] < 30) {
@@ -86,11 +88,13 @@ export const SeatedMarch_repDetection = async (
                         }
                     }
 
+                    // Update the feedback to show which leg to lift next (opposite of lastLegRef)
                     feedbackRef.current = `Good! Now ${nextLeg === 'left' ? 'right' : 'left'} leg next`;
                     feedbackLockRef.current = true;
                     setTimeout(() => { feedbackLockRef.current = false; }, 1000);
                 }
             } else if (!feedbackLockRef.current) {
+                // Update the feedback to show which leg to lift (nextLeg is the one that needs to move)
                 feedbackRef.current = `Lift your ${nextLeg} knee higher`;
             }
 
