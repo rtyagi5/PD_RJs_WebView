@@ -63,10 +63,13 @@ export const SeatedMarch_repDetection = async (
             };
 
             // Determine which leg should move next (alternate from last moved leg)
-            const nextLeg = lastLegRef.current === 'left' ? 'right' : 'left';
+            // If both counts are 0, we're starting a new rep - use left leg first
+            const nextLeg = (leftLegCountRef.current === 0 && rightLegCountRef.current === 0) 
+                ? 'left' 
+                : (lastLegRef.current === 'left' ? 'right' : 'left');
             const otherLeg = nextLeg === 'left' ? 'right' : 'left';
             
-            console.log(`Next leg to move: ${nextLeg}, Last leg: ${lastLegRef.current}`);
+            console.log(`Next leg to move: ${nextLeg}, Last leg: ${lastLegRef.current}, Left count: ${leftLegCountRef.current}, Right count: ${rightLegCountRef.current}`);
 
             // Check if the next leg is lifted high enough and the other leg is down
             if (angles[nextLeg] > 60 && angles[otherLeg] < 30) {
@@ -100,7 +103,7 @@ export const SeatedMarch_repDetection = async (
                     // Update the feedback to show which leg to lift next
                     if (leftLegCountRef.current === 1 && rightLegCountRef.current === 0) {
                         feedbackRef.current = 'Good! Now right leg next';
-                    } else {
+                    } else if (leftLegCountRef.current === 0 && rightLegCountRef.current === 0) {
                         feedbackRef.current = `Rep ${repCountRef.current + 1}: Lift your left knee`;
                     }
                     feedbackLockRef.current = true;
@@ -127,7 +130,10 @@ export const SeatedMarch_repDetection = async (
     return {
         keypoints: keypointsRef.current,
         keypointColors: keypointColorsRef.current,
-        segmentColors: segmentColorsRef.current
+        segmentColors: segmentColorsRef.current,
+        leftKneeAngle: angles ? angles.left : undefined,
+        rightKneeAngle: angles ? angles.right : undefined,
+        repCount: repCountRef.current
     };
 };
 

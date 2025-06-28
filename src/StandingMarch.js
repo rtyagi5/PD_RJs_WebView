@@ -65,11 +65,14 @@ export const StandingMarch_repDetection = async (
                 right: calculateLegAngle(keypoints.right)
             };
 
-            // Determine which leg should move next (alternate from last moved leg)
-            const nextLeg = lastLegRef.current === 'left' ? 'right' : 'left';
+            // Determine which leg should move next
+            // If both counts are 0, we're starting a new rep - use left leg first
+            const nextLeg = (leftLegCountRef.current === 0 && rightLegCountRef.current === 0) 
+                ? 'left' 
+                : (lastLegRef.current === 'left' ? 'right' : 'left');
             const otherLeg = nextLeg === 'left' ? 'right' : 'left';
             
-            console.log(`Next leg to move: ${nextLeg}, Last leg: ${lastLegRef.current}, Angles: L ${angles.left.toFixed(1)}°, R ${angles.right.toFixed(1)}°`);
+            console.log(`Next leg to move: ${nextLeg}, Last leg: ${lastLegRef.current}, Left count: ${leftLegCountRef.current}, Right count: ${rightLegCountRef.current}, Angles: L ${angles.left.toFixed(1)}°, R ${angles.right.toFixed(1)}°`);
 
             // Check if the next leg is lifted high enough (knee above hip) and the other leg is down
             const isLegLifted = angles[nextLeg] > 70;  // Higher threshold for standing
@@ -106,7 +109,7 @@ export const StandingMarch_repDetection = async (
                     // Update the feedback to show which leg to lift next
                     if (leftLegCountRef.current === 1 && rightLegCountRef.current === 0) {
                         feedbackRef.current = 'Good! Now right leg next';
-                    } else {
+                    } else if (leftLegCountRef.current === 0 && rightLegCountRef.current === 0) {
                         feedbackRef.current = `Rep ${repCountRef.current + 1}: Lift your left knee`;
                     }
                     feedbackLockRef.current = true;
@@ -131,7 +134,10 @@ export const StandingMarch_repDetection = async (
     return {
         keypoints: keypointsRef.current,
         keypointColors: keypointColorsRef.current,
-        segmentColors: segmentColorsRef.current
+        segmentColors: segmentColorsRef.current,
+        leftKneeAngle: angles ? angles.left : undefined,
+        rightKneeAngle: angles ? angles.right : undefined,
+        repCount: repCountRef.current
     };
 };
 
