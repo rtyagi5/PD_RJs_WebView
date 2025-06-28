@@ -71,33 +71,38 @@ export const SeatedMarch_repDetection = async (
             // Check if the next leg is lifted high enough and the other leg is down
             if (angles[nextLeg] > 60 && angles[otherLeg] < 30) {
                 if (!feedbackLockRef.current) {
-                    // Count the rep when the leg is lifted
+                    // Count the leg lift
                     if (nextLeg === 'left') leftLegCountRef.current++;
                     else rightLegCountRef.current++;
 
                     // Toggle the last leg reference
                     lastLegRef.current = nextLeg;
 
-                    // Count a full rep when both legs have completed their lifts
+                    // Check if we've completed a full rep (both legs lifted)
                     if (leftLegCountRef.current > 0 && rightLegCountRef.current > 0) {
-                        const completedReps = Math.min(leftLegCountRef.current, rightLegCountRef.current);
-                        repCountRef.current = completedReps;
+                        // Only increment the rep count when we complete a full Left-Right cycle
+                        repCountRef.current++;
                         
-                        // Reset the leg counts for the next rep while maintaining the Left-Right pattern
-                        if (completedReps > 0) {
-                            leftLegCountRef.current -= completedReps;
-                            rightLegCountRef.current -= completedReps;
-                            // Always start with left leg for the next rep to maintain Left-Right pattern
-                            lastLegRef.current = 'right'; // This will make nextLeg = 'left' for the next rep
-                        }
+                        // Reset the leg counts for the next rep
+                        leftLegCountRef.current = 0;
+                        rightLegCountRef.current = 0;
+                        
+                        // Set up for the next rep to start with left leg
+                        lastLegRef.current = 'right';
                         
                         if (repCountRef.current >= targetReps) {
                             handleExerciseComplete();
+                        } else {
+                            feedbackRef.current = `Good! ${repCountRef.current} reps completed. Next rep: left leg first`;
                         }
                     }
 
-                    // Update the feedback to show which leg to lift next (opposite of lastLegRef)
-                    feedbackRef.current = `Good! Now ${nextLeg === 'left' ? 'right' : 'left'} leg next`;
+                    // Update the feedback to show which leg to lift next
+                    if (leftLegCountRef.current === 1 && rightLegCountRef.current === 0) {
+                        feedbackRef.current = 'Good! Now right leg next';
+                    } else {
+                        feedbackRef.current = `Rep ${repCountRef.current + 1}: Lift your left knee`;
+                    }
                     feedbackLockRef.current = true;
                     setTimeout(() => { feedbackLockRef.current = false; }, 1000);
                 }
