@@ -83,6 +83,14 @@ export const SeatedMarch_repDetection = async (
                         const completedReps = Math.min(leftLegCountRef.current, rightLegCountRef.current);
                         repCountRef.current = completedReps;
                         
+                        // Reset the leg counts for the next rep while maintaining the Left-Right pattern
+                        if (completedReps > 0) {
+                            leftLegCountRef.current -= completedReps;
+                            rightLegCountRef.current -= completedReps;
+                            // Always start with left leg for the next rep to maintain Left-Right pattern
+                            lastLegRef.current = 'right'; // This will make nextLeg = 'left' for the next rep
+                        }
+                        
                         if (repCountRef.current >= targetReps) {
                             handleExerciseComplete();
                         }
