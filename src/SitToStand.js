@@ -45,20 +45,22 @@ export const SitStand_repDetection = (
                     if (!feedbackLockRef.current) {
 
                     // Sit Lowered Logic (when sitting down)
-                    if (kneeAngle > 70 && kneeAngle < 110 && 
-                        spineAngle >= 70 && spineAngle <= 110) {
-                            keypointColorsRef.current="#66FF00";
-                            segmentColorsRef.current="#66FF00";
+                    if (kneeAngle > 60 && kneeAngle < 120 && 
+                        spineAngle >= 60 && spineAngle <= 120) {
+                            keypointColorsRef.current = "#66FF00";
+                            segmentColorsRef.current = "#66FF00";
+                            
                         if (!newSitLoweredFlag) {
                             newSitLoweredFlag = true;
                             if (newSitLoweredCount === 0) {
                                 newSitLoweredCount = 1;
                                 feedbackRef.current = "Sit-down started";
-                                // console.log("Sit-down 1 detected");
+                                console.log(`Sit-down 1 detected - Knee: ${kneeAngle.toFixed(1)}°, Spine: ${spineAngle.toFixed(1)}°`);
                             } else if (newSitLoweredCount === 1 && newSitUpCount === 1) {
                                 newSitLoweredCount = 2;
                                 feedbackRef.current = "Sit-down complete";
-                                // console.log("Sit-down 2 detected");
+                                console.log(`Sit-down 2 detected - Knee: ${kneeAngle.toFixed(1)}°, Spine: ${spineAngle.toFixed(1)}°`);
+                                console.log(`State - Lowered: ${newSitLoweredCount}, Stood: ${newSitUpCount}, Flag: ${newSitLoweredFlag}`);
                             }
                         }
                     }
@@ -71,14 +73,15 @@ export const SitStand_repDetection = (
                     }
 
                     // Sit Up Logic (when standing up)
-                    else if (kneeAngle > 150 && kneeAngle <= 180) {
-                        keypointColorsRef.current="#66FF00";
-                        segmentColorsRef.current="#66FF00";
-                        if (newSitLoweredCount === 1) {
-                            if (newSitUpCount === 0) {
-                                newSitUpCount = 1;
-                                feedbackRef.current = "Standing detected";
-                            }
+                    else if (kneeAngle > 140 && kneeAngle <= 190) {  // More lenient angle range
+                        keypointColorsRef.current = "#66FF00";
+                        segmentColorsRef.current = "#66FF00";
+                        
+                        if (newSitLoweredCount === 1 && newSitUpCount === 0) {
+                            newSitUpCount = 1;
+                            feedbackRef.current = "Standing detected";
+                            console.log(`Standing detected - Knee: ${kneeAngle.toFixed(1)}°, Spine: ${spineAngle.toFixed(1)}°`);
+                            console.log(`State - Lowered: ${newSitLoweredCount}, Stood: ${newSitUpCount}, Flag: ${newSitLoweredFlag}`);
                         }
                         newSitLoweredFlag = false;
                     }
@@ -91,23 +94,25 @@ export const SitStand_repDetection = (
                         segmentColorsRef.current="red";
                       }
                     }
-                    // Rep Count Logic
-                    if (newSitUpCount === 1 && newSitLoweredCount === 2 && kneeAngle > 70 && kneeAngle < 100) {
+                    // Rep Count Logic - More lenient angle check
+                    if (newSitUpCount === 1 && newSitLoweredCount === 2 && kneeAngle > 60 && kneeAngle < 120) {
                         if (repCountRef.current < targetReps) {
                             repCountRef.current++;
                             feedbackRef.current = `${repCountRef.current} Rep`;
-                            console.log("Repetition completed");
+                            console.log(`[REP COUNT] ${repCountRef.current} of ${targetReps} completed`);
+                            console.log(`Repetition completed - Knee: ${kneeAngle.toFixed(1)}°, Spine: ${spineAngle.toFixed(1)}°`);
                         }
 
                         // Activate the feedback lock
                         feedbackLockRef.current = true;
 
-                        // Release the lock after 2 seconds
+                        // Release the lock after a shorter delay
                         setTimeout(() => {
                             feedbackLockRef.current = false;
-                        }, 2000); // Adjust the duration as needed
+                            console.log("Reset movement tracking");
+                        }, 500); // Reduced from 2000ms to 500ms for faster response
 
-
+                        // Reset state
                         newSitLoweredCount = 0;
                         newSitUpCount = 0;
                         newSitLoweredFlag = false;
