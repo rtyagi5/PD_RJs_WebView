@@ -27,19 +27,19 @@ function App() {
   const manageExerciseData = async () => {
 
 
-    // // For local development - bypass token check
-    // if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
-    //   const defaultReps = parseInt(process.env.REACT_APP_DEFAULT_REPS) || 5;
-    //   const defaultSide = process.env.REACT_APP_DEFAULT_SIDE || 'left';
-    //   const defaultExercise = process.env.REACT_APP_DEFAULT_EXERCISE || 'SideArmRaise';
-    //   setTargetReps(defaultReps);
-    //   setSide(defaultSide);
-    //   setExerciseType(defaultExercise); // set exercise type
-    //   setIsDetecting(true); // Start detection automatically
-    //   setIsVideoRecording(true);   // video recording
-    //   setIsSkeletonRecording(true);   // skeleton recording
-    //   return;
-    // } 
+    // For local development - bypass token check
+    if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
+      const defaultReps = parseInt(process.env.REACT_APP_DEFAULT_REPS) || 5;
+      const defaultSide = process.env.REACT_APP_DEFAULT_SIDE || 'left';
+      const defaultExercise = process.env.REACT_APP_DEFAULT_EXERCISE || 'SideArmRaise';
+      setTargetReps(defaultReps);
+      setSide(defaultSide);
+      setExerciseType(defaultExercise); // set exercise type
+      setIsDetecting(true); // Start detection automatically
+      setIsVideoRecording(true);   // video recording
+      setIsSkeletonRecording(true);   // skeleton recording
+      return;
+    } 
 
 
 
