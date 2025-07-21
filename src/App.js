@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import "./App.css";
 import ExerciseTracker from "./ExerciseTracker";
 import { useLocation } from "react-router-dom";
-import {jwtDecode} from "jwt-decode";
+import { jwtDecode } from "jwt-decode";
 import axios from "axios";
 import { getServiceUrl } from "./config";
 export function useQuery() {
@@ -28,7 +28,7 @@ function App() {
     try {
       const token = query.get("token");
       const decodeResponse = jwtDecode(token)
-      if(decodeResponse) {
+      if (decodeResponse) {
         const repsFromURL = decodeResponse?.reps
         const sideFromURL = decodeResponse?.side
         const exerciseTypeFromURL = decodeResponse?.exerciseType
@@ -38,11 +38,12 @@ function App() {
           }
         });
         const details = activity.data?.data
-        if(details?.status == "completed") {
-           setDisplayMessage("Activity is either completed or expired. Please start other exercise.")
-           return
+        if (details?.status == "completed") {
+          setDisplayMessage("Activity is either completed or expired. Please start other exercise.")
+          return
         }
-        
+
+        console.log("exerciseTypeFromURL", exerciseTypeFromURL)
         setActivityData(decodeResponse);
         if (repsFromURL && sideFromURL && exerciseTypeFromURL) {
           setTargetReps(parseInt(repsFromURL));
@@ -55,7 +56,7 @@ function App() {
       } else {
         setDisplayMessage("Cannot initate exercise. Please contact support")
       }
-    } catch(err) {
+    } catch (err) {
       setDisplayMessage("Cannot initate exercise. Please contact support")
     }
   }
@@ -69,39 +70,39 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-      {displayMessage ? displayMessage : 
-        !isDetecting && (
-          <div style={{ position: "absolute", bottom: 10, left: 10 }}>
-            <input
-              type="number"
-              value={targetReps}
-              onChange={(e) => setTargetReps(parseInt(e.target.value))}
-              placeholder="Enter number of reps"
-            />
-            {/* Show side selection for all exercises except "SelectExercise" */}
-            {exerciseType !== "SelectExercise" && (
-              <select value={side} onChange={(e) => setSide(e.target.value)}>
-                <option value="left">Left</option>
-                <option value="right">Right</option>
+        {displayMessage ? displayMessage :
+          !isDetecting && (
+            <div style={{ position: "absolute", bottom: 10, left: 10 }}>
+              <input
+                type="number"
+                value={targetReps}
+                onChange={(e) => setTargetReps(parseInt(e.target.value))}
+                placeholder="Enter number of reps"
+              />
+              {/* Show side selection for all exercises except "SelectExercise" */}
+              {exerciseType !== "SelectExercise" && (
+                <select value={side} onChange={(e) => setSide(e.target.value)}>
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                </select>
+              )}
+              <select
+                value={exerciseType}
+                onChange={(e) => setExerciseType(e.target.value)}
+              >
+                <option value="SelectExercise">Select Exercise</option>
+                <option value="SideArmRaise">Side Arm Raise</option>
+                <option value="SitToStand">Sit to Stand</option>
+                <option value="MiniSquats">Mini Squats</option>
+                <option value="LongArcQuad">Long Arc Quad</option>
+                <option value="StandingStraightUp">Standing Straight Up</option>  {/* New Option */}
+                {/* Add more exercises as needed */}
               </select>
-            )}
-            <select 
-              value={exerciseType} 
-              onChange={(e) => setExerciseType(e.target.value)}
-            >
-              <option value="SelectExercise">Select Exercise</option>
-              <option value="SideArmRaise">Side Arm Raise</option>
-              <option value="SitToStand">Sit to Stand</option>
-              <option value="MiniSquats">Mini Squats</option>
-              <option value="LongArcQuad">Long Arc Quad</option>
-              <option value="StandingStraightUp">Standing Straight Up</option>  {/* New Option */}
-              {/* Add more exercises as needed */}
-            </select>
-            <button onClick={handleStartExercise}>
-              Start Exercise
-            </button>
-          </div>
-        )}
+              <button onClick={handleStartExercise}>
+                Start Exercise
+              </button>
+            </div>
+          )}
         {isDetecting && (
           <ExerciseTracker
             exerciseType={exerciseType}
@@ -110,14 +111,14 @@ function App() {
             isDetecting={isDetecting}
             setIsDetecting={setIsDetecting}
             isVideoRecording={isVideoRecording}
-            setIsVideoRecording={setIsVideoRecording}  
+            setIsVideoRecording={setIsVideoRecording}
             isSkeletonRecording={isSkeletonRecording}
             setIsSkeletonRecording={setIsSkeletonRecording}
             setDisplayMessage={setDisplayMessage}
             activityData={activityData}
           />
         )}
-     </header>
+      </header>
     </div>
   );
 }
