@@ -61,23 +61,23 @@ export function drawSegment([ay, ax], [by, bx], color, scale, ctx) {
 // }
 export function drawSkeleton(keypoints, minConfidence, ctx, scale = 1, keypoints_CC, segmentColor) {
   const adjacentKeyPoints = [
-      [5, 7], [7, 9], [6, 8], [8, 10],
-      [11, 13], [13, 15], [12, 14], [14, 16],
-      [11, 12], [5, 6], [5, 11], [6, 12]
+    [5, 7], [7, 9], [6, 8], [8, 10],
+    [11, 13], [13, 15], [12, 14], [14, 16],
+    [11, 12], [5, 6], [5, 11], [6, 12]
   ];
   // Ensure keypoints_CC is treated as an array
   const safeKeypointsCC = Array.isArray(keypoints_CC) ? keypoints_CC : [];
 
   adjacentKeyPoints.forEach(([i, j]) => {
-      const kp1 = keypoints[i];
-      const kp2 = keypoints[j];
-      if (kp1 && kp2 && kp1.score >= minConfidence && kp2.score >= minConfidence) {
-          const kp1Name = keypoints[i].name;
-          const kp2Name = keypoints[j].name;
-          // Check if both keypoints of the segment are in keypoints_CC
-          const color = (safeKeypointsCC.includes(kp1Name) && keypoints_CC.includes(kp2Name)) ? segmentColor : "aqua";
-          drawSegment([kp1.y, kp1.x], [kp2.y, kp2.x], color, scale, ctx);
-      }
+    const kp1 = keypoints[i];
+    const kp2 = keypoints[j];
+    if (kp1 && kp2 && kp1.score >= minConfidence && kp2.score >= minConfidence) {
+      const kp1Name = keypoints[i].name;
+      const kp2Name = keypoints[j].name;
+      // Check if both keypoints of the segment are in keypoints_CC
+      const color = (safeKeypointsCC.includes(kp1Name) && keypoints_CC.includes(kp2Name)) ? segmentColor : "aqua";
+      drawSegment([kp1.y, kp1.x], [kp2.y, kp2.x], color, scale, ctx);
+    }
   });
 }
 
@@ -106,14 +106,14 @@ export function drawSkeleton(keypoints, minConfidence, ctx, scale = 1, keypoints
 // }
 
 export function drawKeypoints(keypoints, minConfidence, ctx, scale = 1, keypoints_CC, color) {
- // Ensure keypoints_CC is treated as an array
- const safeKeypointsCC = Array.isArray(keypoints_CC) ? keypoints_CC : [];
+  // Ensure keypoints_CC is treated as an array
+  const safeKeypointsCC = Array.isArray(keypoints_CC) ? keypoints_CC : [];
   keypoints.forEach((keypoint) => {
-      if (keypoint && keypoint.score >= minConfidence) {
-          // Use the specified color if the keypoint is in keypoints_CC, otherwise use "aqua"
-          const drawColor = safeKeypointsCC.includes(keypoint.name) ? color : "aqua";
-          drawPoint(ctx, keypoint.y * scale, keypoint.x * scale, 4, drawColor);
-      }
+    if (keypoint && keypoint.score >= minConfidence) {
+      // Use the specified color if the keypoint is in keypoints_CC, otherwise use "aqua"
+      const drawColor = safeKeypointsCC.includes(keypoint.name) ? color : "aqua";
+      drawPoint(ctx, keypoint.y * scale, keypoint.x * scale, 4, drawColor);
+    }
   });
 }
 
@@ -178,7 +178,7 @@ export const drawCanvas = (poses, videoWidth, videoHeight, ctx, keypoints, keypo
   }
 };
 
-
+const updates = []
 export const sendUpdates = async (data, exerciseType, activityData) => {
   // Skip API calls in development mode
   // if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
@@ -188,7 +188,7 @@ export const sendUpdates = async (data, exerciseType, activityData) => {
   
   // Example config to determine which data points to include based on exerciseType
   const cacheKey = `${data.repCount}_${data?.feedback}`
-  if(messageCache[cacheKey]) {
+  if (messageCache[cacheKey]) {
     return
   }
   const exerciseDataConfig = {
@@ -218,10 +218,11 @@ export const sendUpdates = async (data, exerciseType, activityData) => {
     }
   });
 
-  if(sync) {
+  updates.push(filteredData);
+  if (data?.completionStatusRef) {
     const query = new URLSearchParams(window.location.search);
-    axios.post(`${getServiceUrl(activityData).EXERCISE_SERVICE}/activities/exercise-data`, {
-      ...filteredData,
+    await axios.post(`${getServiceUrl(activityData).EXERCISE_SERVICE}/activities/exercise-data`, {
+      updates,
       activity: activityData?.activity,
       activityType: "exercise"
     }, {
@@ -229,13 +230,13 @@ export const sendUpdates = async (data, exerciseType, activityData) => {
         Authorization: `Bearer ${query.get("token")}`,
         tenantId: activityData?.tenant
       }
-    }).catch((err)=> {
+    }).catch((err) => {
       console.log("failed in sending the data to server");
-    }).then((res)=> {
+    }).then((res) => {
       console.log("server sync success");
     })
   }
- 
+
   messageCache[cacheKey] = 1
 
   if (window.ReactNativeWebView) {
