@@ -177,15 +177,15 @@ export const drawCanvas = (poses, videoWidth, videoHeight, ctx, keypoints, keypo
     drawSkeleton(poses[0].keypoints, 0.3, ctx, 1, keypoints, segmentColors);
   }
 };
-
-const updates = []
+// to krrp update of all the reps and send on completion of the exercise
+const updates = [];
 export const sendUpdates = async (data, exerciseType, activityData) => {
   // Skip API calls in development mode
   // if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
   //   console.log('[DEV] Skipping API call in development mode');
   //   return;
   // }
-  
+
   // Example config to determine which data points to include based on exerciseType
   const cacheKey = `${data.repCount}_${data?.feedback}`
   if (messageCache[cacheKey]) {
