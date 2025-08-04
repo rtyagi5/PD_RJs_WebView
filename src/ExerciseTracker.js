@@ -408,21 +408,39 @@ const handleSkeletonRecordingComplete = async (videoUrl) => {
 };
 
 async function uploadVideo(file, type) {
+  // Skip upload in development mode
+  if (process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
+    console.log('[DEV] Skipping video upload in development mode');
+    return { success: true, message: 'Skipped in development mode' };
+  }
+
   const query = new URLSearchParams(window.location.search);
+  
+  if (!activityData?.tenant) {
+    console.error('Cannot upload video: Missing tenant data in activityData');
+    throw new Error('Missing tenant information');
+  }
+
   try {
+    const serviceUrl = getServiceUrl(activityData);
+    if (!serviceUrl?.USER_SERVICE) {
+      throw new Error('Invalid service URL configuration');
+    }
+
     const response = await axios.post(
-      `${getServiceUrl(activityData).USER_SERVICE}/files/stream`,
+      `${serviceUrl.USER_SERVICE}/files/stream`,
       file,
       {
         headers: {
           'Content-Type': 'application/octet-stream',
           Authorization: `Bearer ${query.get("token")}`,
-          tenantId: activityData?.tenant
+          tenantId: activityData.tenant
         },
         params: {
-          fileName: `${activityData?.activity}_${type}_${Date.now()}_exercise.webm`,
+          fileName: `${activityData.activity || 'exercise'}_${type}_${Date.now()}_exercise.webm`,
           isExerciseSync: true
         },
+        timeout: 30000 // 30 second timeout
       }
     );
 
@@ -430,6 +448,18 @@ async function uploadVideo(file, type) {
     return response.data;
   } catch (error) {
     console.error('Error uploading video: ', error);
+    if (error.response) {
+      // The request was made and the server responded with a status code
+      console.error('Response data:', error.response.data);
+      console.error('Response status:', error.response.status);
+      console.error('Response headers:', error.response.headers);
+    } else if (error.request) {
+      // The request was made but no response was received
+      console.error('No response received:', error.request);
+    } else {
+      // Something happened in setting up the request
+      console.error('Error:', error.message);
+    }
     throw error;
   }
 }
