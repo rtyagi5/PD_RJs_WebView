@@ -1,4 +1,5 @@
-import React from 'react';
+// Import common utility functions
+import { calculateInteriorAngle } from './utilities';
 
 // Track initialization state
 let hasInitialized = false;
@@ -70,31 +71,26 @@ export const StandingMarch_repDetection = async (
             keypoints[side].ankle = poseKeypoints.find(k => k.name === `${side}_ankle`);
         });
 
-        // Helper function to calculate angle between three points
-        const calculateAngle = (point1, point2, point3) => {
-            if (!point1 || !point2 || !point3) return 180;
-            
-            // Calculate vectors
-            const v1 = { x: point1.x - point2.x, y: point1.y - point2.y };
-            const v2 = { x: point3.x - point2.x, y: point3.y - point2.y };
-            
-            // Calculate dot product and magnitudes
-            const dot = v1.x * v2.x + v1.y * v2.y;
-            const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
-            const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
-            
-            // Calculate angle in degrees
-            let angle = Math.acos(Math.min(Math.max(dot / (mag1 * mag2), -1), 1)) * (180 / Math.PI);
-            
-            // Ensure angle is between 0 and 180
-            return isNaN(angle) ? 0 : angle;
-        };
-
-        // Calculate angles for a given side
+        // Calculate angles for both hips and knees using the common utility function
         const calculateAngles = (side) => {
-            const { shoulder, hip, knee, ankle } = keypoints[side];
-            const hipAngle = calculateAngle(shoulder, hip, knee);
-            const kneeAngle = calculateAngle(hip, knee, ankle);
+            const shoulder = keypoints[side].shoulder;
+            const hip = keypoints[side].hip;
+            const knee = keypoints[side].knee;
+            const ankle = keypoints[side].ankle;
+
+            // Calculate hip angle (shoulder-hip-knee)
+            const hipAngle = calculateInteriorAngle(
+                shoulder,
+                hip,
+                knee
+            ) || 180; // Default to 180 if calculation fails
+
+            // Calculate knee angle (hip-knee-ankle)
+            const kneeAngle = calculateInteriorAngle(
+                hip,
+                knee,
+                ankle
+            ) || 180; // Default to 180 if calculation fails
 
             return {
                 hip: hipAngle,
@@ -138,31 +134,25 @@ export const StandingMarch_repDetection = async (
             const LEG_SWITCH_COOLDOWN = 800; // ms to wait before allowing another leg switch
             
             // Angle thresholds for movement detection
-            // Using more conservative thresholds with hysteresis
-            const LIFTED_HIP_THRESHOLD = 145;      // Hip angle when lifted (more strict)
-            const LIFTED_KNEE_THRESHOLD = 135;     // Knee angle when lifted (more strict)
-            const LOWERED_HIP_THRESHOLD = 165;     // Hip angle when fully lowered
-            const LOWERED_KNEE_THRESHOLD = 160;    // Knee angle when fully lowered
+            // Adjusted to be more lenient and better for standing march
+            const LIFTED_HIP_THRESHOLD = 160;      // Hip angle when lifted (more lenient)
+            const LIFTED_KNEE_THRESHOLD = 150;     // Knee angle when lifted (more lenient)
+            const LOWERED_HIP_THRESHOLD = 170;     // Hip angle when fully lowered
+            const LOWERED_KNEE_THRESHOLD = 165;    // Knee angle when fully lowered
             
-            // Check if legs are lifted or lowered with more strict conditions
-            // A leg is considered lifted only if the other leg is clearly down
+            // Check if legs are lifted or lowered
+            // A leg is considered lifted if it's bent
             const isLeftLegLifted = leftHipAngle < LIFTED_HIP_THRESHOLD && 
-                                 leftKneeAngle < LIFTED_KNEE_THRESHOLD &&
-                                 rightKneeAngle > LOWERED_KNEE_THRESHOLD &&
-                                 rightHipAngle > LOWERED_HIP_THRESHOLD;
+                                 leftKneeAngle < LIFTED_KNEE_THRESHOLD;
                                   
             const isRightLegLifted = rightHipAngle < LIFTED_HIP_THRESHOLD && 
-                                  rightKneeAngle < LIFTED_KNEE_THRESHOLD &&
-                                  leftKneeAngle > LOWERED_KNEE_THRESHOLD &&
-                                  leftHipAngle > LOWERED_HIP_THRESHOLD;
+                                  rightKneeAngle < LIFTED_KNEE_THRESHOLD;
             
-            // A leg is considered lowered only if it's not lifted
-            const isLeftLegLowered = !isLeftLegLifted && 
-                                  leftHipAngle > LOWERED_HIP_THRESHOLD && 
+            // A leg is considered lowered if it's straight
+            const isLeftLegLowered = leftHipAngle > LOWERED_HIP_THRESHOLD && 
                                   leftKneeAngle > LOWERED_KNEE_THRESHOLD;
                                   
-            const isRightLegLowered = !isRightLegLifted && 
-                                   rightHipAngle > LOWERED_HIP_THRESHOLD && 
+            const isRightLegLowered = rightHipAngle > LOWERED_HIP_THRESHOLD && 
                                    rightKneeAngle > LOWERED_KNEE_THRESHOLD;
             
             // Track previous states for edge detection

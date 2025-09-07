@@ -245,11 +245,35 @@ export const sendUpdates = async (data, exerciseType, activityData) => {
   }
 };
 
-export const calculateDistance = (point1, point2) => {
-  if (point1 && point2) {
-    const dx = point1.x - point2.x;
-    const dy = point1.y - point2.y;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-  return 0;
-};
+export function calculateDistance(point1, point2) {
+  if (!point1 || !point2) return 0;
+  const dx = point1.x - point2.x;
+  const dy = point1.y - point2.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Calculates the midpoint between two points
+ * @param {Object} point1 - First point with x and y coordinates
+ * @param {Object} point2 - Second point with x and y coordinates
+ * @returns {Object} Midpoint coordinates {x, y}
+ */
+export function getMidpoint(point1, point2) {
+  if (!point1 || !point2) return null;
+  return {
+    x: (point1.x + point2.x) / 2,
+    y: (point1.y + point2.y) / 2
+  };
+}
+
+/**
+ * Calculates the slope between two points
+ * @param {Object} point1 - First point with x and y coordinates
+ * @param {Object} point2 - Second point with x and y coordinates
+ * @returns {number} Slope between the two points
+ */
+export function calculateSlope(point1, point2) {
+  if (!point1 || !point2) return 0;
+  if (Math.abs(point2.x - point1.x) < 0.0001) return Number.POSITIVE_INFINITY; // Vertical line
+  return (point2.y - point1.y) / (point2.x - point1.x);
+}

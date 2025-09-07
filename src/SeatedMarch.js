@@ -1,175 +1,390 @@
+// Import common utility functions
 import { calculateInteriorAngle } from './utilities';
+
+// Track initialization state
+let hasInitialized = false;
+
+// Create refs at the module level
+const lastLegSwitchTimeRef = { current: 0 };
 
 export const SeatedMarch_repDetection = async (
     poses,
-    side,  // Not used in this exercise since we alternate legs automatically
+    side,
     feedbackRef,
-    leftLegCountRef,  // Track left leg lifts
-    rightLegCountRef, // Track right leg lifts
-    lastLegRef,       // Track which leg was last lifted ('left' or 'right')
+    leftLegCountRef,
+    rightLegCountRef,
+    startLegRef,
     repCountRef,
     targetReps,
     handleExerciseComplete,
     keypointColorsRef,
     segmentColorsRef,
     keypointsRef,
-    feedbackLockRef
+    feedbackLockRef,
+    lastLegSwitchTime = lastLegSwitchTimeRef
 ) => {
-    // Initialize refs if they don't exist
-    if (lastLegRef.current === undefined) {
-        lastLegRef.current = 'none'; // Start with no leg lifted
+    // Initialize refs if not set
+    if (startLegRef.current === undefined) {
+        startLegRef.current = 'left';
     }
-    // Keypoints for both sides
-    const keypoints = {
-        left: {
-            hip: null,
-            knee: null,
-            ankle: null,
-            shoulder: null
-        },
-        right: {
-            hip: null,
-            knee: null,
-            ankle: null,
-            shoulder: null
-        }
+    if (!feedbackLockRef.current) {
+        feedbackLockRef.current = { locked: false };
+    }
+
+    // Track which leg we're currently working on
+    const currentLeg = startLegRef.current;
+    
+    // Track leg states with more descriptive values
+    const LEG_STATES = {
+        NONE: 0,    // Leg hasn't moved yet
+        LIFTED: 1,  // Leg is lifted
+        LOWERED: 2  // Leg has been lifted and lowered (complete movement)
     };
 
-    // Reset colors to default
-    keypointColorsRef.current = "#66FF00";
-    segmentColorsRef.current = "#66FF00";
-    
-    let angles = { left: 0, right: 0 };
+    // Only log initialization on first run
+    if (!hasInitialized) {
+        console.log(`[SeatedMarch] Starting exercise - Target: ${targetReps} reps`);
+        console.log(`[SeatedMarch] Starting with ${currentLeg} leg first`);
+        hasInitialized = true;
+    }
+
+    // Keypoints for both legs
+    const keypoints = {
+        left: { hip: null, knee: null, ankle: null, shoulder: null },
+        right: { hip: null, knee: null, ankle: null, shoulder: null }
+    };
+
+    // Thresholds for exercise detection
+    const THRESHOLDS = {
+        LIFTED_HIP_ANGLE: 100,     // Slightly reduced for better detection
+        LIFTED_KNEE_ANGLE: 80,     // Slightly reduced for better detection
+        LOWERED_HIP_ANGLE: 160,    // Slightly increased for better detection
+        LOWERED_KNEE_ANGLE: 160,   // Slightly increased for better detection
+        LEG_SWITCH_COOLDOWN: 1000,  // ms - time between leg switches
+        MIN_CONFIDENCE: 0.4,        // Slightly increased confidence threshold
+        MIN_KEYPOINTS: 3            // Minimum number of keypoints needed for a valid leg
+    };
+
+    // Extract keypoints from poses if available
+    if (poses[0]?.keypoints) {
+        keypoints.left.shoulder = poses[0].keypoints.find(k => k.name === 'left_shoulder');
+        keypoints.left.hip = poses[0].keypoints.find(k => k.name === 'left_hip');
+        keypoints.left.knee = poses[0].keypoints.find(k => k.name === 'left_knee');
+        keypoints.left.ankle = poses[0].keypoints.find(k => k.name === 'left_ankle');
+        keypoints.right.shoulder = poses[0].keypoints.find(k => k.name === 'right_shoulder');
+        keypoints.right.hip = poses[0].keypoints.find(k => k.name === 'right_hip');
+        keypoints.right.knee = poses[0].keypoints.find(k => k.name === 'right_knee');
+        keypoints.right.ankle = poses[0].keypoints.find(k => k.name === 'right_ankle');
+    }
+
+    // Initialize angles
+    const angles = {
+        left: { hip: 180, knee: 180 },
+        right: { hip: 180, knee: 180 }
+    };
 
     if (poses.length > 0 && poses[0].keypoints) {
         const poseKeypoints = poses[0].keypoints;
-        
+
         // Get all keypoints for both sides
         ['left', 'right'].forEach(side => {
+            keypoints[side].shoulder = poseKeypoints.find(k => k.name === `${side}_shoulder`);
             keypoints[side].hip = poseKeypoints.find(k => k.name === `${side}_hip`);
             keypoints[side].knee = poseKeypoints.find(k => k.name === `${side}_knee`);
             keypoints[side].ankle = poseKeypoints.find(k => k.name === `${side}_ankle`);
-            keypoints[side].shoulder = poseKeypoints.find(k => k.name === `${side}_shoulder`);
         });
 
-        // Check if all required keypoints are detected with good confidence
-        const allKeyPointsDetected = Object.values(keypoints.left).every(k => k && k.score > 0.3) &&
-                                    Object.values(keypoints.right).every(k => k && k.score > 0.3);
-
-        if (allKeyPointsDetected) {
-            keypointsRef.current = [
-                'left_hip', 'left_knee', 'left_ankle', 'left_shoulder',
-                'right_hip', 'right_knee', 'right_ankle', 'right_shoulder'
-            ];
-
-            // Calculate angles for both legs
-            angles = {
-                left: calculateLegAngle(keypoints.left),
-                right: calculateLegAngle(keypoints.right)
-            };
-
-            // Determine which leg to track
-            const currentLeg = lastLegRef.current === 'none' ? 'left' : 
-                             lastLegRef.current === 'left' ? 'right' : 'left';
-            const otherLeg = currentLeg === 'left' ? 'right' : 'left';
-            const currentLegAngle = currentLeg === 'left' ? angles.left : angles.right;
-            const otherLegAngle = otherLeg === 'left' ? angles.left : angles.right;
-
-            console.log(`--- STATE ---`);
-            console.log(`Current leg to lift: ${currentLeg}`);
-            console.log(`Angles - Left: ${angles.left.toFixed(1)}° (${angles.left > 60 ? 'LIFTED' : 'down'}), Right: ${angles.right.toFixed(1)}° (${angles.right > 60 ? 'LIFTED' : 'down'})`);
-
-            // Check if we should switch legs
-            const isLegLifted = currentLegAngle > 60; // Threshold for lifted leg (higher angle means more bent)
-            const isOtherLegDown = otherLegAngle < 30; // Threshold for down leg
-
-            // Check if we're ready to detect a lift
-            if (isLegLifted && isOtherLegDown) {
-                // Count the lift
-                if (currentLeg === 'left') {
-                    leftLegCountRef.current++;
-                    console.log(`Left leg lifted! Count: ${leftLegCountRef.current}`);
-                    feedbackRef.current = 'Good! Now lift your right knee';
-                } else {
-                    rightLegCountRef.current++;
-                    console.log(`Right leg lifted! Count: ${rightLegCountRef.current}`);
-                    feedbackRef.current = 'Good! Now lift your left knee';
-                }
-                
-                // Update the last lifted leg
-                lastLegRef.current = currentLeg;
-                
-                // Check if we've completed a full rep (both legs lifted in sequence)
-                if (leftLegCountRef.current > 0 && rightLegCountRef.current > 0) {
-                    // Complete one full rep
-                    repCountRef.current++;
-                    console.log(`Rep ${repCountRef.current} completed!`);
-                    feedbackRef.current = `Great! Rep ${repCountRef.current} done. Next rep: lift your left knee`;
-                    
-                    // Reset the state for the next rep
-                    leftLegCountRef.current = 0;
-                    rightLegCountRef.current = 0;
-                    lastLegRef.current = 'none';  // Reset to start new rep
-                    
-                    // If we've reached the target reps, complete the exercise
-                    if (repCountRef.current >= targetReps) {
-                        handleExerciseComplete(repCountRef.current);
-                        return; // Exit early if exercise is complete
-                    } else {
-                        feedbackRef.current = `Good! ${repCountRef.current} reps completed. Next rep: left leg first`;
-                        console.log('--- STARTING NEW REP ---');
-                    }
-                }
-            } else {
-                // Only show "lift higher" if the leg is partially raised
-                if (currentLegAngle > 30 && currentLegAngle <= 60) {
-                    feedbackRef.current = `Lift your ${currentLeg} knee higher!`;
-                } else if (currentLegAngle <= 30 && otherLegAngle > 60) {
-                    // If the other leg is lifted when it shouldn't be
-                    feedbackRef.current = `Keep your ${otherLeg} leg down while lifting your ${currentLeg} knee`;
-                } else if (lastLegRef.current === 'none') {
-                    // Initial state - tell user to start with left leg
-                    feedbackRef.current = 'Start by lifting your left knee';
-                } else {
-                    // Default instruction
-                    feedbackRef.current = `Lift your ${currentLeg} knee`;
-                }
+        // Calculate angles for both legs with validation
+        const calculateAngles = (side) => {
+            const parts = keypoints[side];
+            const angles = { hip: 180, knee: 180 };
+            
+            // Only calculate angles if we have enough confidence in the keypoints
+            const hasShoulder = parts.shoulder?.score > THRESHOLDS.MIN_CONFIDENCE;
+            const hasHip = parts.hip?.score > THRESHOLDS.MIN_CONFIDENCE;
+            const hasKnee = parts.knee?.score > THRESHOLDS.MIN_CONFIDENCE;
+            const hasAnkle = parts.ankle?.score > THRESHOLDS.MIN_CONFIDENCE;
+            
+            // Calculate hip angle (shoulder-hip-knee)
+            if (hasShoulder && hasHip && hasKnee) {
+                angles.hip = calculateInteriorAngle(
+                    parts.shoulder,
+                    parts.hip,
+                    parts.knee
+                ) || 180;
             }
 
-            // Visual feedback - highlight the leg that should move next
-            keypointColorsRef.current = {
-                [`${currentLeg}_hip`]: "#FF0000",
-                [`${currentLeg}_knee`]: "#FF0000",
-                [`${currentLeg}_ankle`]: "#FF0000"
-            };
+            // Calculate knee angle (hip-knee-ankle)
+            if (hasHip && hasKnee && hasAnkle) {
+                angles.knee = calculateInteriorAngle(
+                    parts.hip,
+                    parts.knee,
+                    parts.ankle
+                ) || 180;
+            }
 
+            return angles;
+        };
+
+        // Check if we have enough keypoints with good confidence
+        const hasGoodKeypoints = 
+            keypoints.left.hip?.score > THRESHOLDS.MIN_CONFIDENCE &&
+            keypoints.left.knee?.score > THRESHOLDS.MIN_CONFIDENCE &&
+            keypoints.right.hip?.score > THRESHOLDS.MIN_CONFIDENCE &&
+            keypoints.right.knee?.score > THRESHOLDS.MIN_CONFIDENCE;
+            
+        // Visual feedback for keypoint confidence
+        if (!hasGoodKeypoints) {
+            keypointColorsRef.current = '#FFA500'; // Orange for low confidence
+            segmentColorsRef.current = '#FFA500';
+            feedbackRef.current = 'Adjust position for better detection';
+        }
+
+        if (hasGoodKeypoints) {
+            // Update keypoints for visualization
+            keypointsRef.current = [
+                'left_shoulder', 'left_hip', 'left_knee', 'left_ankle',
+                'right_shoulder', 'right_hip', 'right_knee', 'right_ankle'
+            ];
+
+            // Set default colors
+            keypointColorsRef.current = 'aqua';
+            segmentColorsRef.current = 'aqua';
+
+            // Calculate angles for both legs
+            angles.left = calculateAngles('left');
+            angles.right = calculateAngles('right');
+            
+            // Log current angles for debugging
+            console.log(`[Angles] Left - Hip: ${angles.left.hip.toFixed(1)}°, Knee: ${angles.left.knee.toFixed(1)}° | ` +
+                      `Right - Hip: ${angles.right.hip.toFixed(1)}°, Knee: ${angles.right.knee.toFixed(1)}°`);
+
+            // Define leg movement detection with angle logging
+            const leftHipAngle = angles.left.hip;
+            const leftKneeAngle = angles.left.knee;
+            const rightHipAngle = angles.right.hip;
+            const rightKneeAngle = angles.right.knee;
+
+            // Check if legs are lifted or lowered with better state management
+            const isLeftLegLifted = leftKneeAngle < THRESHOLDS.LIFTED_KNEE_ANGLE && 
+                                 leftHipAngle < THRESHOLDS.LIFTED_HIP_ANGLE &&
+                                 leftKneeAngle > 0 && leftHipAngle > 0;  // Ensure valid angles
+                                  
+            const isRightLegLifted = rightKneeAngle < THRESHOLDS.LIFTED_KNEE_ANGLE && 
+                                  rightHipAngle < THRESHOLDS.LIFTED_HIP_ANGLE &&
+                                  rightKneeAngle > 0 && rightHipAngle > 0;  // Ensure valid angles
+            
+            // A leg is considered lowered if the knee is straight (large knee angle) and hip is extended (large hip angle)
+            const isLeftLegLowered = leftKneeAngle > THRESHOLDS.LOWERED_KNEE_ANGLE && 
+                                  leftHipAngle > THRESHOLDS.LOWERED_HIP_ANGLE;
+                                  
+            const isRightLegLowered = rightKneeAngle > THRESHOLDS.LOWERED_KNEE_ANGLE && 
+                                   rightHipAngle > THRESHOLDS.LOWERED_HIP_ANGLE;
+            
+            // Debug: Log state changes
+            if (isLeftLegLifted && leftLegCountRef.current !== LEG_STATES.LIFTED) {
+                console.log(`[${side}] Leg lifted - Hip: ${leftHipAngle.toFixed(1)}°, Knee: ${leftKneeAngle.toFixed(1)}°`);
+            }
+            if (isRightLegLifted && rightLegCountRef.current !== LEG_STATES.LIFTED) {
+                console.log(`[${side}] Leg lifted - Hip: ${rightHipAngle.toFixed(1)}°, Knee: ${rightKneeAngle.toFixed(1)}°`);
+            }
+            
+            // Track previous states for edge detection
+            const prevLeftLegState = leftLegCountRef.current;
+            const prevRightLegState = rightLegCountRef.current;
+            
+            // Enhanced debug logging for leg states
+            const leftState = isLeftLegLifted ? 'LIFTED' : isLeftLegLowered ? 'LOWERED' : 'MOVING';
+            const rightState = isRightLegLifted ? 'LIFTED' : isRightLegLowered ? 'LOWERED' : 'MOVING';
+            
+            // Log state changes with more context
+            if (leftState !== (window.lastLeftState || '') || rightState !== (window.lastRightState || '')) {
+                console.log(`[LEFT] Hip: ${leftHipAngle.toFixed(1)}° (${keypoints.left.hip?.score?.toFixed(2)}), ` +
+                          `Knee: ${leftKneeAngle.toFixed(1)}° (${keypoints.left.knee?.score?.toFixed(2)}) - ${leftState}`);
+                console.log(`[RIGHT] Hip: ${rightHipAngle.toFixed(1)}° (${keypoints.right.hip?.score?.toFixed(2)}), ` +
+                          `Knee: ${rightKneeAngle.toFixed(1)}° (${keypoints.right.knee?.score?.toFixed(2)}) - ${rightState}`);
+                window.lastLeftState = leftState;
+                window.lastRightState = rightState;
+            }
+            
+            // Only process if we're not locked and have good keypoint confidence
+            const hasGoodConfidence = 
+                keypoints.left.hip?.score > THRESHOLDS.MIN_CONFIDENCE &&
+                keypoints.left.knee?.score > THRESHOLDS.MIN_CONFIDENCE &&
+                keypoints.right.hip?.score > THRESHOLDS.MIN_CONFIDENCE &&
+                keypoints.right.knee?.score > THRESHOLDS.MIN_CONFIDENCE;
+                
+            if (!feedbackLockRef.current.locked && hasGoodConfidence) {
+                const now = Date.now();
+                const canSwitchLegs = now - lastLegSwitchTime.current > THRESHOLDS.LEG_SWITCH_COOLDOWN;
+                
+                // Handle left leg state changes
+                if (isLeftLegLifted && prevLeftLegState !== LEG_STATES.LIFTED) {
+                    leftLegCountRef.current = LEG_STATES.LIFTED;
+                    console.log(`[SeatedMarch] Left leg lifted (Hip: ${leftHipAngle.toFixed(1)}°, Knee: ${leftKneeAngle.toFixed(1)}°)`);
+                    feedbackRef.current = 'Left leg up';
+                    
+                    // Show left leg in green when lifted
+                    keypointColorsRef.current = '#00FF00';
+                    segmentColorsRef.current = '#00FF00';
+                    keypointsRef.current = ['left_hip', 'left_knee', 'left_ankle'];
+                    
+                    // Lock briefly to prevent rapid state changes
+                    feedbackLockRef.current.locked = true;
+                    setTimeout(() => {
+                        feedbackLockRef.current.locked = false;
+                    }, 300);
+                } 
+                else if (isLeftLegLowered && prevLeftLegState === LEG_STATES.LIFTED) {
+                    leftLegCountRef.current = LEG_STATES.LOWERED;
+                    console.log(`[SeatedMarch] Left leg lowered (Hip: ${leftHipAngle.toFixed(1)}°, Knee: ${leftKneeAngle.toFixed(1)}°)`);
+                    feedbackRef.current = 'Left leg down';
+                    
+                    // Reset colors to default
+                    keypointColorsRef.current = 'aqua';
+                    segmentColorsRef.current = 'aqua';
+                    keypointsRef.current = [];
+                    
+                    // Lock briefly to prevent rapid state changes
+                    feedbackLockRef.current.locked = true;
+                    setTimeout(() => {
+                        feedbackLockRef.current.locked = false;
+                    }, 300);
+                }
+
+                // Handle right leg state changes
+                if (isRightLegLifted && prevRightLegState !== LEG_STATES.LIFTED) {
+                    rightLegCountRef.current = LEG_STATES.LIFTED;
+                    console.log(`[SeatedMarch] Right leg lifted (Hip: ${rightHipAngle.toFixed(1)}°, Knee: ${rightKneeAngle.toFixed(1)}°)`);
+                    feedbackRef.current = 'Right leg up';
+                    
+                    // Show right leg in green when lifted
+                    keypointColorsRef.current = '#00FF00';
+                    segmentColorsRef.current = '#00FF00';
+                    keypointsRef.current = ['right_hip', 'right_knee', 'right_ankle'];
+                    
+                    // Lock briefly to prevent rapid state changes
+                    feedbackLockRef.current.locked = true;
+                    setTimeout(() => {
+                        feedbackLockRef.current.locked = false;
+                    }, 300);
+                }
+                else if (isRightLegLowered && prevRightLegState === LEG_STATES.LIFTED) {
+                    rightLegCountRef.current = LEG_STATES.LOWERED;
+                    console.log(`[SeatedMarch] Right leg lowered (Hip: ${rightHipAngle.toFixed(1)}°, Knee: ${rightKneeAngle.toFixed(1)}°)`);
+                    feedbackRef.current = 'Right leg down';
+                    
+                    // Reset colors to default
+                    keypointColorsRef.current = 'aqua';
+                    segmentColorsRef.current = 'aqua';
+                    keypointsRef.current = [];
+                    
+                    // Lock briefly to prevent rapid state changes
+                    feedbackLockRef.current.locked = true;
+                    setTimeout(() => {
+                        feedbackLockRef.current.locked = false;
+                    }, 300);
+                }
+
+                // Handle leg switching when current leg completes its movement
+                if (currentLeg === 'left' && leftLegCountRef.current === LEG_STATES.LOWERED && canSwitchLegs) {
+                    startLegRef.current = 'right';
+                    lastLegSwitchTime.current = now;
+                    feedbackRef.current = 'Now lift your right knee';
+                    console.log('[SeatedMarch] Switching to right leg');
+                }
+                else if (currentLeg === 'right' && rightLegCountRef.current === LEG_STATES.LOWERED && canSwitchLegs) {
+                    startLegRef.current = 'left';
+                    lastLegSwitchTime.current = now;
+                    
+                    // Check if we've completed a full rep (both legs lifted and lowered)
+                    if (leftLegCountRef.current === LEG_STATES.LOWERED && rightLegCountRef.current === LEG_STATES.LOWERED) {
+                        repCountRef.current++;
+                        console.log(`[SeatedMarch] Rep ${repCountRef.current} completed!`);
+                        feedbackRef.current = `Great! Rep ${repCountRef.current} of ${targetReps} completed`;
+                        
+                        // Reset leg states for next rep
+                        leftLegCountRef.current = LEG_STATES.NONE;
+                        rightLegCountRef.current = LEG_STATES.NONE;
+                        
+                        // If we've reached the target reps, complete the exercise
+                        if (repCountRef.current >= targetReps) {
+                            handleExerciseComplete(repCountRef.current);
+                            return {
+                                keypoints: keypointsRef.current,
+                                keypointColors: keypointColorsRef.current,
+                                segmentColors: segmentColorsRef.current,
+                                feedback: feedbackRef.current,
+                                leftLegCount: leftLegCountRef.current,
+                                rightLegCount: rightLegCountRef.current,
+                                repCount: repCountRef.current,
+                                isComplete: true
+                            };
+                        }
+                    } else {
+                        feedbackRef.current = 'Now lift your left knee';
+                    }
+                    
+                    console.log('[SeatedMarch] Switching to left leg');
+                }
+                
+                // Visual feedback for current leg to move
+                if (!isLeftLegLifted && !isLeftLegLowered && currentLeg === 'left') {
+                    feedbackRef.current = 'Lift your left knee higher';
+                    keypointColorsRef.current = '#FF0000';
+                    segmentColorsRef.current = '#FF0000';
+                    keypointsRef.current = ['left_hip', 'left_knee', 'left_ankle'];
+                }
+                else if (!isRightLegLifted && !isRightLegLowered && currentLeg === 'right') {
+                    feedbackRef.current = 'Lift your right knee higher';
+                    keypointColorsRef.current = '#FF0000';
+                    segmentColorsRef.current = '#FF0000';
+                    keypointsRef.current = ['right_hip', 'right_knee', 'right_ankle'];
+                }
+            }
         } else {
-            feedbackRef.current = "Please ensure your whole body is visible in the frame";
-            keypointsRef.current = [];
+            // Handle case when not all keypoints are detected
+            const missingKeypoints = [];
+            
+            ['left', 'right'].forEach(side => {
+                const hip = keypoints[`${side}_hip`];
+                const knee = keypoints[`${side}_knee`];
+                const ankle = keypoints[`${side}_ankle`];
+                const shoulder = keypoints[`${side}_shoulder`];
+                
+                if (!hip || !hip.score || hip.score < THRESHOLDS.MIN_CONFIDENCE) 
+                    missingKeypoints.push(`${side} hip`);
+                if (!knee || !knee.score || knee.score < THRESHOLDS.MIN_CONFIDENCE) 
+                    missingKeypoints.push(`${side} knee`);
+                if (!ankle || !ankle.score || ankle.score < THRESHOLDS.MIN_CONFIDENCE) 
+                    missingKeypoints.push(`${side} ankle`);
+                if (!shoulder || !shoulder.score || shoulder.score < THRESHOLDS.MIN_CONFIDENCE) 
+                    missingKeypoints.push(`${side} shoulder`);
+            });
+            
+            if (missingKeypoints.length > 0) {
+                console.warn(`Missing or low confidence keypoints: ${missingKeypoints.join(', ')}`);
+                feedbackRef.current = `Adjust position - can't detect: ${missingKeypoints.slice(0, 2).join(', ')}${missingKeypoints.length > 2 ? '...' : ''}`;
+                
+                // Reset colors to default
+                keypointColorsRef.current = '#FF0000';
+                segmentColorsRef.current = '#FF0000';
+                keypointsRef.current = [];
+            }
         }
     }
 
+    // Return the current state for the parent component
     return {
         keypoints: keypointsRef.current,
         keypointColors: keypointColorsRef.current,
         segmentColors: segmentColorsRef.current,
-        leftKneeAngle: angles ? angles.left : undefined,
-        rightKneeAngle: angles ? angles.right : undefined,
-        repCount: repCountRef.current
+        feedback: feedbackRef.current,
+        leftLegCount: leftLegCountRef.current,
+        rightLegCount: rightLegCountRef.current,
+        repCount: repCountRef.current,
+        isComplete: repCountRef.current >= targetReps
     };
-};
-
-// Helper function to calculate leg angle (hip-knee-ankle)
-const calculateLegAngle = (leg) => {
-    if (!leg.hip || !leg.knee || !leg.ankle) return 0;
-    
-    const angle = calculateInteriorAngle(
-        { x: leg.hip.x, y: leg.hip.y },
-        { x: leg.knee.x, y: leg.knee.y },
-        { x: leg.ankle.x, y: leg.ankle.y }
-    );
-    
-    return angle || 0;
 };
 
 export default SeatedMarch_repDetection;

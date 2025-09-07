@@ -9,6 +9,15 @@ import { LAQ_repDetection } from './LongArcQuad';
 import { StandingStraightUp_detection } from './StandingStraightUp';
 import { SeatedMarch_repDetection } from './SeatedMarch';
 import { StandingMarch_repDetection } from './StandingMarch';
+import SeatedCalfRaises_repDetection from './SeatedCalfRaises';
+import StandingCalfRaises_repDetection from './StandingCalfRaises';
+import SeatedDorsiflexion_repDetection from './SeatedDorsiflexion';
+import StandingDorsiflexion_repDetection from './StandingDorsiflexion';
+import BicepCurls_repDetection from './BicepCurls';
+import MiniLunges_repDetection from './MiniLunges';
+import LiftAndChops_repDetection from './LiftAndChops';
+import StepUps_repDetection from './StepUps';
+import WallPushUps_repDetection from './WallPushUps';
 import { drawCanvas,sendUpdates } from './utilities';
 import VideoRecorder from './VideoRecorder'; 
 import SkeletonRecorder from './SkeletonRecorder'; 
@@ -29,21 +38,25 @@ const ExerciseTracker = ({
   const detectorRef = useRef(null); // Store the detector here
   const [data, setData] = useState({}); // Store dynamic data here
   const feedbackRef = useRef("Initializing...");  // Use ref instead of state for feedback
-  const armLoweredCountRef = useRef(0);
-  const armUpCountRef = useRef(0);
-  const armLoweredFlagRef = useRef(false);
-  const repCountRef = useRef(0);
-  const fpsRef = useRef(0);
+  // Exercise tracking refs
+  const leftLegCountRef = useRef(0);      // Track left leg lifts
+  const rightLegCountRef = useRef(0);     // Track right leg lifts
+  const leftArmCountRef = useRef(0);      // Track left arm movements
+  const rightArmCountRef = useRef(0);     // Track right arm movements
+  const armLoweredCountRef = useRef(0);   // For arm lowering movement
+  const armUpCountRef = useRef(0);        // For arm raising movement
+  const armLoweredFlagRef = useRef(false); // Track if arm is lowered
+  const startLegRef = useRef(side || 'left'); // Initialize with the side prop, default to 'left'
+  const startArmRef = useRef(side || 'left'); // Initialize with the side prop, default to 'left'
+  const lastRepTimeRef = useRef(0);       // Track time of last rep
+  const repCountRef = useRef(0);          // Track total reps completed
+  const fpsRef = useRef(0);               // Track frames per second
+  const lastLegRef = useRef('none');      // Track the last leg that was lifted
+  
   // Refs for general exercise tracking
   const sitLoweredCountRef = useRef(0);   // For sit-down movement
   const sitUpCountRef = useRef(0);        // For stand-up movement
   const sitLoweredFlagRef = useRef(false); // For sit-down movement
-  
-  // Refs specifically for Seated March
-  const leftLegCountRef = useRef(0);      // Track left leg lifts
-  const rightLegCountRef = useRef(0);     // Track right leg lifts
-  const lastLegRef = useRef('left');  // Start with 'right' so the first prompt is 'left' leg
-  const startLegRef = useRef('left');     
   const keypointsRef = useRef([]);
   const keypointColorsRef = useRef("aqua");
   const segmentColorsRef = useRef("aqua");
@@ -189,6 +202,143 @@ const ExerciseTracker = ({
               keypointsRef,
               feedbackLockRef
             );
+          } else if (exerciseType === "SeatedCalfRaises") {
+            exerciseData = SeatedCalfRaises_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              leftLegCountRef,
+              rightLegCountRef,
+              startLegRef,
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef,
+              lastRepTimeRef
+            );
+          } else if (exerciseType === "StandingCalfRaises") {
+            exerciseData = StandingCalfRaises_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              leftLegCountRef,
+              rightLegCountRef,
+              startLegRef,
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef,
+              lastRepTimeRef
+            );
+          } else if (exerciseType === "SeatedDorsiflexion") {
+            exerciseData = SeatedDorsiflexion_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              leftLegCountRef,
+              rightLegCountRef,
+              startLegRef,
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef,
+              lastRepTimeRef
+            );
+          } else if (exerciseType === "StandingDorsiflexion") {
+            exerciseData = StandingDorsiflexion_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              leftLegCountRef,
+              rightLegCountRef,
+              startLegRef,
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef,
+              lastRepTimeRef
+            );
+          } else if (exerciseType === "MiniLunges") {
+            exerciseData = MiniLunges_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              leftLegCountRef,
+              rightLegCountRef,
+              startLegRef,
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef,
+              lastRepTimeRef
+            );
+          } else if (exerciseType === "SeatedDorsiflexion") {
+            exerciseData = SeatedDorsiflexion_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              leftLegCountRef,
+              rightLegCountRef,
+              startLegRef,
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef,
+              lastRepTimeRef
+            );
+          } else if (exerciseType === "BicepCurls") {
+            exerciseData = BicepCurls_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              leftArmCountRef,
+              rightArmCountRef,
+              startArmRef,
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef,
+              lastRepTimeRef
+            );
+          } else if (exerciseType === "LiftAndChops") {
+            exerciseData = LiftAndChops_repDetection(
+              poses,
+              side,
+              'lift', // Start with lift
+              feedbackRef,
+              leftArmCountRef,
+              rightArmCountRef,
+              startArmRef,
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef,
+              lastRepTimeRef
+            );
           } else if (exerciseType === "StandingStraightUp") {
             // Timer-based logic for StandingStraightUp
             exerciseData = StandingStraightUp_detection(
@@ -206,7 +356,7 @@ const ExerciseTracker = ({
               feedbackRef,
               leftLegCountRef,      // Pass left leg counter
               rightLegCountRef,     // Pass right leg counter
-              lastLegRef,           // Pass last leg reference
+              startLegRef,          // Pass startLegRef to control which leg starts first
               repCountRef,
               targetReps,
               handleExerciseComplete,

@@ -101,6 +101,7 @@ function App() {
               <select value={side} onChange={(e) => setSide(e.target.value)}>
                 <option value="left">Left</option>
                 <option value="right">Right</option>
+                <option value="both">Both</option>
               </select>
             )}
             <select 
@@ -115,6 +116,15 @@ function App() {
               <option value="SeatedMarch">Seated March</option>
               <option value="StandingMarch">Standing March</option>
               <option value="StandingStraightUp">Standing Straight Up</option>
+              <option value="SeatedDorsiflexion">Seated Dorsiflexion</option>
+              <option value="StandingDorsiflexion">Standing Dorsiflexion</option>
+              <option value="SeatedCalfRaises">Seated Calf Raises</option>
+              <option value="StandingCalfRaises">Standing Calf Raises</option>
+              <option value="BicepCurls">Bicep Curls</option>
+              <option value="MiniLunges">Mini Lunges</option>
+              <option value="LiftAndChops">Lift and Chops</option>
+              <option value="StepUps">Step Ups</option>
+              <option value="WallPushUps">Wall Push-Ups</option>
               {/* Add more exercises as needed */}
             </select>
             <button onClick={handleStartExercise}>
