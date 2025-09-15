@@ -163,7 +163,8 @@ export default function ExerciseTrackerRefactored({
 
   // Upload helper
   async function uploadVideo(file, type) {
-    if (process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') return { success: true };
+    //if (process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') return { success: true };
+    if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') return { success: true };
     const query = new URLSearchParams(window.location.search);
     if (!activityData?.tenant) throw new Error('Missing tenant information');
     const serviceUrl = getServiceUrl(activityData);
@@ -362,10 +363,14 @@ useEffect(() => {
     console.log('[Engine] built:', spec?.name ?? exerciseType, 'phases:', phaseList);
   }, [exerciseType, targetReps]);
 
-  // Auto-start detection locally
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') setIsDetecting?.(true);
-  }, []); 
+  // // Auto-start detection locally
+  // useEffect(() => {
+  //   if (process.env.NODE_ENV === 'development') setIsDetecting?.(true);
+  // }, []); 
+    // Auto-start detection locally
+    useEffect(() => {
+      if (process.env.NODE_ENV === 'production') setIsDetecting?.(true);
+    }, []); 
 
   // Detection loop
   useEffect(() => {

@@ -27,31 +27,31 @@ function App() {
 
   const manageExerciseData = async () => {
     // For local development - bypass token check
-    if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
-      console.log('Development mode active. Environment variables:', {
-        REACT_APP_DEFAULT_REPS: process.env.REACT_APP_DEFAULT_REPS,
-        REACT_APP_DEFAULT_SIDE: process.env.REACT_APP_DEFAULT_SIDE,
-        REACT_APP_DEFAULT_EXERCISE: process.env.REACT_APP_DEFAULT_EXERCISE,
-        REACT_APP_DEFAULT_VIDEO: process.env.REACT_APP_DEFAULT_VIDEO,
-        REACT_APP_DEFAULT_SKELETON: process.env.REACT_APP_DEFAULT_SKELETON
-      });
+    // if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
+    //   console.log('Development mode active. Environment variables:', {
+    //     REACT_APP_DEFAULT_REPS: process.env.REACT_APP_DEFAULT_REPS,
+    //     REACT_APP_DEFAULT_SIDE: process.env.REACT_APP_DEFAULT_SIDE,
+    //     REACT_APP_DEFAULT_EXERCISE: process.env.REACT_APP_DEFAULT_EXERCISE,
+    //     REACT_APP_DEFAULT_VIDEO: process.env.REACT_APP_DEFAULT_VIDEO,
+    //     REACT_APP_DEFAULT_SKELETON: process.env.REACT_APP_DEFAULT_SKELETON
+    //   });
       
-      const defaultReps = parseInt(process.env.REACT_APP_DEFAULT_REPS) || 5;
-      const defaultSide = process.env.REACT_APP_DEFAULT_SIDE || 'left';
-      const defaultExercise = process.env.REACT_APP_DEFAULT_EXERCISE || 'SideArmRaise';
-      const defaultVideo = process.env.REACT_APP_DEFAULT_VIDEO === 'true';
-      const defaultSkeleton = process.env.REACT_APP_DEFAULT_SKELETON === 'true';
+    //   const defaultReps = parseInt(process.env.REACT_APP_DEFAULT_REPS) || 5;
+    //   const defaultSide = process.env.REACT_APP_DEFAULT_SIDE || 'left';
+    //   const defaultExercise = process.env.REACT_APP_DEFAULT_EXERCISE || 'SideArmRaise';
+    //   const defaultVideo = process.env.REACT_APP_DEFAULT_VIDEO === 'true';
+    //   const defaultSkeleton = process.env.REACT_APP_DEFAULT_SKELETON === 'true';
       
-      console.log(`Setting up with exercise: ${defaultExercise}, reps: ${defaultReps}, side: ${defaultSide}`);
+    //   console.log(`Setting up with exercise: ${defaultExercise}, reps: ${defaultReps}, side: ${defaultSide}`);
       
-      setTargetReps(defaultReps);
-      setSide(defaultSide);
-      setExerciseType(defaultExercise);
-      setIsDetecting(true);
-      setIsVideoRecording(defaultVideo);
-      setIsSkeletonRecording(defaultSkeleton);
-      return;
-    }
+    //   setTargetReps(defaultReps);
+    //   setSide(defaultSide);
+    //   setExerciseType(defaultExercise);
+    //   setIsDetecting(true);
+    //   setIsVideoRecording(defaultVideo);
+    //   setIsSkeletonRecording(defaultSkeleton);
+    //   return;
+    // }
 
 
 
