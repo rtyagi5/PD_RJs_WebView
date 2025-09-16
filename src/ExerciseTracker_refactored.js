@@ -31,45 +31,45 @@ function getQueryNumber(...names) {
 
 // Format values for HUD/logs (string)
 function pretty(key, val) {
-    if (!Number.isFinite(val)) return '—';
-    const k = String(key || '').toLowerCase();
-    // For normalized/ratio-ish metrics or small magnitudes, show 2 decimals
-    if (k.includes('norm') || k.includes('ratio') || Math.abs(val) < 2) {
-      return val.toFixed(2);
-    }
-    return String(Math.round(val));
+  if (!Number.isFinite(val)) return '—';
+  const k = String(key || '').toLowerCase();
+  // For normalized/ratio-ish metrics or small magnitudes, show 2 decimals
+  if (k.includes('norm') || k.includes('ratio') || Math.abs(val) < 2) {
+    return val.toFixed(2);
   }
-  
-  // Format values for sync payload (number)
-  function prettyNum(key, val) {
-    if (!Number.isFinite(val)) return undefined;
-    const k = String(key || '').toLowerCase();
-    if (k.includes('norm') || k.includes('ratio') || Math.abs(val) < 2) {
-      return Number(val.toFixed(2));
-    }
-    return Math.round(val);
+  return String(Math.round(val));
+}
+
+// Format values for sync payload (number)
+function prettyNum(key, val) {
+  if (!Number.isFinite(val)) return undefined;
+  const k = String(key || '').toLowerCase();
+  if (k.includes('norm') || k.includes('ratio') || Math.abs(val) < 2) {
+    return Number(val.toFixed(2));
   }
-  
+  return Math.round(val);
+}
+
 
 
 // Which metrics to sync / show for each exercise
-const METRIC_MAP = {
+export const METRIC_MAP = {
   SideArmRaise: ['armAngle', 'shoulderAngle'],
   MiniSquats: ['kneeAngleMin', 'kneeAngleMax'],
   SitToStand: ['kneeAngleMax', 'hipToKneeNormMax'],
   LongArcQuad: ['kneeAngle', 'hipToAnkleNorm'],
   StandingStraightUp: ['trunkAngleMin', 'kneeAngleMax'],
-  SeatedMarches: ['kneeLiftNormMax','hipFlexAngleMin'],
-  StandingMarches: ['kneeLiftNormMax','hipFlexAngleMin'],
-  MiniLunges: ['kneeAngleMin','kneeAngleMax'],
+  SeatedMarches: ['kneeLiftNormMax', 'hipFlexAngleMin'],
+  StandingMarches: ['kneeLiftNormMax', 'hipFlexAngleMin'],
+  MiniLunges: ['kneeAngleMin', 'kneeAngleMax'],
   BicepCurls: ['elbowAngleMin'],
   LiftsAndChops: ['handsHeightNorm'],
   StepUps: ['ankleLiftNormLead', 'kneeAngleLead'],
   WallPushUp: ['elbowOffsetMax', 'trunkAngleMin'],
-  CalfRaisesSeated: ['plantarMetric','plantarDelta','plantarUp','plantarDown','trunkAngleMin'],
-  CalfRaisesStanding: ['footPitchDelta','pitchUp','pitchDown','kneeAngleMin','trunkAngleMin'],
-  SeatedDorsiflexion: ['footPitchDelta','pitchUp','pitchDown','trunkAngleMin'],
-  StandingDorsiflexion: ['footPitchDelta','pitchUp','pitchDown','trunkAngleMin'],
+  CalfRaisesSeated: ['plantarMetric', 'plantarDelta', 'plantarUp', 'plantarDown', 'trunkAngleMin'],
+  CalfRaisesStanding: ['footPitchDelta', 'pitchUp', 'pitchDown', 'kneeAngleMin', 'trunkAngleMin'],
+  SeatedDorsiflexion: ['footPitchDelta', 'pitchUp', 'pitchDown', 'trunkAngleMin'],
+  StandingDorsiflexion: ['footPitchDelta', 'pitchUp', 'pitchDown', 'trunkAngleMin'],
 };
 
 // Smoothing config
@@ -78,10 +78,10 @@ const METRIC_MAP = {
 //   return 0.35;
 // }
 function alphaFor(key) {
-    const k = String(key || '').toLowerCase();
-    if (k.includes('norm')) return 0.4;       // heavier smoothing for normalized distances
-    return 0.35;
-  }
+  const k = String(key || '').toLowerCase();
+  if (k.includes('norm')) return 0.4;       // heavier smoothing for normalized distances
+  return 0.35;
+}
 
 const SKIP_SMOOTH = new Set([
   'side',
@@ -95,27 +95,27 @@ const SKIP_SMOOTH = new Set([
   'standKneeUp', 'standTrunkUp', 'standHipOverAnkleMax',
   'slumpKnee', 'slumpTrunk', 'slumpHipOverAnkleMax',
   // Seated Marches thresholds
-  'hipFlexAngleUp','hipFlexAngleDown','kneeLiftNormUp','kneeLiftNormDown','trunkUprightMin',
+  'hipFlexAngleUp', 'hipFlexAngleDown', 'kneeLiftNormUp', 'kneeLiftNormDown', 'trunkUprightMin',
   // Standing Marches thresholds
-  'kneeToAnkleLiftNormUp','kneeToAnkleLiftNormDown',
+  'kneeToAnkleLiftNormUp', 'kneeToAnkleLiftNormDown',
   // Mini Lunges thresholds
-  'lungeKneeDown','lungeKneeUp','trunkUprightMin',
+  'lungeKneeDown', 'lungeKneeUp', 'trunkUprightMin',
   // Bicep Curls thresholds
-  'elbowFlexUp','elbowFlexDown',
+  'elbowFlexUp', 'elbowFlexDown',
   // LiftsAndChops thresholds
-  'liftHigh','chopLow','xSideEnter',
+  'liftHigh', 'chopLow', 'xSideEnter',
   // StepUps thresholds
-  'ankleLiftNormUp','ankleLiftNormDown','kneeExtendedUp','kneeFlexedDown',
+  'ankleLiftNormUp', 'ankleLiftNormDown', 'kneeExtendedUp', 'kneeFlexedDown',
   // Wall Push-Up thresholds
-  'elbowOffsetDown','elbowOffsetUp','trunkStraightMin','elbowLevelTol',
+  'elbowOffsetDown', 'elbowOffsetUp', 'trunkStraightMin', 'elbowLevelTol',
   // Calf Raises Seated dynamic thresholds
-  'plantarMetric','plantarUp','plantarDown','plantarDelta','ankleAngle','ankleAngleUp','ankleAngleDown','footPitchDelta','footPitchDeltaMin',
+  'plantarMetric', 'plantarUp', 'plantarDown', 'plantarDelta', 'ankleAngle', 'ankleAngleUp', 'ankleAngleDown', 'footPitchDelta', 'footPitchDeltaMin',
   // Calf Raises Standing dynamic thresholds
-'footPitchDelta','pitchUp','pitchDown','kneeAngleMin','kneeStraightMin','trunkAngleMin',
+  'footPitchDelta', 'pitchUp', 'pitchDown', 'kneeAngleMin', 'kneeStraightMin', 'trunkAngleMin',
   // Seated Dorsiflexion thresholds & guards (do NOT smooth)
   'pitchUp', 'pitchDown', 'heelStayTol', 'toeUpDeltaMin',
-    // Standing Dorsiflexion
-    'heelStayTol','ankleStayTol','toeUpDeltaMin','pitchUp','pitchDown',
+  // Standing Dorsiflexion
+  'heelStayTol', 'ankleStayTol', 'toeUpDeltaMin', 'pitchUp', 'pitchDown',
 ]);
 
 export default function ExerciseTrackerRefactored({
@@ -165,10 +165,10 @@ export default function ExerciseTrackerRefactored({
   // Upload helper
   async function uploadVideo(file, type) {
     // Skip upload in development mode (match original behavior)
-    if (process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
-      console.log('[DEV] Skipping video upload in development mode');
-      return { success: true, message: 'Skipped in development mode' };
-    }
+    // if (process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
+    //   console.log('[DEV] Skipping video upload in development mode');
+    //   return { success: true, message: 'Skipped in development mode' };
+    // }
     const query = new URLSearchParams(window.location.search);
     if (!activityData?.tenant) throw new Error('Missing tenant information');
     const serviceUrl = getServiceUrl(activityData);
@@ -232,105 +232,105 @@ export default function ExerciseTrackerRefactored({
     [exerciseType, activityData]
   );
 
-//   // Detector init (run once)
-//   useEffect(() => {
-//     if (didInitDetectorRef.current) return;
-//     didInitDetectorRef.current = true;
+  //   // Detector init (run once)
+  //   useEffect(() => {
+  //     if (didInitDetectorRef.current) return;
+  //     didInitDetectorRef.current = true;
 
-//     let canceled = false;
+  //     let canceled = false;
 
-//     (async () => {
-//       try {
-//         await tf.setBackend('webgl');
-//         await tf.ready();
+  //     (async () => {
+  //       try {
+  //         await tf.setBackend('webgl');
+  //         await tf.ready();
 
-//         const modelPath =
-//           window.location.hostname === 'localhost'
-//             ? `/models/movenet/model.json`
-//             : `${process.env.PUBLIC_URL}/models/movenet/model.json`;
+  //         const modelPath =
+  //           window.location.hostname === 'localhost'
+  //             ? `/models/movenet/model.json`
+  //             : `${process.env.PUBLIC_URL}/models/movenet/model.json`;
 
-//         console.time('[Tracker] MoveNet load');
-//         const det = await posedetection.createDetector(
-//           posedetection.SupportedModels.MoveNet,
-//           {
-//             modelType: posedetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-//             modelUrl: modelPath,
-//           }
-//         );
-//         console.timeEnd('[Tracker] MoveNet load');
+  //         console.time('[Tracker] MoveNet load');
+  //         const det = await posedetection.createDetector(
+  //           posedetection.SupportedModels.MoveNet,
+  //           {
+  //             modelType: posedetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+  //             modelUrl: modelPath,
+  //           }
+  //         );
+  //         console.timeEnd('[Tracker] MoveNet load');
 
-//         if (!canceled) {
-//           detectorRef.current = det;
-//           console.log('[Tracker] detector ready');
-//         } else {
-//           await det?.dispose?.();
-//         }
-//       } catch (err) {
-//         console.error('[Tracker] detector init failed:', err);
-//       }
-//     })();
+  //         if (!canceled) {
+  //           detectorRef.current = det;
+  //           console.log('[Tracker] detector ready');
+  //         } else {
+  //           await det?.dispose?.();
+  //         }
+  //       } catch (err) {
+  //         console.error('[Tracker] detector init failed:', err);
+  //       }
+  //     })();
 
-//     return () => {
-//       canceled = true;
-//       detectorRef.current?.dispose?.();
-//       detectorRef.current = null;
-//     };
-//   }, []);
+  //     return () => {
+  //       canceled = true;
+  //       detectorRef.current?.dispose?.();
+  //       detectorRef.current = null;
+  //     };
+  //   }, []);
 
-  
-// Detector init (swap per exercise/spec)
-useEffect(() => {
+
+  // Detector init (swap per exercise/spec)
+  useEffect(() => {
     let canceled = false;
-  
+
     (async () => {
       try {
         // Which detector does the active spec want?
-      //  const kind = (specRef.current?.detector || 'movenet');
-       // Which detector does the active spec want? (allow ?backend=mp|movenet)
+        //  const kind = (specRef.current?.detector || 'movenet');
+        // Which detector does the active spec want? (allow ?backend=mp|movenet)
         const q = new URLSearchParams(window.location.search);
         const forced = q.get('backend'); // "mp" or "movenet"
         const activeSpec = EXERCISE_SPECS[exerciseType] || EXERCISE_SPECS.SideArmRaise;
         const kind = forced === 'mp' ? 'mediapipe'
-                   : forced === 'movenet' ? 'movenet'
-                   : (activeSpec?.detector || 'movenet');
-  
+          : forced === 'movenet' ? 'movenet'
+            : (activeSpec?.detector || 'movenet');
+
         // No change? keep current detector
         if (detectorRef.current && detKindRef.current === kind) return;
-  
+
         // Dispose previous detector if switching
-        try { await detectorRef.current?.dispose?.(); } catch {}
+        try { await detectorRef.current?.dispose?.(); } catch { }
         detectorRef.current = null;
         detKindRef.current = kind;
-  
 
-          console.time(`[Tracker] ${kind} load`);
-          const detector = await createPoseDetector(kind); // <-- central helper (uses CDN for MP)
-          console.timeEnd(`[Tracker] ${kind} load`);
-          console.log('[DetectorInit]', { exerciseType, forced, chosen: kind });
 
-          if (!canceled) {
-            detectorRef.current = detector;
-            console.log(`[Tracker] detector ready (${kind})`);
-          } else {
-            await detector?.dispose?.();
-          }
-          
+        console.time(`[Tracker] ${kind} load`);
+        const detector = await createPoseDetector(kind); // <-- central helper (uses CDN for MP)
+        console.timeEnd(`[Tracker] ${kind} load`);
+        console.log('[DetectorInit]', { exerciseType, forced, chosen: kind });
+
+        if (!canceled) {
+          detectorRef.current = detector;
+          console.log(`[Tracker] detector ready (${kind})`);
+        } else {
+          await detector?.dispose?.();
+        }
+
       } catch (err) {
         console.error('[Tracker] detector init failed:', err);
       }
     })();
-  
+
     // Cleanup on unmount or exercise change
     return () => {
       canceled = true;
-      try { detectorRef.current?.dispose?.(); } catch {}
+      try { detectorRef.current?.dispose?.(); } catch { }
       detectorRef.current = null;
     };
   }, [exerciseType]); // re-evaluate when exercise (and thus spec) changes
-  
 
 
-// Build/refresh spec & engine on exercise/targetReps change
+
+  // Build/refresh spec & engine on exercise/targetReps change
   useEffect(() => {
     const spec = EXERCISE_SPECS[exerciseType] || EXERCISE_SPECS.SideArmRaise;
     specRef.current = spec;
@@ -342,7 +342,7 @@ useEffect(() => {
     feedbackRef.current = 'Initializing...';
     smoothRef.current = {}; // wipe smoothers on spec switch
     // reset any per-session calibration in the spec
-    try { spec?.onStart?.(); } catch {}
+    try { spec?.onStart?.(); } catch { }
     // Derive target seconds for time mode
     let targetSeconds;
     const isTimeMode = (spec.mode === 'time' || spec.isTimeBased);
@@ -374,10 +374,11 @@ useEffect(() => {
   // useEffect(() => {
   //   if (process.env.NODE_ENV === 'development') setIsDetecting?.(true);
   // }, []); 
-    // Auto-start detection locally
-    useEffect(() => {
-      if (process.env.NODE_ENV === 'production') setIsDetecting?.(true);
-    }, []); 
+  // Auto-start detection locally
+  useEffect(() => {
+    // if (process.env.NODE_ENV === 'production')
+    setIsDetecting?.(true);
+  }, []);
 
   // Detection loop
   useEffect(() => {
@@ -400,7 +401,7 @@ useEffect(() => {
     const loop = async () => {
       if (!isDetecting) return;
 
-      const det   = detectorRef.current;
+      const det = detectorRef.current;
       const video = webcamRef.current?.video;
 
       // Keep polling until both detector and video are ready
@@ -445,7 +446,7 @@ useEffect(() => {
       };
       const spec = specRef.current;
       if (spec?.highlights) {
-        try { spec.highlights({ setHighlight, features: { ...feat, side } }); } catch {}
+        try { spec.highlights({ setHighlight, features: { ...feat, side } }); } catch { }
       }
 
       // Draw overlay + recorders every frame (even during countdown)
@@ -468,7 +469,7 @@ useEffect(() => {
         try {
           // minimal payload; maybeSendUpdates will include fps, repCount and feedbackRef
           maybeSendUpdates({});
-        } catch {}
+        } catch { }
       } else {
         previousRemainingTimeRef.current = null;
 
@@ -516,16 +517,16 @@ useEffect(() => {
           hudValue = `${secs}s / ${targetSecs}s`;
           setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} hold ${hudValue}`);
         } else {
-        //   const metricKey = spec?.primaryMetric || METRIC_MAP[exerciseType]?.[0] || null;
-        //   const mv = metricKey && Number.isFinite(feat[metricKey]) ? Math.round(feat[metricKey]) : '—';
-        //   hudLabel = metricKey || 'metric';
-        //   hudValue = mv;
-        //   setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} reps=${repCount} ${hudLabel}=${hudValue}`);
-        const metricKey = spec?.primaryMetric || METRIC_MAP[exerciseType]?.[0] || null;
-        const rawVal = metricKey && Number.isFinite(feat[metricKey]) ? feat[metricKey] : NaN;
-        hudLabel = metricKey || 'metric';
-        hudValue = pretty(metricKey, rawVal);
-        setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} reps=${repCount} ${hudLabel}=${hudValue}`);
+          //   const metricKey = spec?.primaryMetric || METRIC_MAP[exerciseType]?.[0] || null;
+          //   const mv = metricKey && Number.isFinite(feat[metricKey]) ? Math.round(feat[metricKey]) : '—';
+          //   hudLabel = metricKey || 'metric';
+          //   hudValue = mv;
+          //   setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} reps=${repCount} ${hudLabel}=${hudValue}`);
+          const metricKey = spec?.primaryMetric || METRIC_MAP[exerciseType]?.[0] || null;
+          const rawVal = metricKey && Number.isFinite(feat[metricKey]) ? feat[metricKey] : NaN;
+          hudLabel = metricKey || 'metric';
+          hudValue = pretty(metricKey, rawVal);
+          setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} reps=${repCount} ${hudLabel}=${hudValue}`);
         }
 
         // transitions / reps logs
@@ -680,45 +681,45 @@ function computeFeaturesForExercise(poses, exerciseType, side, specFromRef) {
   if (spec?.kneeLiftNormDown != null) thresholds.kneeLiftNormDown = spec.kneeLiftNormDown;
   if (spec?.trunkUprightMin != null) thresholds.trunkUprightMin = spec.trunkUprightMin;
 
-   // Standing Marches
-   if (spec?.kneeToAnkleLiftNormUp != null) thresholds.kneeToAnkleLiftNormUp = spec.kneeToAnkleLiftNormUp;
-   if (spec?.kneeToAnkleLiftNormDown != null) thresholds.kneeToAnkleLiftNormDown = spec.kneeToAnkleLiftNormDown;
-   if (spec?.hipFlexAngleUp != null) thresholds.hipFlexAngleUp = spec.hipFlexAngleUp;
-   if (spec?.hipFlexAngleDown != null) thresholds.hipFlexAngleDown = spec.hipFlexAngleDown;
-   if (spec?.trunkUprightMin != null) thresholds.trunkUprightMin = spec.trunkUprightMin;
- 
-   // Mini Lunges
-   if (spec?.lungeKneeDown != null) thresholds.lungeKneeDown = spec.lungeKneeDown;
-   if (spec?.lungeKneeUp != null) thresholds.lungeKneeUp = spec.lungeKneeUp;
-   if (spec?.trunkUprightMin != null) thresholds.trunkUprightMin = spec.trunkUprightMin;
+  // Standing Marches
+  if (spec?.kneeToAnkleLiftNormUp != null) thresholds.kneeToAnkleLiftNormUp = spec.kneeToAnkleLiftNormUp;
+  if (spec?.kneeToAnkleLiftNormDown != null) thresholds.kneeToAnkleLiftNormDown = spec.kneeToAnkleLiftNormDown;
+  if (spec?.hipFlexAngleUp != null) thresholds.hipFlexAngleUp = spec.hipFlexAngleUp;
+  if (spec?.hipFlexAngleDown != null) thresholds.hipFlexAngleDown = spec.hipFlexAngleDown;
+  if (spec?.trunkUprightMin != null) thresholds.trunkUprightMin = spec.trunkUprightMin;
 
-   // ---- NEW: Bicep Curls thresholds ----
-  if (spec?.elbowFlexUp!= null) thresholds.elbowFlexUp = spec.elbowFlexUp;
-  if (spec?.elbowFlexDown!= null) thresholds.elbowFlexDown = spec.elbowFlexDown;
+  // Mini Lunges
+  if (spec?.lungeKneeDown != null) thresholds.lungeKneeDown = spec.lungeKneeDown;
+  if (spec?.lungeKneeUp != null) thresholds.lungeKneeUp = spec.lungeKneeUp;
+  if (spec?.trunkUprightMin != null) thresholds.trunkUprightMin = spec.trunkUprightMin;
+
+  // ---- NEW: Bicep Curls thresholds ----
+  if (spec?.elbowFlexUp != null) thresholds.elbowFlexUp = spec.elbowFlexUp;
+  if (spec?.elbowFlexDown != null) thresholds.elbowFlexDown = spec.elbowFlexDown;
 
   // Lifts & Chops thresholds passthrough
-if (spec?.liftHigh != null) thresholds.liftHigh = spec.liftHigh;
-if (spec?.chopLow != null) thresholds.chopLow = spec.chopLow;
-if (spec?.xSideEnter != null) thresholds.xSideEnter = spec.xSideEnter;
+  if (spec?.liftHigh != null) thresholds.liftHigh = spec.liftHigh;
+  if (spec?.chopLow != null) thresholds.chopLow = spec.chopLow;
+  if (spec?.xSideEnter != null) thresholds.xSideEnter = spec.xSideEnter;
 
-// StepUps
-if (spec?.ankleLiftNormUp != null) thresholds.ankleLiftNormUp = spec.ankleLiftNormUp;
-if (spec?.ankleLiftNormDown != null) thresholds.ankleLiftNormDown = spec.ankleLiftNormDown;
-if (spec?.kneeExtendedUp != null) thresholds.kneeExtendedUp = spec.kneeExtendedUp;
-if (spec?.kneeFlexedDown != null) thresholds.kneeFlexedDown = spec.kneeFlexedDown;  
+  // StepUps
+  if (spec?.ankleLiftNormUp != null) thresholds.ankleLiftNormUp = spec.ankleLiftNormUp;
+  if (spec?.ankleLiftNormDown != null) thresholds.ankleLiftNormDown = spec.ankleLiftNormDown;
+  if (spec?.kneeExtendedUp != null) thresholds.kneeExtendedUp = spec.kneeExtendedUp;
+  if (spec?.kneeFlexedDown != null) thresholds.kneeFlexedDown = spec.kneeFlexedDown;
 
-// Wall Push-Up passthrough
-if (spec?.elbowOffsetDown != null) thresholds.elbowOffsetDown = spec.elbowOffsetDown;
-if (spec?.elbowOffsetUp   != null) thresholds.elbowOffsetUp   = spec.elbowOffsetUp;
-if (spec?.trunkStraightMin != null) thresholds.trunkStraightMin = spec.trunkStraightMin;
-if (spec?.elbowLevelTol != null) thresholds.elbowLevelTol = spec.elbowLevelTol;
+  // Wall Push-Up passthrough
+  if (spec?.elbowOffsetDown != null) thresholds.elbowOffsetDown = spec.elbowOffsetDown;
+  if (spec?.elbowOffsetUp != null) thresholds.elbowOffsetUp = spec.elbowOffsetUp;
+  if (spec?.trunkStraightMin != null) thresholds.trunkStraightMin = spec.trunkStraightMin;
+  if (spec?.elbowLevelTol != null) thresholds.elbowLevelTol = spec.elbowLevelTol;
 
-// Calf Raises Seated passthrough
-if (spec?.heelBelowKneeUp   != null) thresholds.heelBelowKneeUp   = spec.heelBelowKneeUp;
-if (spec?.heelBelowKneeDown != null) thresholds.heelBelowKneeDown = spec.heelBelowKneeDown;
-if (spec?.ankleBelowKneeUp  != null) thresholds.ankleBelowKneeUp  = spec.ankleBelowKneeUp;
-if (spec?.ankleBelowKneeDown!= null) thresholds.ankleBelowKneeDown= spec.ankleBelowKneeDown;
-if (spec?.trunkUprightMin   != null) thresholds.trunkUprightMin   = spec.trunkUprightMin;
+  // Calf Raises Seated passthrough
+  if (spec?.heelBelowKneeUp != null) thresholds.heelBelowKneeUp = spec.heelBelowKneeUp;
+  if (spec?.heelBelowKneeDown != null) thresholds.heelBelowKneeDown = spec.heelBelowKneeDown;
+  if (spec?.ankleBelowKneeUp != null) thresholds.ankleBelowKneeUp = spec.ankleBelowKneeUp;
+  if (spec?.ankleBelowKneeDown != null) thresholds.ankleBelowKneeDown = spec.ankleBelowKneeDown;
+  if (spec?.trunkUprightMin != null) thresholds.trunkUprightMin = spec.trunkUprightMin;
 
   return { ...base, ...extra, ...thresholds, side };
 }

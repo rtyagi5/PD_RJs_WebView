@@ -1,5 +1,6 @@
 import axios from "axios"
 import { getServiceUrl } from "./config";
+import { METRIC_MAP } from "./ExerciseTracker_refactored";
 const lineWidth = 2;  // Adjusted line width
 let messageCache = {}
 
@@ -192,33 +193,7 @@ export const sendUpdates = async (data, exerciseType, activityData) => {
   if (messageCache[cacheKey] && !data?.completionStatusRef) {
     return
   }
-  const exerciseDataConfig = {
-    "SideArmRaise": ["armAngle", "shoulderAngle"],
-    "Squats": ["kneeAngle", "hipAngle"],
-    "SitToStand": ["spineAngle", "kneeAngle", "hipDistance"], // New configuration for SitToStand
-    "MiniSquats": ["kneeAngle", "spineAngle"], // Add MiniSquats configuration
-    "LongArcQuad": ["kneeAngle", "spineAngle"], // Add MiniSquats configuration
-    "StandingStraightUp": ["headTilt", "shoulderAlignment", "hipAlignment", "kneeAlignment", "ankleAlignment"], // Add Standing Straight Up configuration
-    "SeatedMarches": ["hipAngle", "kneeAngle"],
-    "StandingMarches": ["hipAngle", "kneeAngle"],
-    "MiniLunges": ["kneeAngle", "hipAngle"],
-    "BicepCurls": ["elbowAngle"],
-    "LiftsAndChops": [
-      "shoulderFlexionExtension",
-      "shoulderAbductionAdduction",
-      "trunkRotation",
-      "trunkFlexionExtension",
-      "hipRotation"
-    ],
-    "StepUps": ["kneeAngle", "hipAngle"],
-    "WallPushUp": ["elbowAngle", "shoulderAngle", "trunkAngle"],
-    "CalfRaisesSeated": ["ankleAngle", "kneeAngle", "trunkAngle"],
-    "CalfRaisesStanding": ["ankleAngle", "kneeAngle", "trunkAngle"],
-    "SeatedDorsiflexion": ["ankleAngle", "kneeAngle", "trunkAngle"],
-    "StandingDorsiflexion": ["ankleAngle", "kneeAngle", "trunkAngle"]
-  };
-
-  const selectedConfig = exerciseDataConfig[exerciseType] || [];
+  const selectedConfig = METRIC_MAP[exerciseType] || [];
 
   // Include only the relevant data points
   const filteredData = {
