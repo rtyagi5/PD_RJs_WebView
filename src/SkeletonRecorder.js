@@ -49,8 +49,29 @@ const SkeletonRecorder = forwardRef(
       // START RECORDING
       if (isSkeletonRecording) {
         if (!mediaRecorderRef.current) {
+          // Prime the first frame so the stream has immediate content
+          try {
+            const w = (canvasRef?.current?.width) || webcamRef?.current?.video?.videoWidth || 640;
+            const h = (canvasRef?.current?.height) || webcamRef?.current?.video?.videoHeight || 480;
+            hiddenCanvasRef.current.width = w;
+            hiddenCanvasRef.current.height = h;
+            const ctx = hiddenCanvasRef.current.getContext('2d');
+            ctx.clearRect(0, 0, w, h);
+            if (canvasRef?.current) ctx.drawImage(canvasRef.current, 0, 0, w, h);
+          } catch {}
+
           const canvasStream = hiddenCanvasRef.current.captureStream(30); // 30 FPS
-          mediaRecorderRef.current = new MediaRecorder(canvasStream, { mimeType: 'video/webm; codecs=vp9' });
+          // Choose a supported mimeType for broader compatibility
+          const candidates = [
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm'
+          ];
+          const supported = candidates.find(t => {
+            try { return typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); }
+            catch { return false; }
+          }) || 'video/webm';
+          mediaRecorderRef.current = new MediaRecorder(canvasStream, { mimeType: supported });
           
           mediaRecorderRef.current.ondataavailable = event => {
             if (event.data.size > 0) {
