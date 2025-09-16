@@ -26,7 +26,7 @@ function App() {
   }, []);
 
   const manageExerciseData = async () => {
-    // For local development - bypass token check
+    // // For local development - bypass token check
     // if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
     //   console.log('Development mode active. Environment variables:', {
     //     REACT_APP_DEFAULT_REPS: process.env.REACT_APP_DEFAULT_REPS,

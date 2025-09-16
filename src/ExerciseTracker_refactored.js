@@ -463,6 +463,12 @@ useEffect(() => {
           feedbackRef.current = msg;
           previousRemainingTimeRef.current = remaining;
         }
+        // Send countdown feedback to WebView during calibration
+        // This mirrors the legacy behavior where WebView shows the countdown
+        try {
+          // minimal payload; maybeSendUpdates will include fps, repCount and feedbackRef
+          maybeSendUpdates({});
+        } catch {}
       } else {
         previousRemainingTimeRef.current = null;
 
