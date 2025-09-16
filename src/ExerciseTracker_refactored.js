@@ -144,6 +144,7 @@ export default function ExerciseTrackerRefactored({
   const detectionStartTimeRef = useRef(null);
   const previousRemainingTimeRef = useRef(null);
   const fpsRef = useRef(0);
+  const lastExerciseDataRef = useRef({});
 
   const videoRecorderRef = useRef(null);
   const skeletonRecorderRef = useRef(null);
@@ -163,8 +164,11 @@ export default function ExerciseTrackerRefactored({
 
   // Upload helper
   async function uploadVideo(file, type) {
-    //if (process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') return { success: true };
-    if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') return { success: true };
+    // Skip upload in development mode (match original behavior)
+    if (process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
+      console.log('[DEV] Skipping video upload in development mode');
+      return { success: true, message: 'Skipped in development mode' };
+    }
     const query = new URLSearchParams(window.location.search);
     if (!activityData?.tenant) throw new Error('Missing tenant information');
     const serviceUrl = getServiceUrl(activityData);
@@ -193,6 +197,7 @@ export default function ExerciseTrackerRefactored({
       feedback: 'Target reps achieved!',
       completionStatusRef: true,
       repCount: repCountRef.current,
+      ...lastExerciseDataRef.current,
     };
     await sendUpdates(finalData, exerciseType, activityData);
 
@@ -215,6 +220,8 @@ export default function ExerciseTrackerRefactored({
       const finalData = {
         fps: fpsRef.current,
         completionStatusRef: false,
+        repCount: repCountRef.current,
+        feedback: feedbackRef.current,
         ...exerciseData,
       };
       if (feedbackRef.current !== lastFeedbackSentRef.current) {
@@ -385,6 +392,10 @@ useEffect(() => {
     detectionStartTimeRef.current = performance.now();
 
     let rafId = 0;
+    // FPS measurement (match original tracker behavior)
+    let frameCount = 0;
+    let lastFpsUpdate = performance.now();
+    let dbgCounter = 0;
 
     const loop = async () => {
       if (!isDetecting) return;
@@ -416,9 +427,35 @@ useEffect(() => {
         console.error('[Tracker] estimatePoses failed:', e);
       }
 
-      // Countdown
+      // Compute & smooth features EARLY so we can color-code during countdown
+      const feat = computeFeaturesForExercise(poses, exerciseType, side, specRef.current);
+      const smooth = smoothRef.current;
+      for (const [k, raw] of Object.entries(feat)) {
+        if (SKIP_SMOOTH.has(k) || !Number.isFinite(raw)) continue;
+        if (!smooth[k]) smooth[k] = new EMA(alphaFor(k));
+        const v = smooth[k].next(raw);
+        if (Number.isFinite(v)) feat[k] = v;
+      }
+
+      // Apply highlights from current spec before drawing
+      const setHighlight = ({ keypoints, color }) => {
+        keypointsRef.current = keypoints || [];
+        keypointColorsRef.current = color || '#66FF00';
+        segmentColorsRef.current = color || '#66FF00';
+      };
+      const spec = specRef.current;
+      if (spec?.highlights) {
+        try { spec.highlights({ setHighlight, features: { ...feat, side } }); } catch {}
+      }
+
+      // Draw overlay + recorders every frame (even during countdown)
+      drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+      videoRecorderRef.current?.updateFrame?.(poses, vw, vh);
+      skeletonRecorderRef.current?.updateFrame?.(poses, vw, vh);
+
+      // Countdown (fixed)
       const elapsed = performance.now() - detectionStartTimeRef.current;
-      const INITIAL_DELAY = 2000;
+      const INITIAL_DELAY = 10000;
       if (elapsed < INITIAL_DELAY) {
         const remaining = Math.ceil((INITIAL_DELAY - elapsed) / 1000);
         const msg = remaining === INITIAL_DELAY / 1000 ? `Get ready in ${remaining}` : `${remaining}`;
@@ -429,27 +466,7 @@ useEffect(() => {
       } else {
         previousRemainingTimeRef.current = null;
 
-        // Compute & smooth features (use current spec to avoid stale)
-        const feat = computeFeaturesForExercise(poses, exerciseType, side, specRef.current);
-
-        const smooth = smoothRef.current;
-        for (const [k, raw] of Object.entries(feat)) {
-          if (SKIP_SMOOTH.has(k) || !Number.isFinite(raw)) continue;
-          if (!smooth[k]) smooth[k] = new EMA(alphaFor(k));
-          const v = smooth[k].next(raw);
-          if (Number.isFinite(v)) feat[k] = v;
-        }
-
-        // Highlights from current spec
-        const setHighlight = ({ keypoints, color }) => {
-          keypointsRef.current = keypoints || [];
-          keypointColorsRef.current = color || '#66FF00';
-          segmentColorsRef.current = color || '#66FF00';
-        };
-        const spec = specRef.current;
-        if (spec?.highlights) {
-          try { spec.highlights({ setHighlight, features: { ...feat, side } }); } catch {}
-        }
+        // We already computed feat and highlights above; proceed with engine step
 
         // Step state machine — ensure engine matches active spec
         const activeSpecName = specRef.current?.name;
@@ -477,6 +494,8 @@ useEffect(() => {
         // unify counters / feedback
         repCountRef.current = repCount;
         feedbackRef.current = feedback || feedbackRef.current;
+
+        // (debug logs removed to minimize changes)
 
         // HUD metric selection (time mode vs rep mode)
         const isTimeMode = (specRef.current?.mode === 'time' || specRef.current?.isTimeBased);
@@ -529,13 +548,20 @@ useEffect(() => {
             timeRemainingMs: timeRemainingMs ?? 0
           } : {})
         };
+        // Keep latest snapshot for completion payload
+        lastExerciseDataRef.current = exerciseData;
         await maybeSendUpdates(exerciseData);
       }
 
-      // Draw overlay + recorders every frame
-      drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
-      videoRecorderRef.current?.updateFrame?.(poses, vw, vh);
-      skeletonRecorderRef.current?.updateFrame?.(poses, vw, vh);
+      // FPS measurement (update roughly every 100ms)
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFpsUpdate > 100) {
+        const calculatedFps = Math.round((frameCount / (now - lastFpsUpdate)) * 1000);
+        fpsRef.current = calculatedFps;
+        frameCount = 0;
+        lastFpsUpdate = now;
+      }
 
       rafId = requestAnimationFrame(loop);
     };
@@ -598,7 +624,14 @@ function pickExerciseMetrics(exerciseType, feat) {
 
 // Compute features with the **active spec** (passed in)
 function computeFeaturesForExercise(poses, exerciseType, side, specFromRef) {
-  const kps = (poses?.[0]?.keypoints) || [];
+  // Normalize keypoint names for models that omit `name` (e.g., MoveNet)
+  const MOVE_NET_NAMES = [
+    'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
+    'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist',
+    'left_hip', 'right_hip', 'left_knee', 'right_knee', 'left_ankle', 'right_ankle'
+  ];
+  const raw = (poses?.[0]?.keypoints) || [];
+  const kps = raw.map((k, i) => (k?.name ? k : { ...k, name: MOVE_NET_NAMES[i] }));
   const base = computeCommonFeatures(kps, side);
 
   // Ask spec for extras (if any)

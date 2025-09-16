@@ -180,11 +180,11 @@ export const drawCanvas = (poses, videoWidth, videoHeight, ctx, keypoints, keypo
 
 const updates = []
 export const sendUpdates = async (data, exerciseType, activityData) => {
-  // Skip API calls in development mode
-  // if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
-  //   console.log('[DEV] Skipping API call in development mode');
-  //   return;
-  // }
+  // In development, we still want to post to WebView/parent but skip server API calls
+  const devMode = process.env.REACT_APP_DEVELOPMENT_MODE === 'true';
+  if (devMode) {
+    console.log('[DEV] Skipping server API call; will still post message to WebView/parent');
+  }
 
   // Example config to determine which data points to include based on exerciseType
   const cacheKey = `${data.repCount}_${data?.feedback}`
@@ -236,7 +236,7 @@ export const sendUpdates = async (data, exerciseType, activityData) => {
   });
 
   updates.push(filteredData);
-  if (data?.completionStatusRef) {
+  if (!devMode && data?.completionStatusRef) {
     const query = new URLSearchParams(window.location.search);
     await axios.post(`${getServiceUrl(activityData).EXERCISE_SERVICE}/activities/exercise-data`, {
       updates,
