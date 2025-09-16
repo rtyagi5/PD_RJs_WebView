@@ -35,11 +35,10 @@ const VideoRecorder = forwardRef(
         // Draw the final composited visible canvas:
         ctx.clearRect(0, 0, videoWidth, videoHeight);
         ctx.drawImage(webcamRef.current.video, 0, 0, videoWidth, videoHeight);
-
-        // Optionally, draw your skeleton here if you'd like. 
-        // But typically, you pass `poses`, etc. to a custom draw function
-        // drawCanvas(poses, videoWidth, videoHeight, ctx, 
-        //            keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+        // Overlay the already-rendered visible canvas (which has the skeleton) on top
+        if (canvasRef?.current) {
+          ctx.drawImage(canvasRef.current, 0, 0, videoWidth, videoHeight);
+        }
       },
     }));
 
@@ -51,7 +50,17 @@ const VideoRecorder = forwardRef(
       if (isVideoRecording) {
         if (!mediaRecorderRef.current) {
           const canvasStream = hiddenCanvasRef.current.captureStream(30); // 30 FPS
-          mediaRecorderRef.current = new MediaRecorder(canvasStream, { mimeType: 'video/webm; codecs=vp9' });
+          // Choose a supported mimeType for broader compatibility
+          const candidates = [
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm'
+          ];
+          const supported = candidates.find(t => {
+            try { return typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t); }
+            catch { return false; }
+          }) || 'video/webm';
+          mediaRecorderRef.current = new MediaRecorder(canvasStream, { mimeType: supported });
           
           mediaRecorderRef.current.ondataavailable = event => {
             if (event.data.size > 0) {
