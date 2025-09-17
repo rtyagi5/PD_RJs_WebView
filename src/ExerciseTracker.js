@@ -2,10 +2,10 @@ import React, { useRef, useEffect, useState } from "react";
 import * as tf from "@tensorflow/tfjs";
 import * as posedetection from "@tensorflow-models/pose-detection";
 import Webcam from "react-webcam";
-import { SAR_repDetection } from "./SideArmRaise"; 
+import { SAR_repDetection } from "./SideArmRaise";
 import { SitStand_repDetection } from './SitToStand';
 import { MiniSquats_repDetection } from './MiniSquats';
-import { LAQ_repDetection } from './LongArcQuad'; 
+import { LAQ_repDetection } from './LongArcQuad';
 import { StandingStraightUp_detection } from './StandingStraightUp';
 import { SeatedMarch_repDetection } from './SeatedMarch';
 import { StandingMarch_repDetection } from './StandingMarch';
@@ -18,20 +18,20 @@ import MiniLunges_repDetection from './MiniLunges';
 import LiftAndChops_repDetection from './LiftAndChops';
 import StepUps_repDetection from './StepUps';
 import WallPushUps_repDetection from './WallPushUps';
-import { drawCanvas,sendUpdates } from './utilities';
-import VideoRecorder from './VideoRecorder'; 
-import SkeletonRecorder from './SkeletonRecorder'; 
+import { drawCanvas, sendUpdates } from './utilities';
+import VideoRecorder from './VideoRecorder';
+import SkeletonRecorder from './SkeletonRecorder';
 import axios from "axios";
 import { getServiceUrl } from "./config";
 
-const ExerciseTracker = ({ 
-  exerciseType, side, 
-  targetReps, isDetecting, 
-  setIsDetecting, isVideoRecording, 
-  setIsVideoRecording, isSkeletonRecording, 
+const ExerciseTracker = ({
+  exerciseType, side,
+  targetReps, isDetecting,
+  setIsDetecting, isVideoRecording,
+  setIsVideoRecording, isSkeletonRecording,
   setIsSkeletonRecording, setDisplayMessage,
   activityData
- }) => {
+}) => {
 
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
@@ -52,7 +52,7 @@ const ExerciseTracker = ({
   const repCountRef = useRef(0);          // Track total reps completed
   const fpsRef = useRef(0);               // Track frames per second
   const lastLegRef = useRef('none');      // Track the last leg that was lifted
-  
+
   // Refs for general exercise tracking
   const sitLoweredCountRef = useRef(0);   // For sit-down movement
   const sitUpCountRef = useRef(0);        // For stand-up movement
@@ -68,7 +68,7 @@ const ExerciseTracker = ({
   const videoRecorderRef = useRef(null); // Ref for the video recorder
   const skeletonRecorderRef = useRef(null); // Ref for the video recorder
 
-  
+
 
 
   const detect = async () => {
@@ -77,10 +77,10 @@ const ExerciseTracker = ({
       console.log("Detector not available or detection not started.");
       return;
     }
-     // Set the detection start time if it's not already set
-      if (!detectionStartTimeRef.current) {
-        detectionStartTimeRef.current = performance.now();
-      }
+    // Set the detection start time if it's not already set
+    if (!detectionStartTimeRef.current) {
+      detectionStartTimeRef.current = performance.now();
+    }
 
     let frameCount = 0;
     let lastFpsUpdate = performance.now();
@@ -107,69 +107,69 @@ const ExerciseTracker = ({
         // console.log("Poses estimated", poses);
 
 
-         // Calculate elapsed time since detection started
-      const elapsedTimeSinceDetectionStart = performance.now() - detectionStartTimeRef.current;
+        // Calculate elapsed time since detection started
+        const elapsedTimeSinceDetectionStart = performance.now() - detectionStartTimeRef.current;
 
-      const INITIAL_DELAY = 10000; // 5000 milliseconds = 5 seconds
-      let exerciseData = {};
-      if (elapsedTimeSinceDetectionStart < INITIAL_DELAY) {        
-        // During initial delay, display "Get ready..." message
-        const remainingTime = Math.ceil((INITIAL_DELAY - elapsedTimeSinceDetectionStart) / 1000);
-        // setFeedback(`Get ready... ${remainingTime}`);
-        // feedbackRef.current = `Get ready in ... ${remainingTime}`;
-         // Determine the feedback message
-         let feedbackMessage;
-         if (remainingTime === INITIAL_DELAY / 1000) {
-           feedbackMessage = `Get ready in ${remainingTime}`;
-         } else {
-           feedbackMessage = `${remainingTime}`;
-         }
- 
-         // Update feedback only when the remaining time changes
-         if (remainingTime !== previousRemainingTimeRef.current) {
-           feedbackRef.current = feedbackMessage;
-           previousRemainingTimeRef.current = remainingTime;
-         }
-      
-      }
-      else{   
-         // Reset previousRemainingTimeRef after countdown
-         previousRemainingTimeRef.current = null;    
-        
-         // Add the condition here
-         if (exerciseType === "SideArmRaise") {
-    // Pass the required config as an object
-           exerciseData = await SAR_repDetection(
-                poses,
-                side,
-                feedbackRef,
-                armLoweredCountRef,
-                armUpCountRef,
-                armLoweredFlagRef,
-                repCountRef,
-                targetReps,
-                handleExerciseComplete,            
-                keypointColorsRef,      
-                segmentColorsRef,
-                keypointsRef,
-                feedbackLockRef  
-              );
-            } else if (exerciseType === "SitToStand") {
-              exerciseData = SitStand_repDetection(
-                poses,
-                side,
-                feedbackRef,
-                sitLoweredCountRef,
-                sitUpCountRef,
-                sitLoweredFlagRef,
-                repCountRef,
-                targetReps,
-                handleExerciseComplete, 
-                keypointColorsRef,      
-                segmentColorsRef,
-                keypointsRef,
-                feedbackLockRef
-              );
+        const INITIAL_DELAY = 10000; // 5000 milliseconds = 5 seconds
+        let exerciseData = {};
+        if (elapsedTimeSinceDetectionStart < INITIAL_DELAY) {
+          // During initial delay, display "Get ready..." message
+          const remainingTime = Math.ceil((INITIAL_DELAY - elapsedTimeSinceDetectionStart) / 1000);
+          // setFeedback(`Get ready... ${remainingTime}`);
+          // feedbackRef.current = `Get ready in ... ${remainingTime}`;
+          // Determine the feedback message
+          let feedbackMessage;
+          if (remainingTime === INITIAL_DELAY / 1000) {
+            feedbackMessage = `Get ready in ${remainingTime}`;
+          } else {
+            feedbackMessage = `${remainingTime}`;
+          }
+
+          // Update feedback only when the remaining time changes
+          if (remainingTime !== previousRemainingTimeRef.current) {
+            feedbackRef.current = feedbackMessage;
+            previousRemainingTimeRef.current = remainingTime;
+          }
+
+        }
+        else {
+          // Reset previousRemainingTimeRef after countdown
+          previousRemainingTimeRef.current = null;
+
+          // Add the condition here
+          if (exerciseType === "SideArmRaise") {
+            // Pass the required config as an object
+            exerciseData = await SAR_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              armLoweredCountRef,
+              armUpCountRef,
+              armLoweredFlagRef,
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef
+            );
+          } else if (exerciseType === "SitToStand") {
+            exerciseData = SitStand_repDetection(
+              poses,
+              side,
+              feedbackRef,
+              sitLoweredCountRef,
+              sitUpCountRef,
+              sitLoweredFlagRef,
+              repCountRef,
+              targetReps,
+              handleExerciseComplete,
+              keypointColorsRef,
+              segmentColorsRef,
+              keypointsRef,
+              feedbackLockRef
+            );
           } else if (exerciseType === "MiniSquats") {
             exerciseData = MiniSquats_repDetection(
               poses,
@@ -180,8 +180,8 @@ const ExerciseTracker = ({
               sitLoweredFlagRef,     // Ref to track if the user has squatted down
               repCountRef,           // Reference to hold rep count
               targetReps,            // Target number of reps
-              handleExerciseComplete ,// Function to call when target reps are complete
-              keypointColorsRef,      
+              handleExerciseComplete,// Function to call when target reps are complete
+              keypointColorsRef,
               segmentColorsRef,
               keypointsRef,
               feedbackLockRef
@@ -197,7 +197,7 @@ const ExerciseTracker = ({
               repCountRef,
               targetReps,
               handleExerciseComplete,
-              keypointColorsRef,      
+              keypointColorsRef,
               segmentColorsRef,
               keypointsRef,
               feedbackLockRef
@@ -344,7 +344,7 @@ const ExerciseTracker = ({
             exerciseData = StandingStraightUp_detection(
               poses,
               feedbackRef,
-              keypointColorsRef,      
+              keypointColorsRef,
               segmentColorsRef,
               keypointsRef,
               feedbackLockRef
@@ -360,7 +360,7 @@ const ExerciseTracker = ({
               repCountRef,
               targetReps,
               handleExerciseComplete,
-              keypointColorsRef,      
+              keypointColorsRef,
               segmentColorsRef,
               keypointsRef,
               feedbackLockRef
@@ -376,28 +376,28 @@ const ExerciseTracker = ({
               repCountRef,
               targetReps,
               handleExerciseComplete,
-              keypointColorsRef,      
+              keypointColorsRef,
               segmentColorsRef,
               keypointsRef,
               feedbackLockRef
             );
           }
-          
-            if (exerciseData) {
-              setData(exerciseData);
-              // console.log("Updated exercise data:", exerciseData);
+
+          if (exerciseData) {
+            setData(exerciseData);
+            // console.log("Updated exercise data:", exerciseData);
           }
         }
-          // console.log("Updated keypoints data:", keypointsRef.current);
-          // console.log("Updated keypointColors data:", keypointColorsRef.current);
-          // console.log("Updated segmentColors data:", segmentColorsRef.current);
-          
-       drawCanvas(poses, videoWidth, videoHeight, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+        // console.log("Updated keypoints data:", keypointsRef.current);
+        // console.log("Updated keypointColors data:", keypointColorsRef.current);
+        // console.log("Updated segmentColors data:", segmentColorsRef.current);
 
-      // Update the hidden canvas for video recording
-      if (videoRecorderRef.current && videoRecorderRef.current.updateFrame) {
-        videoRecorderRef.current.updateFrame(poses, videoWidth, videoHeight);
-      }
+        drawCanvas(poses, videoWidth, videoHeight, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+
+        // Update the hidden canvas for video recording
+        if (videoRecorderRef.current && videoRecorderRef.current.updateFrame) {
+          videoRecorderRef.current.updateFrame(poses, videoWidth, videoHeight);
+        }
 
         // Update the hidden canvas for skeleton recording
         if (skeletonRecorderRef.current && skeletonRecorderRef.current.updateFrame) {
@@ -414,20 +414,20 @@ const ExerciseTracker = ({
           // Send the update every second
           const finalData1 = {
             fps: calculatedFps, // Directly use calculated FPS
-            feedback:feedbackRef.current,
-            completionStatusRef:completionStatusRef.current,
+            feedback: feedbackRef.current,
+            completionStatusRef: completionStatusRef.current,
             ...exerciseData,
             repCount: repCountRef.current
           };
 
 
           // Only send feedback if initial delay has passed
-            if (feedbackRef.current !== lastFeedbackSentRef.current) {
-              lastFeedbackSentRef.current = feedbackRef.current;
-              await sendUpdates(finalData1, exerciseType, activityData);
-            }
-          
-    
+          if (feedbackRef.current !== lastFeedbackSentRef.current) {
+            lastFeedbackSentRef.current = feedbackRef.current;
+            await sendUpdates(finalData1, exerciseType, activityData);
+          }
+
+
           frameCount = 0;
           lastFpsUpdate = currentTime;
         }
@@ -511,7 +511,7 @@ const ExerciseTracker = ({
     // Send the final update to the WebView
     // sendUpdates();
     const finalData = {
-       fps: fpsRef.current,
+      fps: fpsRef.current,
       ...data, // Send the latest data available
       feedback: "Target reps achieved!",
       completionStatusRef: true,
@@ -533,92 +533,93 @@ const ExerciseTracker = ({
     //     //setData({}); // Clear data
     //     setRepCount(0); // Reset rep count
     // }, 5000);
-};
+  };
 
-const handleVideoRecordingComplete = async(videoUrl) => {
-  console.log("Video recording complete. URL:", videoUrl);
-  // const a = document.createElement('a');
-  // a.href = videoUrl;
-  // a.download = 'exercise_video_recording.webm';
-  // a.click();
-  setDisplayMessage("Syncing video. Please wait...")
-  await uploadVideo(videoUrl, "videoRecording")
-  setDisplayMessage("Exericise video synced successfully!!")
-};
+  const handleVideoRecordingComplete = async (videoUrl) => {
+    console.log("Video recording complete. URL:", videoUrl);
+    // const a = document.createElement('a');
+    // a.href = videoUrl;
+    // a.download = 'exercise_video_recording.webm';
+    // a.click();
+    setDisplayMessage("Syncing video. Please wait...")
+    await uploadVideo(videoUrl, "videoRecording")
+    setDisplayMessage("Exericise video synced successfully!!")
+  };
 
-const handleSkeletonRecordingComplete = async (videoUrl) => {
-  console.log("Skeleton recording complete. URL:", videoUrl);
-  // const a = document.createElement('a');
-  // a.href = videoUrl;
-  // a.download = 'exercise_skeleton_recording.webm';
-  // a.click();
-  setDisplayMessage("Syncing skeleton video. Please wait...")
-  await uploadVideo(videoUrl, "skeleton")
-  setDisplayMessage("Skeleton video synced successfully!!")
-};
+  const handleSkeletonRecordingComplete = async (videoUrl) => {
+    console.log("Skeleton recording complete. URL:", videoUrl);
+    // const a = document.createElement('a');
+    // a.href = videoUrl;
+    // a.download = 'exercise_skeleton_recording.webm';
+    // a.click();
+    setDisplayMessage("Syncing skeleton video. Please wait...")
+    await uploadVideo(videoUrl, "skeleton")
+    setDisplayMessage("Skeleton video synced successfully!!")
+  };
 
-async function uploadVideo(file, type) {
-  // Skip upload in development mode
-  if (process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
-    console.log('[DEV] Skipping video upload in development mode');
-    return { success: true, message: 'Skipped in development mode' };
-  }
+  async function uploadVideo(file, type) {
+    // Skip upload in development mode 
+    // uncomment this only while local dev
+    // if (process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
+    //   console.log('[DEV] Skipping video upload in development mode');
+    //   return { success: true, message: 'Skipped in development mode' };
+    // }
 
-  const query = new URLSearchParams(window.location.search);
-  
-  if (!activityData?.tenant) {
-    console.error('Cannot upload video: Missing tenant data in activityData');
-    throw new Error('Missing tenant information');
-  }
+    const query = new URLSearchParams(window.location.search);
 
-  try {
-    const serviceUrl = getServiceUrl(activityData);
-    if (!serviceUrl?.USER_SERVICE) {
-      throw new Error('Invalid service URL configuration');
+    if (!activityData?.tenant) {
+      console.error('Cannot upload video: Missing tenant data in activityData');
+      throw new Error('Missing tenant information');
     }
 
-    const response = await axios.post(
-      `${serviceUrl.USER_SERVICE}/files/stream`,
-      file,
-      {
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          Authorization: `Bearer ${query.get("token")}`,
-          tenantId: activityData.tenant
-        },
-        params: {
-          fileName: `${activityData.activity || 'exercise'}_${type}_${Date.now()}_exercise.webm`,
-          isExerciseSync: true
-        },
-        timeout: 30000 // 30 second timeout
+    try {
+      const serviceUrl = getServiceUrl(activityData);
+      if (!serviceUrl?.USER_SERVICE) {
+        throw new Error('Invalid service URL configuration');
       }
-    );
 
-    console.log('Upload successful: ', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Error uploading video: ', error);
-    if (error.response) {
-      // The request was made and the server responded with a status code
-      console.error('Response data:', error.response.data);
-      console.error('Response status:', error.response.status);
-      console.error('Response headers:', error.response.headers);
-    } else if (error.request) {
-      // The request was made but no response was received
-      console.error('No response received:', error.request);
-    } else {
-      // Something happened in setting up the request
-      console.error('Error:', error.message);
+      const response = await axios.post(
+        `${serviceUrl.USER_SERVICE}/files/stream`,
+        file,
+        {
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            Authorization: `Bearer ${query.get("token")}`,
+            tenantId: activityData.tenant
+          },
+          params: {
+            fileName: `${activityData.activity || 'exercise'}_${type}_${Date.now()}_exercise.webm`,
+            isExerciseSync: true
+          },
+          timeout: 30000 // 30 second timeout
+        }
+      );
+
+      console.log('Upload successful: ', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error uploading video: ', error);
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        console.error('Response data:', error.response.data);
+        console.error('Response status:', error.response.status);
+        console.error('Response headers:', error.response.headers);
+      } else if (error.request) {
+        // The request was made but no response was received
+        console.error('No response received:', error.request);
+      } else {
+        // Something happened in setting up the request
+        console.error('Error:', error.message);
+      }
+      throw error;
     }
-    throw error;
   }
-}
 
 
 
   return (
     <div>
-       <Webcam
+      <Webcam
         ref={webcamRef}
         playsInline
         controls={false}
@@ -640,7 +641,7 @@ async function uploadVideo(file, type) {
         videoConstraints={{
           facingMode: "user",
         }}
-/>
+      />
       <canvas
         ref={canvasRef}
         style={{
@@ -656,32 +657,32 @@ async function uploadVideo(file, type) {
           height: "100vh",
           objectFit: "fill",
           transform: "scaleX(-1)", // This flips the video horizontally
-        }}
+        }}
       />
       {/* Invisible VideoRecorder Component */}
       <VideoRecorder
-              ref={videoRecorderRef}
-              webcamRef={webcamRef}
-              canvasRef={canvasRef}         // <-- add this
-              keypointsRef={keypointsRef}
-              keypointColorsRef={keypointColorsRef}
-              segmentColorsRef={segmentColorsRef}
-              isVideoRecording={isVideoRecording} 
-              onRecordingComplete={handleVideoRecordingComplete}
-            />
+        ref={videoRecorderRef}
+        webcamRef={webcamRef}
+        canvasRef={canvasRef}         // <-- add this
+        keypointsRef={keypointsRef}
+        keypointColorsRef={keypointColorsRef}
+        segmentColorsRef={segmentColorsRef}
+        isVideoRecording={isVideoRecording}
+        onRecordingComplete={handleVideoRecordingComplete}
+      />
       {/* Invisible SkeletonRecorder Component */}
       <SkeletonRecorder
-                    ref={skeletonRecorderRef}
-                    webcamRef={webcamRef}
-                    canvasRef={canvasRef}         // <-- add this
-                    keypointsRef={keypointsRef}
-                    keypointColorsRef={keypointColorsRef}
-                    segmentColorsRef={segmentColorsRef}
-                    isSkeletonRecording={isSkeletonRecording}
-                    onRecordingComplete={handleSkeletonRecordingComplete}
-                  />
-        {/* Container for all informational elements */}
-        {/* <div style={{ 
+        ref={skeletonRecorderRef}
+        webcamRef={webcamRef}
+        canvasRef={canvasRef}         // <-- add this
+        keypointsRef={keypointsRef}
+        keypointColorsRef={keypointColorsRef}
+        segmentColorsRef={segmentColorsRef}
+        isSkeletonRecording={isSkeletonRecording}
+        onRecordingComplete={handleSkeletonRecordingComplete}
+      />
+      {/* Container for all informational elements */}
+      {/* <div style={{ 
         position: 'absolute', 
         top: 10, 
         left: 10, 
@@ -691,8 +692,8 @@ async function uploadVideo(file, type) {
         gap: '5px',  // Reduced gap to keep elements close together
         zIndex: 10 
       }}> */}
-        {/* FPS Display */}
-        {/* <div
+      {/* FPS Display */}
+      {/* <div
           style={{
             color: 'white',
             backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -703,9 +704,9 @@ async function uploadVideo(file, type) {
         >
           FPS: {fps}
         </div> */}
-  
-        {/* Reps Display */}
-        {/* <div
+
+      {/* Reps Display */}
+      {/* <div
           style={{
             color: 'white',
             backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -716,9 +717,9 @@ async function uploadVideo(file, type) {
         >
           Reps: {repCount}
         </div> */}
-  
-        {/* Feedback Display */}
-        {/* <div
+
+      {/* Feedback Display */}
+      {/* <div
           style={{
             color: 'white',
             backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -729,12 +730,12 @@ async function uploadVideo(file, type) {
         >
           {feedback}
         </div> */}
-  
-{/* Conditional Rendering Based on Exercise Type */}
-{/* {exerciseType === "SideArmRaise" && ( */}
-  <>
-    {/* Arm Angle Display */}
-    {/* <div
+
+      {/* Conditional Rendering Based on Exercise Type */}
+      {/* {exerciseType === "SideArmRaise" && ( */}
+      <>
+        {/* Arm Angle Display */}
+        {/* <div
       style={{
         color: "white",
         backgroundColor: "rgba(0, 0, 0, 0.6)",
@@ -746,8 +747,8 @@ async function uploadVideo(file, type) {
       Arm Angle: {armAngle?.toFixed(2)}
     </div> */}
 
-    {/* Shoulder Angle Display */}
-    {/* <div
+        {/* Shoulder Angle Display */}
+        {/* <div
       style={{
         color: "white",
         backgroundColor: "rgba(0, 0, 0, 0.6)",
@@ -758,12 +759,12 @@ async function uploadVideo(file, type) {
     >
       Shoulder Angle: {shoulderAngle?.toFixed(2)}
     </div> */}
-  </>
-{/* )} */}
+      </>
+      {/* )} */}
 
-{/* {exerciseType === "SitToStand" && ( */}
-  <>
-    {/* <div
+      {/* {exerciseType === "SitToStand" && ( */}
+      <>
+        {/* <div
       style={{
         color: 'white',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -796,13 +797,13 @@ async function uploadVideo(file, type) {
     >
       Hip Distance: {hipDistance?.toFixed(2)}
     </div> */}
-  </>
-{/* )} */}
+      </>
+      {/* )} */}
 
-{/* Conditional Rendering Based on Exercise Type */}
-{/* {exerciseType === "MiniSquats" && ( */}
-  <>
-    {/* <div
+      {/* Conditional Rendering Based on Exercise Type */}
+      {/* {exerciseType === "MiniSquats" && ( */}
+      <>
+        {/* <div
       style={{
         color: "white",
         backgroundColor: "rgba(0, 0, 0, 0.6)",
@@ -825,12 +826,12 @@ async function uploadVideo(file, type) {
     >
       Spine Angle: {spineAngle?.toFixed(2)}
     </div> */}
-  </>
-{/* )} */}
-{/* Conditional Rendering Based on Exercise Type */}
-{/* {exerciseType === "LongArcQuad" && ( */}
-  <>
-    {/* <div
+      </>
+      {/* )} */}
+      {/* Conditional Rendering Based on Exercise Type */}
+      {/* {exerciseType === "LongArcQuad" && ( */}
+      <>
+        {/* <div
       style={{
         color: "white",
         backgroundColor: "rgba(0, 0, 0, 0.6)",
@@ -853,12 +854,12 @@ async function uploadVideo(file, type) {
     >
       Spine Angle: {spineAngle?.toFixed(2)}
     </div> */}
-  </>
-{/* )} */}
- {/* {exerciseType === "StandingStraightUp" && ( */}
-  <>
-    {/* Head Angle Display */}
-    {/* <div
+      </>
+      {/* )} */}
+      {/* {exerciseType === "StandingStraightUp" && ( */}
+      <>
+        {/* Head Angle Display */}
+        {/* <div
       style={{
         color: 'white',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -870,8 +871,8 @@ async function uploadVideo(file, type) {
       Head Angle: {headTilt?.toFixed(2)}°
     </div> */}
 
-    {/* Shoulder Alignment Display */}
-    {/* <div
+        {/* Shoulder Alignment Display */}
+        {/* <div
       style={{
         color: 'white',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -883,8 +884,8 @@ async function uploadVideo(file, type) {
       Shoulder Alignment: {shoulderAlignment?.toFixed(2)}°
     </div> */}
 
-    {/* Hip Alignment Display */}
-    {/* <div
+        {/* Hip Alignment Display */}
+        {/* <div
       style={{
         color: 'white',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -896,8 +897,8 @@ async function uploadVideo(file, type) {
       Hip Alignment: {hipAlignment?.toFixed(2)}°
     </div> */}
 
-    {/* Knee Alignment Display */}
-    {/* <div
+        {/* Knee Alignment Display */}
+        {/* <div
       style={{
         color: 'white',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -908,7 +909,7 @@ async function uploadVideo(file, type) {
     >
       Knee Alignment: {kneeAlignment?.toFixed(2)}°
     </div> */}
-    {/* <div
+        {/* <div
             style={{
               color: 'white',
               backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -919,13 +920,13 @@ async function uploadVideo(file, type) {
           >
             Time Elapsed: {timeElapsed.toFixed(2)} seconds
           </div> */}
-  </>
- {/* )} */}
+      </>
+      {/* )} */}
 
-     {/* </div> */}
-  </div>
-);
-  
+      {/* </div> */}
+    </div>
+  );
+
 };
 
 export default ExerciseTracker;
