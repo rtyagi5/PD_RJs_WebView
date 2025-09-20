@@ -180,7 +180,7 @@ export const drawCanvas = (poses, videoWidth, videoHeight, ctx, keypoints, keypo
 };
 
 const updates = []
-export const sendUpdates = async (data, exerciseType, activityData) => {
+export const sendUpdates = async (data, exerciseType, activityData, setDisplayMessage) => {
   // // In development, we still want to post to WebView/parent but skip server API calls
   // const devMode = process.env.REACT_APP_DEVELOPMENT_MODE === 'true';
   // if (devMode) {
@@ -204,7 +204,6 @@ export const sendUpdates = async (data, exerciseType, activityData) => {
     completionStatusRef: data.completionStatusRef,
   };
 
-  let sync = filteredData.repCount > 0
   selectedConfig.forEach(param => {
     if (data[param] !== undefined) {
       filteredData[param] = data[param];
@@ -214,6 +213,7 @@ export const sendUpdates = async (data, exerciseType, activityData) => {
   updates.push(filteredData);
   // Always send completion updates to the server
   if (data?.completionStatusRef) {
+    setDisplayMessage("Syncing exercise data...");
     const query = new URLSearchParams(window.location.search);
     await axios.post(`${getServiceUrl(activityData).EXERCISE_SERVICE}/activities/exercise-data`, {
       updates,
@@ -225,9 +225,11 @@ export const sendUpdates = async (data, exerciseType, activityData) => {
         tenantId: activityData?.tenant
       }
     }).catch((err) => {
+      setDisplayMessage("Failed to sync exercise data. Please try again.");
       console.log("failed in sending the data to server");
     }).then((res) => {
-      console.log("server sync success");
+      setDisplayMessage("Data synced successfully!!");
+      console.log("server sync success", res);
     })
   }
 

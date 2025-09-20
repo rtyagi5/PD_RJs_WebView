@@ -199,7 +199,7 @@ export default function ExerciseTrackerRefactored({
       repCount: repCountRef.current,
       ...lastExerciseDataRef.current,
     };
-    await sendUpdates(finalData, exerciseType, activityData);
+    await sendUpdates(finalData, exerciseType, activityData, setDisplayMessage);
 
     setIsDetecting(false);
     setIsVideoRecording(false);
@@ -226,7 +226,7 @@ export default function ExerciseTrackerRefactored({
       };
       if (feedbackRef.current !== lastFeedbackSentRef.current) {
         lastFeedbackSentRef.current = feedbackRef.current;
-        await sendUpdates(finalData, exerciseType, activityData);
+        await sendUpdates(finalData, exerciseType, activityData, setDisplayMessage);
       }
     },
     [exerciseType, activityData]
@@ -515,7 +515,7 @@ export default function ExerciseTrackerRefactored({
             Math.floor(((timeHeldMs ?? 0) + (timeRemainingMs ?? 0)) / 1000) || (Number(targetReps) || 0);
           hudLabel = 'time';
           hudValue = `${secs}s / ${targetSecs}s`;
-          setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} hold ${hudValue}`);
+          // setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} hold ${hudValue}`);
         } else {
           //   const metricKey = spec?.primaryMetric || METRIC_MAP[exerciseType]?.[0] || null;
           //   const mv = metricKey && Number.isFinite(feat[metricKey]) ? Math.round(feat[metricKey]) : '—';
@@ -526,7 +526,7 @@ export default function ExerciseTrackerRefactored({
           const rawVal = metricKey && Number.isFinite(feat[metricKey]) ? feat[metricKey] : NaN;
           hudLabel = metricKey || 'metric';
           hudValue = pretty(metricKey, rawVal);
-          setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} reps=${repCount} ${hudLabel}=${hudValue}`);
+          // setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} reps=${repCount} ${hudLabel}=${hudValue}`);
         }
 
         // transitions / reps logs

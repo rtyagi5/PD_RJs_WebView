@@ -82,6 +82,7 @@ function App() {
           setTargetReps(parseInt(repsFromURL));
           setSide(sideFromURL);
           setExerciseType(exerciseTypeFromURL); // set exercise type
+          setIsDetecting(true);
           setIsVideoRecording(details?.patient?.allowExerciseVideo ?? true);   // video recording
           setIsSkeletonRecording(details?.patient?.allowSkeletonVideo ?? true);   // skeleton recording
         }
@@ -94,6 +95,7 @@ function App() {
   }
 
   const handleStartExercise = () => {
+    setIsDetecting(true);
     setIsSkeletonRecording(true);   // new line
     setIsVideoRecording(true);   // new line
   };
@@ -105,25 +107,24 @@ function App() {
       <header className="App-header">
 
         {displayMessage ? displayMessage : !isDetecting ? <>
-          {exerciseType ?
+          {process.env.REACT_APP_DEVELOPMENT_MODE === 'true' && exerciseType ?
             <div>
               {InstructionUI[exerciseType]}
               <button onClick={() => {
                 setIsDetecting(true);
               }}
-                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-150 ease-in-out">
+                className="mt-4 px-4 py-2 text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-150 ease-in-out">
                 Start Exercise
               </button>
               {process.env.REACT_APP_DEVELOPMENT_MODE === 'true' &&
                 <button onClick={() => {
                   setExerciseType(null);
                 }}
-                  className="mt-4 ml-4 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition duration-150 ease-in-out">
+                  className="mt-4 ml-4 px-4 py-2 text-base bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition duration-150 ease-in-out">
                   Change Exercise
                 </button>}
             </div>
             :
-            process.env.REACT_APP_DEVELOPMENT_MODE === 'true' &&
             <DropdownSelector
               targetReps={targetReps}
               setTargetReps={setTargetReps}
@@ -162,6 +163,7 @@ const DropdownSelector = ({ targetReps, setTargetReps, exerciseType, side, setSi
         type="number"
         name="targetReps"
         value={targetReps}
+        className="block w-full px-4 py-2 mb-4 text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-150 ease-in-out"
         onChange={(e) => setTargetReps(parseInt(e.target.value))}
         placeholder="Enter number of reps"
       />
