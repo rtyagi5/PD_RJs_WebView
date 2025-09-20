@@ -116,13 +116,12 @@ function App() {
                 className="mt-4 px-4 py-2 text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-150 ease-in-out">
                 Start Exercise
               </button>
-              {process.env.REACT_APP_DEVELOPMENT_MODE === 'true' &&
-                <button onClick={() => {
-                  setExerciseType(null);
-                }}
-                  className="mt-4 ml-4 px-4 py-2 text-base bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition duration-150 ease-in-out">
-                  Change Exercise
-                </button>}
+              <button onClick={() => {
+                setExerciseType(null);
+              }}
+                className="mt-4 ml-4 px-4 py-2 text-base bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition duration-150 ease-in-out">
+                Change Exercise
+              </button>
             </div>
             :
             <DropdownSelector
