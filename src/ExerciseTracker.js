@@ -424,7 +424,7 @@ const ExerciseTracker = ({
           // Only send feedback if initial delay has passed
           if (feedbackRef.current !== lastFeedbackSentRef.current) {
             lastFeedbackSentRef.current = feedbackRef.current;
-            await sendUpdates(finalData1, exerciseType, activityData);
+            await sendUpdates(finalData1, exerciseType, activityData, setDisplayMessage);
           }
 
 
@@ -518,7 +518,7 @@ const ExerciseTracker = ({
       repCount: repCountRef.current
     };
 
-    await sendUpdates(finalData, exerciseType, activityData);
+    await sendUpdates(finalData, exerciseType, activityData, setDisplayMessage);
     setIsDetecting(false);
     setIsVideoRecording(false);  // This triggers the video recorder to stop
     setIsSkeletonRecording(false);  // This triggers the video recorder to stop
