@@ -135,6 +135,7 @@ export default function ExerciseTrackerRefactored({
   const keypointsRef = useRef([]);
   const keypointColorsRef = useRef('#66FF00');
   const segmentColorsRef = useRef('#66FF00');
+  const feedbackLogRef = useRef('');
   const feedbackRef = useRef('Initializing...');
   const prevPhaseRef = useRef(null);
   const prevRepRef = useRef(0);
@@ -501,6 +502,12 @@ export default function ExerciseTrackerRefactored({
         // unify counters / feedback
         repCountRef.current = repCount;
         feedbackRef.current = feedback || feedbackRef.current;
+
+        // Log feedback changes for validation
+        if (feedbackRef.current && feedbackRef.current !== feedbackLogRef.current) {
+          console.log(`[Feedback] ${engine?.spec?.name}: ${feedbackRef.current}`);
+          feedbackLogRef.current = feedbackRef.current;
+        }
 
         // (debug logs removed to minimize changes)
 
