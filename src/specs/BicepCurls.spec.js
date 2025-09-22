@@ -33,22 +33,22 @@ const BicepCurls = {
     rep: { from: 'lowered', to: 'raised' },
   
     feedback: [
-      {
-        when: "phase=='lowered'",
-        say: 'Curl up',
-        highlight: ({ setHighlight }) => {
-          setHighlight({
-            keypoints: [
-              'left_shoulder','left_elbow','left_wrist',
-              'right_shoulder','right_elbow','right_wrist'
-            ],
-            color: '#FFB020'
-          });
-        }
+      // Lowered: start cue (green)
+      { when: "phase=='lowered'", say: 'Start Position - Curl up',
+        highlight: ({ setHighlight }) =>
+          setHighlight({ keypoints: ['left_shoulder','left_elbow','left_wrist','right_shoulder','right_elbow','right_wrist'], color: '#66FF00' })
       },
+
+      // Transition: neither lowered nor raised (orange)
+      { when: "!(phase=='lowered' || phase=='raised')", say: 'Keep going',
+        highlight: ({ setHighlight }) =>
+          setHighlight({ keypoints: ['left_shoulder','left_elbow','left_wrist','right_shoulder','right_elbow','right_wrist'], color: '#FFB020' })
+      },
+
+      // Raised: highlight the more flexed arm (green)
       {
         when: "phase=='raised'",
-        say: 'Squeeze at top',
+        say: 'Squeeze at top - lower slowly',
         highlight: ({ setHighlight, features }) => {
           const l = features.elbowAngleL, r = features.elbowAngleR;
           let side = null;
@@ -58,17 +58,13 @@ const BicepCurls = {
   
           const pts = side
             ? [`${side}_shoulder`, `${side}_elbow`, `${side}_wrist`]
-            : [
-                'left_shoulder','left_elbow','left_wrist',
-                'right_shoulder','right_elbow','right_wrist'
-              ];
+            : ['left_shoulder','left_elbow','left_wrist','right_shoulder','right_elbow','right_wrist'];
           setHighlight({ keypoints: pts, color: '#66FF00' });
         }
       },
-      {
-        when: "Number.isFinite(trunkAngleMin) && trunkAngleMin < trunkUprightMin",
-        say: 'Stand tall'
-      },
+
+      // Posture cue independent of the phase gating
+      { when: "Number.isFinite(trunkAngleMin) && trunkAngleMin < trunkUprightMin", say: 'Stand tall' },
     ],
   
     // Compute both elbows & a trunk posture cue
@@ -110,6 +106,45 @@ const BicepCurls = {
       };
     },
   };
+
+// Smooth color transitions with a short hold for orange to avoid flicker.
+BicepCurls.highlights = function ({ setHighlight, features }) {
+  const down = BicepCurls.elbowFlexDown;
+  const up   = BicepCurls.elbowFlexUp;
+  const l = features.elbowAngleL;
+  const r = features.elbowAngleR;
+  const minElbow = features.elbowAngleMin;
+
+  // Determine phase-like state using thresholds (mirrors spec logic)
+  const isLowered = Number.isFinite(minElbow) && minElbow >= down;
+  const isRaised  = Number.isFinite(minElbow) && minElbow <= up;
+
+  // Choose which side to highlight when raised (more flexed = smaller angle)
+  let pts = ['left_shoulder','left_elbow','left_wrist','right_shoulder','right_elbow','right_wrist'];
+  if (isRaised) {
+    let side = null;
+    if (Number.isFinite(l) && Number.isFinite(r)) side = (l <= r ? 'left' : 'right');
+    else if (Number.isFinite(l)) side = 'left';
+    else if (Number.isFinite(r)) side = 'right';
+    
+    if (side) {
+      pts = [`${side}_shoulder`, `${side}_elbow`, `${side}_wrist`];
+    }
+  }
+
+  // Color with orange hold
+  let desired = '#66FF00';
+  if (!isLowered && !isRaised) desired = '#FFB020';
+
+  if (!this._hl) this._hl = { lastColor: null, lastTs: 0 };
+  const now = Date.now();
+  const HOLD_MS = 250;
+  const { lastColor, lastTs } = this._hl;
+  if (lastColor === '#FFB020' && now - lastTs < HOLD_MS) desired = '#FFB020';
+  if (desired !== lastColor) { this._hl.lastColor = desired; this._hl.lastTs = now; }
+
+  setHighlight({ keypoints: pts, color: desired });
+};
   
   export default BicepCurls;
   

@@ -2,8 +2,6 @@
 // ExerciseTracker_refactored.js
 // ---------------------------------------------
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import * as tf from '@tensorflow/tfjs';
-import * as posedetection from '@tensorflow-models/pose-detection';
 import Webcam from 'react-webcam';
 import { PhaseMachine } from './phase_machine';
 import { EXERCISE_SPECS } from './registry';
@@ -66,8 +64,8 @@ export const METRIC_MAP = {
   LiftsAndChops: ['handsHeightNorm'],
   StepUps: ['ankleLiftNormLead', 'kneeAngleLead'],
   WallPushUp: ['elbowOffsetMax', 'trunkAngleMin'],
-  CalfRaisesSeated: ['plantarMetric', 'plantarDelta', 'plantarUp', 'plantarDown', 'trunkAngleMin'],
-  CalfRaisesStanding: ['footPitchDelta', 'pitchUp', 'pitchDown', 'kneeAngleMin', 'trunkAngleMin'],
+  CalfRaisesSeated: ['ankleAngleActive', 'degLowerMin', 'degLowerMax', 'degRaiseDynamic', 'startAngle', 'activeSide'],
+  CalfRaisesStanding: ['activeToeAngle', 'degRaiseDynamic', 'activeSide'],
   SeatedDorsiflexion: ['footPitchDelta', 'pitchUp', 'pitchDown', 'trunkAngleMin'],
   StandingDorsiflexion: ['footPitchDelta', 'pitchUp', 'pitchDown', 'trunkAngleMin'],
 };
@@ -109,7 +107,15 @@ const SKIP_SMOOTH = new Set([
   // Wall Push-Up thresholds
   'elbowOffsetDown', 'elbowOffsetUp', 'trunkStraightMin', 'elbowLevelTol',
   // Calf Raises Seated dynamic thresholds
-  'plantarMetric', 'plantarUp', 'plantarDown', 'plantarDelta', 'ankleAngle', 'ankleAngleUp', 'ankleAngleDown', 'footPitchDelta', 'footPitchDeltaMin',
+  'plantarMetric', 'plantarUp', 'plantarDown', 'plantarDelta', 'ankleAngle', 'ankleAngleUp', 'ankleAngleDown', 'footPitchDelta', 'footPitchDeltaMin', 'footPitchDeltaActive',
+  // New CalfRaisesSeated (angle-based) primary/gates
+  'anklePlantarPctActive', 'pctUp', 'pctDown', 'anklePlantarDeltaActive', 'degUp', 'degDown',
+  // New CalfRaisesSeated gates (do NOT smooth)
+  'toeDeltaActive', 'toeStayTol', 'dPitchActive', 'dPitchMin', 'ankleAngleDeltaActive', 'ankleAngleDeltaMin', 'angleGateOn',
+  // Degree-based extras
+  'dPlantarPerSec', 'degSlopeMin', 'heelLiftActive', 'heelLiftMin',
+  // Angle-only ready/raise gates
+  'ankleAngleActive', 'activeToeAngle', 'readyAngleActive', 'raiseDeltaActive', 'readyMin', 'readyMax', 'raiseUp', 'raiseDown',
   // Calf Raises Standing dynamic thresholds
   'footPitchDelta', 'pitchUp', 'pitchDown', 'kneeAngleMin', 'kneeStraightMin', 'trunkAngleMin',
   // Seated Dorsiflexion thresholds & guards (do NOT smooth)
@@ -522,7 +528,7 @@ export default function ExerciseTrackerRefactored({
             Math.floor(((timeHeldMs ?? 0) + (timeRemainingMs ?? 0)) / 1000) || (Number(targetReps) || 0);
           hudLabel = 'time';
           hudValue = `${secs}s / ${targetSecs}s`;
-          // setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} hold ${hudValue}`);
+          setDisplayMessage?.(`${spec?.name || exerciseType}: phase=${phase || '—'} hold ${hudValue}`);
         } else {
           //   const metricKey = spec?.primaryMetric || METRIC_MAP[exerciseType]?.[0] || null;
           //   const mv = metricKey && Number.isFinite(feat[metricKey]) ? Math.round(feat[metricKey]) : '—';
@@ -533,16 +539,18 @@ export default function ExerciseTrackerRefactored({
           const rawVal = metricKey && Number.isFinite(feat[metricKey]) ? feat[metricKey] : NaN;
           hudLabel = metricKey || 'metric';
           hudValue = pretty(metricKey, rawVal);
-          // setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} reps=${repCount} ${hudLabel}=${hudValue}`);
+          setDisplayMessage?.(`${spec?.name || exerciseType}: phase=${phase || '—'} reps=${repCount} ${hudLabel}=${hudValue}`);
         }
 
         // transitions / reps logs
         if (phase && phase !== prevPhaseRef.current) {
           console.log(`[${engine?.spec?.name}] Phase -> ${phase}; ${hudLabel}=${hudValue}`);
+          setDisplayMessage?.(`${spec?.name || exerciseType}: phase=${phase} reps=${repCount} ${hudLabel}=${hudValue}`);
           prevPhaseRef.current = phase;
         }
         if (repDelta > 0 || repCount !== prevRepRef.current) {
           console.log(`[${engine?.spec?.name}] Rep +1 -> ${repCount}`);
+          setDisplayMessage?.(`${spec?.name || exerciseType}: Rep +1 → ${repCount} (${hudLabel}=${hudValue})`);
           prevRepRef.current = repCount;
         }
 

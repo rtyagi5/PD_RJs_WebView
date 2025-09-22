@@ -4,36 +4,14 @@
 // (toe.y - heel.y, normalized by shank). Lock a baseline after short warmup.
 // Optional knee-straight guard; everything else is intentionally minimal.
 
-let __footDYBaseline = NaN;   // baseline toe.y - heel.y (normalized)
-let __baselineFrames = 0;
-let __baselineLocked = false;
+// Angle-only debug previous values
+let __prevToeL = NaN, __prevHeelL = NaN, __prevToeR = NaN, __prevHeelR = NaN;
+let __lastLogTs = 0;
+// Angle-based rep state (absolute thresholds)
+let __loweredTsActive = 0; // dwell timer when in absolute lowered band (side-agnostic)
+let __prevReadyFlag = false; // for one-shot READY log without relying on 'this'
 
-let __prevFootDY = NaN;
-
-const __BASE_FRAMES = 60;      // ~2s @ 30fps for faster initialization
-const __EMA_ALPHA_INIT = 0.15;  // Much faster initial settling
-const __EMA_ALPHA_SLOW = 0.05;  // More responsive to changes
-
-const ema = (prev, v, a) => (Number.isFinite(prev) ? (a*v + (1-a)*prev) : v);
-
-// URL tuning: ?footPctMin=0.10&kneeStraightMin=150
-function getPct(name, fallback) {
-  const v = Number(new URLSearchParams(window.location.search).get(name));
-  return (Number.isFinite(v) && v > 0 && v < 0.5) ? v : fallback;
-}
-function getNum(name, fallback) {
-  const v = Number(new URLSearchParams(window.location.search).get(name));
-  return Number.isFinite(v) ? v : fallback;
-}
-
-// Light sanity guards
-function clampRangeOrNaN(v, lo = -0.2, hi = 2.0) {
-  return Number.isFinite(v) && v > lo && v < hi ? v : NaN;
-}
-function clampJump(prev, v, maxJump = 0.5) {
-  if (!Number.isFinite(v) || !Number.isFinite(prev)) return v;
-  return Math.abs(v - prev) > maxJump ? prev : v;
-}
+// (Removed unused baseline helpers)
 
 const CalfRaisesStanding = {
   name: 'CalfRaisesStanding',
@@ -41,47 +19,83 @@ const CalfRaisesStanding = {
   side: 'both',
   mode: 'rep',
 
-  // For the HUD we show the rotation (more intuitive than a ratio)
-  primaryMetric: 'footPitchDelta',
+  // For the HUD show the active toe angle
+  primaryMetric: 'activeToeAngle',
 
-  // Very relaxed timing for maximum sensitivity
-  dwellMs: 200,        // Minimal hold time
-  refractoryMs: 500,   // Minimal cooldown between reps
+  // Timing: short hold, moderate cooldown so quick, real raises count
+  dwellMs: 150,        // Short hold to accommodate balance
+  refractoryMs: 500,   // Cooldown between reps
 
   // Posture guards with more tolerance
   kneeStraightMin: 145,  // Slightly more tolerant of bent knees
   trunkUprightMin: 155,  // Slightly more tolerant of forward lean
 
   onStart: () => {
-    __footDYBaseline = NaN;
-    __baselineFrames = 0;
-    __baselineLocked = false;
-    __prevFootDY = NaN;
+    // reset per-session state
+    __prevToeL = __prevHeelL = __prevToeR = __prevHeelR = NaN;
+    __lastLogTs = 0;
+    __loweredTsActive = 0;
+    // Do not auto-enable debug; logs are gated by window.__LOG_ANGLES
   },
 
-  highlights: ({ setHighlight }) => {
-    setHighlight({
-      color: '#00E5FF',
-      keypoints: [
-        ['left_ankle','left_heel'],   ['left_heel','left_foot_index'],
-        ['right_ankle','right_heel'], ['right_heel','right_foot_index'],
-      ],
-    });
+  highlights: function ({ setHighlight, features }) {
+    const f = features || {};
+    const activeToe = f.activeToeAngle;
+    const raiseDeg = f.degRaiseDynamic;
+    const armed = !!f.armReady;
+
+    // Posture checks
+    const kMin = f.kneeAngleMin; const kThr = f.kneeStraightMin;
+    const tMin = f.trunkAngleMin; const tThr = f.trunkUprightMin;
+    const badKnee  = Number.isFinite(kMin) && Number.isFinite(kThr) && kMin < (kThr - 10);
+    const badTrunk = Number.isFinite(tMin) && Number.isFinite(tThr) && tMin < tThr;
+    const badPosture = badKnee || badTrunk;
+
+    const inLowered = !!f.loweredOk;
+    const inRaised  = Number.isFinite(activeToe) && Number.isFinite(raiseDeg) && activeToe >= raiseDeg;
+
+    let color = '#FFB020'; // transition orange by default
+    if (badPosture) color = '#FF4D4F'; // red
+    else if (inLowered && armed) color = '#66FF00'; // green when ok to raise
+    else if (inRaised) color = '#66FF00'; // green at top
+    else if (inLowered && !armed) color = '#66CCFF'; // cool blue while waiting to arm
+
+    // Add hysteresis like Seated so color doesn't flicker
+    if (!this._hl) this._hl = { lastColor: null, lastTs: 0 };
+    const now = Date.now();
+    const HOLD_MS = 250;
+    const { lastColor, lastTs } = this._hl;
+    if (lastColor === '#FFB020' && now - lastTs < HOLD_MS) color = '#FFB020';
+    if (color !== lastColor) { this._hl.lastColor = color; this._hl.lastTs = now; }
+
+    // Emphasize active side keypoints if available, else draw both sides
+    const uiSide = String(f?.side || '').toLowerCase();
+    const active = f?.activeSide || (uiSide === 'left' || uiSide === 'right' ? uiSide : null);
+    let pts;
+    if (active === 'left' || active === 'right') {
+      const s = active;
+      pts = [`${s}_hip`, `${s}_knee`, `${s}_ankle`, `${s}_heel`, `${s}_foot_index`];
+    } else {
+      pts = ['left_ankle','left_heel','left_foot_index','right_ankle','right_heel','right_foot_index'];
+    }
+
+    setHighlight({ color, keypoints: pts });
   },
 
-  // State machine with relaxed conditions for better detection
+  // State machine (angle-based)
   phases: [
     {
       id: 'lowered',
-      enter: "Number.isFinite(footPitchDelta) && Number.isFinite(pitchDown) && footPitchDelta <= pitchDown"
+      enter: "loweredOk===true"
     },
     {
       id: 'raised',
       enter: "(" +
-        " Number.isFinite(footPitchDelta) && Number.isFinite(pitchUp) && " +
-        " footPitchDelta >= pitchUp" +  // Must reach threshold
+        " Number.isFinite(activeToeAngle) && Number.isFinite(degRaiseDynamic) && (" +
+          " activeToeAngle >= degRaiseDynamic" +
+        ")" +
         " ) && (" +
-        " !Number.isFinite(kneeStraightMin) || !Number.isFinite(kneeAngleMin) || kneeAngleMin >= (kneeStraightMin - 10)" +  // 10° tolerance
+        " !Number.isFinite(kneeStraightMin) || !Number.isFinite(kneeAngleMin) || kneeAngleMin >= (kneeStraightMin - 10)" +
         " )"
     },
   ],
@@ -90,6 +104,7 @@ const CalfRaisesStanding = {
 
   feedback: [
     { when: "phase=='lowered'", say: 'Lift your heels' },
+    { when: "phase=='lowered' && !armReady", say: 'Hold neutral briefly to arm' },
     { when: "phase=='raised'",  say: 'Nice — control down' },
     { when: "Number.isFinite(kneeAngleMin) && Number.isFinite(kneeStraightMin) && kneeAngleMin < kneeStraightMin", say: 'Keep knees straighter' },
     { when: "Number.isFinite(trunkAngleMin) && trunkAngleMin < trunkUprightMin", say: 'Stand tall' },
@@ -100,104 +115,86 @@ const CalfRaisesStanding = {
     const La = utils.kp(kps, 'left_ankle'); const Ra = utils.kp(kps, 'right_ankle');
     const Lh = utils.kp(kps, 'left_heel');  const Rh = utils.kp(kps, 'right_heel');
     const Lfi = utils.kp(kps, 'left_foot_index'); const Rfi = utils.kp(kps, 'right_foot_index');
-    const Ls = utils.kp(kps, 'left_shoulder'); const Rs = utils.kp(kps, 'right_shoulder');
-    const Lhip = utils.kp(kps, 'left_hip');  const Rhip = utils.kp(kps, 'right_hip');
 
-    const P = utils.present, D = utils.calculateDistance, A = utils.angle;
+    const P = utils.present, A = utils.angle;
+    const vis = p => (p?.score || 0) >= 0.15;
     const finite = v => Number.isFinite(v);
-    const avg = a => { const v = a.filter(finite); return v.length ? v.reduce((x,y)=>x+y,0)/v.length : NaN; };
 
-    const shankLenL = (P(Lk)&&P(La)) ? Math.max(D(Lk, La), 1e-6) : NaN;
-    const shankLenR = (P(Rk)&&P(Ra)) ? Math.max(D(Rk, Ra), 1e-6) : NaN;
+    const angToeL  = (P(Lk)&&P(La)&&P(Lfi)&&vis(La)&&vis(Lfi)) ? A(Lk, La, Lfi) : NaN;
+    const angHeelL = (P(Lk)&&P(La)&&P(Lh) &&vis(La)&&vis(Lh))  ? A(Lk, La, Lh)  : NaN;
+    const angToeR  = (P(Rk)&&P(Ra)&&P(Rfi)&&vis(Ra)&&vis(Rfi)) ? A(Rk, Ra, Rfi) : NaN;
+    const angHeelR = (P(Rk)&&P(Ra)&&P(Rh) &&vis(Ra)&&vis(Rh))  ? A(Rk, Ra, Rh)  : NaN;
 
-    // toe - heel vertical separation / shank (goes UP when heel rises, toes stay)
-    const footDYNormL = (P(Lfi)&&P(Lh)&&finite(shankLenL)) ? (Lfi.y - Lh.y)/shankLenL : NaN;
-    const footDYNormR = (P(Rfi)&&P(Rh)&&finite(shankLenR)) ? (Rfi.y - Rh.y)/shankLenR : NaN;
-    
-    // Require BOTH feet to be detected for better accuracy
-    let footDY = NaN;
-    if (Number.isFinite(footDYNormL) && Number.isFinite(footDYNormR)) {
-      // Very sensitive to any lift
-      const minLift = 0.05;  // Very low minimum lift threshold
-      if (footDYNormL > minLift || footDYNormR > minLift) {
-        // Use the foot that's lifting more
-        footDY = Math.max(footDYNormL, footDYNormR);
+    // Log only when angle changes by >=1° and debounce logs to ~5/sec
+    const now = Date.now();
+    const shouldLog = (now - __lastLogTs) >= 200 && (typeof window !== 'undefined' && window.__LOG_ANGLES === true);
+    const changed = (a,b) => (finite(a)&&finite(b) && Math.abs(a-b) >= 1);
+    if (shouldLog && (
+      changed(angToeL, __prevToeL) || changed(angHeelL, __prevHeelL) ||
+      changed(angToeR, __prevToeR) || changed(angHeelR, __prevHeelR)
+    )) {
+      __lastLogTs = now;
+      // eslint-disable-next-line no-console
+      console.log('[CRS-STANDING ANGLES]',
+        `L toe=${finite(angToeL)?angToeL.toFixed(0):'—'}`,
+        `L heel=${finite(angHeelL)?angHeelL.toFixed(0):'—'}`,
+        `R toe=${finite(angToeR)?angToeR.toFixed(0):'—'}`,
+        `R heel=${finite(angHeelR)?angHeelR.toFixed(0):'—'}`
+      );
+    }
+    __prevToeL = finite(angToeL) ? angToeL : __prevToeL;
+    __prevHeelL = finite(angHeelL) ? angHeelL : __prevHeelL;
+    __prevToeR = finite(angToeR) ? angToeR : __prevToeR;
+    __prevHeelR = finite(angHeelR) ? angHeelR : __prevHeelR;
+
+    // --- Angle-based rep logic (ABSOLUTE THRESHOLDS) ---
+    // Use whichever toe angle is available and larger for robustness
+    let activeSide = null;
+    if (finite(angToeL) && finite(angToeR)) activeSide = (angToeL >= angToeR) ? 'left' : 'right';
+    else if (finite(angToeL)) activeSide = 'left';
+    else if (finite(angToeR)) activeSide = 'right';
+
+    const activeToeAngle = activeSide === 'left' ? angToeL : activeSide === 'right' ? angToeR : NaN;
+
+    // Simple absolute thresholds derived from your observed data
+    const loweredMax = 110;    // <= this is neutral (wider)
+    const raisedMin = 115;     // >= this is raised (lower for sensitivity)
+
+    const loweredOk = Number.isFinite(activeToeAngle) && activeToeAngle <= loweredMax;
+    if (loweredOk) {
+      if (!__loweredTsActive) __loweredTsActive = now;
+    } else {
+      __loweredTsActive = 0;
+    }
+
+    const armReady = loweredOk && (now - __loweredTsActive) >= 80; // shorter dwell to arm
+    const degRaiseDynamic = raisedMin; // fixed absolute raised target
+
+    // Minimal posture metrics (optional)
+    const kneeAngleL = NaN, kneeAngleR = NaN, kneeAngleMin = NaN;
+    const kneeStraightMin = CalfRaisesStanding.kneeStraightMin;
+
+    // One-shot log when a rep condition is satisfied (pre-phase), to aid debugging
+    if (typeof window !== 'undefined' && window.__DEBUG_CRS) {
+      const readyNow = !!(armReady && Number.isFinite(activeToeAngle) && activeToeAngle >= degRaiseDynamic);
+      if (readyNow && !__prevReadyFlag) {
+        // eslint-disable-next-line no-console
+        console.log('[CRS-STANDING READY]', `side=${activeSide||'—'}`, `toe=${activeToeAngle?.toFixed?.(0)}`, `>=${degRaiseDynamic}`);
       }
+      __prevReadyFlag = readyNow;
     }
-    
-    // Only update if we have a valid, significant movement
-    if (Number.isFinite(footDY)) {
-      footDY = clampRangeOrNaN(footDY, -0.5, 1.0);  // Wider range
-      footDY = clampJump(__prevFootDY, footDY, 0.4);  // Very permissive jump clamping
-      __prevFootDY = footDY;
-    }
-
-    // Warmup/lock baseline for foot pitch only
-    if (Number.isFinite(footDY) && __baselineFrames < __BASE_FRAMES) {
-      __footDYBaseline = ema(__footDYBaseline, footDY, __EMA_ALPHA_INIT);
-      __baselineFrames++;
-      if (__baselineFrames >= __BASE_FRAMES) {
-        __baselineLocked = true;
-        __footDYBaseline *= 0.98; // tiny buffer
-      }
-    } else if (Number.isFinite(footDY) && !__baselineLocked) {
-      __footDYBaseline = ema(__footDYBaseline, footDY, __EMA_ALPHA_SLOW);
-    }
-
-    const footDYBase = Number.isFinite(__footDYBaseline) ? __footDYBaseline : footDY;
-
-    // The delta we track
-    const footPitchDelta = (Number.isFinite(footDY) && Number.isFinite(footDYBase)) ? (footDY - footDYBase) : NaN;
-
-    // Very relaxed thresholds for maximum detection
-    const footPctMin = getPct('footPctMin', 0.10);  // 10% of baseline pitch
-    const minAbs = 0.03;                           // Very low absolute minimum
-    
-    // Calculate minimum required movement with much higher thresholds
-    const pitchDeltaMin = Number.isFinite(footDYBase)
-      ? Math.max(minAbs, footPctMin * Math.max(footDYBase, 1e-3))
-      : 0.15;  // Much higher fallback
-
-    // Require very distinct movement
-    const pitchUp   = pitchDeltaMin;      // Must reach full threshold
-    const pitchDown = pitchDeltaMin * 0.1; // Very little movement required to count as down
-
-    // Posture (light)
-    const trunkL = (P(Ls)&&P(Lhip)&&(P(La)||P(Lk))) ? A(Ls, Lhip, (P(La)?La:Lk)) : NaN;
-    const trunkR = (P(Rs)&&P(Rhip)&&(P(Ra)||P(Rk))) ? A(Rs, Rhip, (P(Ra)?Ra:Rk)) : NaN;
-    const trunkAngleMin = [trunkL, trunkR].filter(finite).length ? Math.min(trunkL, trunkR) : NaN;
-
-    const kneeAngleL = (P(Lhip)&&P(Lk)&&P(La)) ? A(Lhip, Lk, La) : NaN;
-    const kneeAngleR = (P(Rhip)&&P(Rk)&&P(Ra)) ? A(Rhip, Rk, Ra) : NaN;
-    const kneeAngleMin = [kneeAngleL, kneeAngleR].filter(finite).length ? Math.min(kneeAngleL, kneeAngleR) : NaN;
-
-    const kneeStraightMin = getNum('kneeStraightMin', CalfRaisesStanding.kneeStraightMin);
-
-    // Enhanced debug output
-  if (window.__DEBUG_CRS) {
-    // eslint-disable-next-line no-console
-    console.log(
-      `[CRS-STANDING ${__baselineLocked ? 'LOCKED' : 'CAL'}]`,
-      `phase=${this?.phase || 'none'}`,
-      `pitchΔ=${footPitchDelta?.toFixed?.(2)}`,
-      `up=${pitchUp?.toFixed?.(2)}`,
-      `dn=${pitchDown?.toFixed?.(2)}`,
-      `base=${footDYBase?.toFixed?.(3)}`,
-      `knee=${kneeAngleMin?.toFixed?.(0) || '?'}°`,
-      `trunk=${trunkAngleMin?.toFixed?.(0) || '?'}°`,
-      `lock=${__baselineLocked ? 'Y' : 'N'}`
-    );
-  }
 
     return {
-      // primary metric & thresholds (simple mode)
-      footPitchDelta,
-      pitchUp,
-      pitchDown,
-
-      // posture (light guards)
+      ankleAngleToeL: angToeL,
+      ankleAngleHeelL: angHeelL,
+      ankleAngleToeR: angToeR,
+      ankleAngleHeelR: angHeelR,
+      activeSide,
+      activeToeAngle,
+      degRaiseDynamic,
+      loweredOk,
+      armReady,
       kneeAngleL, kneeAngleR, kneeAngleMin, kneeStraightMin,
-      trunkAngleL: trunkL, trunkAngleR: trunkR, trunkAngleMin,
     };
   },
 };

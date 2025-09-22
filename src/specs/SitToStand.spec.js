@@ -6,11 +6,11 @@ const SitToStand = {
     side: 'both',                          // <- we consume both sides
     primaryMetric: 'kneeAngleMax',         // HUD prefers the standing indicator
     dwellMs: 140,
-  
+
     // Fallback thresholds when ankle isn't visible (distance normalized by shoulder-hip)
     seatedDistThresh:   0.24,
     standingDistThresh: 0.32,
-  
+
     phases: [
       {
         id: 'seated',
@@ -25,56 +25,67 @@ const SitToStand = {
           "(!Number.isFinite(kneeAngleMax) && Number.isFinite(hipToKneeNormMax) && hipToKneeNormMax > standingDistThresh)"
       },
     ],
-  
+
     rep: { from: 'seated', to: 'standing' },
-  
+
     feedback: [
-        { when: "phase=='seated'",   say: 'Get ready',
-            highlight: ({ setHighlight }) =>
-            setHighlight({ keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'],
-                          color: '#FF4D4D' })
+        // Standing: at target (green)
+        { when: "phase=='standing'", say: 'Standing - Sit down',
+          highlight: ({ setHighlight }) => setHighlight({
+            keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'],
+            color: '#66FF00'
+          })
         },
-        { when: "phase=='standing'", say: 'Nice stand!',
-            highlight: ({ setHighlight }) =>
-            setHighlight({ keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'],
-                          color: '#66FF00' })
+        // Seated: start position (green)
+        { when: "phase=='seated'", say: 'Start Position - Stand up',
+          highlight: ({ setHighlight }) => setHighlight({
+            keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'],
+            color: '#66FF00'
+          })
         },
-            
+        // Transition: neither seated nor standing (orange)
+        { when: "!(phase=='seated' || phase=='standing')", say: 'Keep going',
+          highlight: ({ setHighlight }) => setHighlight({
+            keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'],
+            color: '#FFB020'
+          })
+        },
+
         { when: "!Number.isFinite(kneeAngleMax) && !Number.isFinite(hipToKneeNormMax)",
           say:  'Keep hips, knees (and ankles if possible) in frame'
         },
     ],
-  
+
     // Compute both sides, then expose fused min/max features for simple rules.
     computeExtraFeatures: ({ kps, utils }) => {
       const sides = ['left', 'right'];
-  
+
       const kneeAngle = {};
       const hipToKneeNorm = {};
-  
+
       for (const s of sides) {
         const hip      = utils.kp(kps, `${s}_hip`);
         const knee     = utils.kp(kps, `${s}_knee`);
         const ankle    = utils.kp(kps, `${s}_ankle`);
         const shoulder = utils.kp(kps, `${s}_shoulder`);
-  
+
         // angle fallback: only if all three are present
         kneeAngle[s] =
           (utils.present(hip) && utils.present(knee) && utils.present(ankle))
             ? utils.angle(hip, knee, ankle)
             : NaN;
-  
+
         // distance fallback normalized by torso segment (shoulder->hip)
         hipToKneeNorm[s] =
           (utils.present(hip) && utils.present(knee) && utils.present(shoulder))
             ? utils.calculateDistance(hip, knee) / Math.max(utils.calculateDistance(shoulder, hip), 1e-6)
             : NaN;
       }
-  
+
       const finite = v => Number.isFinite(v);
       const mins   = [kneeAngle.left, kneeAngle.right].filter(finite);
       const maxs   = mins; // reuse list; contents are same set
-  
+
       const kneeAngleMin = mins.length ? Math.min(...mins) : NaN;
       const kneeAngleMax = maxs.length ? Math.max(...maxs) : NaN;
   

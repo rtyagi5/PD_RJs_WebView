@@ -2,7 +2,7 @@
 // specs/SeatedMarches.spec.js
 // ---------------------------------------------
 const SeatedMarches = {
-    name: 'SeatedMarches',
+    name: 'SeatedMarch',
     side: 'both',                      // evaluate both legs; fuse metrics
     mode: 'rep',                       // count each lift
     primaryMetric: 'kneeLiftNormMax',  // HUD: how high the higher knee is
@@ -24,7 +24,7 @@ const SeatedMarches = {
     if (lOK && rOK) {
         if (l > r + 0.01) return 'left';
         if (r > l + 0.01) return 'right';
-    }
+    };
     return null; // tie / not clearly up => don't switch
     },  
     
@@ -54,33 +54,74 @@ const SeatedMarches = {
     rep: { from: 'lowered', to: 'raised' },
   
     feedback: [
-      { when: "phase=='lowered'", say: 'Lift one knee up' },
-  
+      // Lowered: start cue (green)
+      { when: "phase=='lowered'", say: 'Start Position - Lift one knee up',
+        highlight: ({ setHighlight }) =>
+          setHighlight({ keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'], color: '#66FF00' })
+      },
+
+      // Transition: neither lowered nor raised (orange)
+      { when: "!(phase=='lowered' || phase=='raised')", say: 'Keep going',
+        highlight: ({ setHighlight }) =>
+          setHighlight({ keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'], color: '#FFB020' })
+      },
+
+      // Raised: highlight the higher knee (green)
       {
         when: "phase=='raised'",
-        say: 'Nice lift',
+        say: 'Nice lift - lower the knee  ',
         highlight: ({ setHighlight, features }) => {
-          // Pick the clearly higher knee with a small margin to avoid flicker
           const l = features.kneeLiftNormL ?? -Infinity;
           const r = features.kneeLiftNormR ?? -Infinity;
           let side = 'left';
           if (r > l + 0.01) side = 'right';
           if (l > r + 0.01) side = 'left';
-          // if nearly tied, keep both green so it doesn’t jump
           const pts = (Math.abs(l - r) < 0.01)
             ? ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle']
             : [`${side}_hip`, `${side}_knee`, `${side}_ankle`];
-  
           setHighlight({ keypoints: pts, color: '#66FF00' });
         }
       },
-  
+
       // Posture cue independent of rep logic
-      {
-        when: "Number.isFinite(trunkAngleMin) && trunkAngleMin < trunkUprightMin",
-        say: 'Sit tall'
-      },
+      { when: "Number.isFinite(trunkAngleMin) && trunkAngleMin < trunkUprightMin", say: 'Sit tall' },
     ],
+  
+    highlights: function ({ setHighlight, features }) {
+      const down = SeatedMarches.kneeLiftNormDown;
+      const up   = SeatedMarches.kneeLiftNormUp;
+      const l = features.kneeLiftNormL ?? -Infinity;
+      const r = features.kneeLiftNormR ?? -Infinity;
+      const maxLift = features.kneeLiftNormMax;
+
+      // Determine phase-like state using thresholds (mirrors spec logic)
+      const isLowered = Number.isFinite(maxLift) && maxLift <= down;
+      const isRaised  = Number.isFinite(maxLift) && maxLift >= up;
+
+      // Choose which side to highlight when raised
+      let pts = ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'];
+      if (isRaised) {
+        let side = 'left';
+        if ((r ?? -Infinity) > (l ?? -Infinity) + 0.01) side = 'right';
+        if ((l ?? -Infinity) > (r ?? -Infinity) + 0.01) side = 'left';
+        if (Math.abs((l ?? 0) - (r ?? 0)) >= 0.01) {
+          pts = [`${side}_hip`, `${side}_knee`, `${side}_ankle`];
+        }
+      }
+
+      // Color with orange hold
+      let desired = '#66FF00';
+      if (!isLowered && !isRaised) desired = '#FFB020';
+
+      if (!this._hl) this._hl = { lastColor: null, lastTs: 0 };
+      const now = Date.now();
+      const HOLD_MS = 250;
+      const { lastColor, lastTs } = this._hl;
+      if (lastColor === '#FFB020' && now - lastTs < HOLD_MS) desired = '#FFB020';
+      if (desired !== lastColor) { this._hl.lastColor = desired; this._hl.lastTs = now; }
+
+      setHighlight({ keypoints: pts, color: desired });
+    },
   
     // Compute per-side angles + a simple knee-lift measure; then fuse metrics
     computeExtraFeatures: ({ kps, utils }) => {

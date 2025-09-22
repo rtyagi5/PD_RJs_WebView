@@ -41,9 +41,18 @@ const StepUps = {
     rep: { from: 'lowered', to: 'raised' },
   
     feedback: [
-      {
-        when: "phase=='lowered'",
-        say: 'Step up',
+      // Lowered: start cue (green)
+      { when: "phase=='lowered'", say: 'Start Position - Step up',
+        highlight: ({ setHighlight, features }) => {
+          const s = features.side === 'right' ? 'right'
+                : features.side === 'left'  ? 'left'
+                : (features.ankleLiftNormL ?? 0) >= (features.ankleLiftNormR ?? 0) ? 'left' : 'right';
+          setHighlight({ keypoints: [`${s}_hip`, `${s}_knee`, `${s}_ankle`], color: '#66FF00' });
+        }
+      },
+
+      // Transition: neither lowered nor raised (orange)
+      { when: "!(phase=='lowered' || phase=='raised')", say: 'Keep going',
         highlight: ({ setHighlight, features }) => {
           const s = features.side === 'right' ? 'right'
                 : features.side === 'left'  ? 'left'
@@ -51,9 +60,9 @@ const StepUps = {
           setHighlight({ keypoints: [`${s}_hip`, `${s}_knee`, `${s}_ankle`], color: '#FFB020' });
         }
       },
-      {
-        when: "phase=='raised'",
-        say: 'Stand tall',
+
+      // Raised: top position (green)
+      { when: "phase=='raised'", say: 'Stand tall - Step down',
         highlight: ({ setHighlight, features }) => {
           const s = features.side === 'right' ? 'right'
                 : features.side === 'left'  ? 'left'
@@ -127,6 +136,42 @@ const StepUps = {
       };
     },
   };
+
+// Smooth color transitions with a short hold for orange to avoid flicker.
+StepUps.highlights = function ({ setHighlight, features }) {
+  const down = StepUps.ankleLiftNormDown;
+  const up   = StepUps.ankleLiftNormUp;
+  const kneeDown = StepUps.kneeFlexedDown;
+  const kneeUp   = StepUps.kneeExtendedUp;
+  
+  const ankleLift = features.ankleLiftNormLead;
+  const kneeAngle = features.kneeAngleLead;
+
+  // Determine phase-like state using thresholds (mirrors spec logic)
+  const isLowered = (Number.isFinite(ankleLift) && ankleLift <= down) ||
+                    (Number.isFinite(kneeAngle) && kneeAngle <= kneeDown);
+  const isRaised  = (Number.isFinite(ankleLift) && ankleLift >= up) &&
+                    (!Number.isFinite(kneeAngle) || kneeAngle >= kneeUp);
+
+  // Choose which side to highlight (lead leg)
+  const s = features.side === 'right' ? 'right'
+          : features.side === 'left'  ? 'left'
+          : (features.ankleLiftNormL ?? 0) >= (features.ankleLiftNormR ?? 0) ? 'left' : 'right';
+  const pts = [`${s}_hip`, `${s}_knee`, `${s}_ankle`];
+
+  // Color with orange hold
+  let desired = '#66FF00';
+  if (!isLowered && !isRaised) desired = '#FFB020';
+
+  if (!this._hl) this._hl = { lastColor: null, lastTs: 0 };
+  const now = Date.now();
+  const HOLD_MS = 250;
+  const { lastColor, lastTs } = this._hl;
+  if (lastColor === '#FFB020' && now - lastTs < HOLD_MS) desired = '#FFB020';
+  if (desired !== lastColor) { this._hl.lastColor = desired; this._hl.lastTs = now; }
+
+  setHighlight({ keypoints: pts, color: desired });
+};
   
   export default StepUps;
   

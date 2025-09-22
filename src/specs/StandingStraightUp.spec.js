@@ -47,20 +47,31 @@ const StandingStraightUp = {
     rep: { from: 'not_straight', to: 'straight' },
   
     feedback: [
-      { when: "phase=='not_straight'",   say: 'Stand tall',
-        highlight: ({ setHighlight }) =>
-          setHighlight({
-            keypoints: ['left_shoulder','left_hip','left_knee','left_ankle',
-                        'right_shoulder','right_hip','right_knee','right_ankle'],
-            color: '#FF4D4D'
-          })
-      },
-      { when: "phase=='straight'",       say: 'Nice upright posture',
+      // Straight (target) -> green
+      { when: "phase=='straight'", say: 'Upright - Hold steady',
         highlight: ({ setHighlight }) =>
           setHighlight({
             keypoints: ['left_shoulder','left_hip','left_knee','left_ankle',
                         'right_shoulder','right_hip','right_knee','right_ankle'],
             color: '#66FF00'
+          })
+      },
+      // Not straight (needs correction) -> red
+      { when: "phase=='not_straight'", say: 'Stand tall',
+        highlight: ({ setHighlight }) =>
+          setHighlight({
+            keypoints: ['left_shoulder','left_hip','left_knee','left_ankle',
+                        'right_shoulder','right_hip','right_knee','right_ankle'],
+            color: '#FF3B30'
+          })
+      },
+      // Transition (neither straight nor not_straight) -> orange
+      { when: "!(phase=='straight' || phase=='not_straight')", say: 'Keep going',
+        highlight: ({ setHighlight }) =>
+          setHighlight({
+            keypoints: ['left_shoulder','left_hip','left_knee','left_ankle',
+                        'right_shoulder','right_hip','right_knee','right_ankle'],
+            color: '#FFB020'
           })
       },
       { when: "Number.isFinite(hipAnkleDxNormMax) && hipAnkleDxNormMax > 0.20",
@@ -119,6 +130,45 @@ const StandingStraightUp = {
       };
     },
   };
-  
-  export default StandingStraightUp;
-  
+
+// Smooth color transitions with a short orange hold to avoid flicker across micro dips.
+StandingStraightUp.highlights = function ({ setHighlight, features }) {
+  const pts = ['left_shoulder','left_hip','left_knee','left_ankle',
+               'right_shoulder','right_hip','right_knee','right_ankle'];
+
+  const {
+    kneeAngleMin, kneeAngleMax,
+    trunkAngleMin,
+    hipAnkleDxNormMax,
+    standKneeUp = StandingStraightUp.standKneeUp,
+    standTrunkUp = StandingStraightUp.standTrunkUp,
+    standHipOverAnkleMax = StandingStraightUp.standHipOverAnkleMax,
+    slumpKnee = StandingStraightUp.slumpKnee,
+    slumpTrunk = StandingStraightUp.slumpTrunk,
+    slumpHipOverAnkleMax = StandingStraightUp.slumpHipOverAnkleMax,
+  } = features;
+
+  const f = (v) => Number.isFinite(v);
+  const isNotStraight = (f(kneeAngleMin) && kneeAngleMin < slumpKnee) ||
+                        (f(trunkAngleMin) && trunkAngleMin < slumpTrunk) ||
+                        (f(hipAnkleDxNormMax) && hipAnkleDxNormMax > slumpHipOverAnkleMax);
+  const isStraight = (!f(kneeAngleMax)      || kneeAngleMax      >= standKneeUp) &&
+                     (!f(trunkAngleMin)     || trunkAngleMin     >= standTrunkUp) &&
+                     (!f(hipAnkleDxNormMax) || hipAnkleDxNormMax <= standHipOverAnkleMax);
+
+  let desired;
+  if (isNotStraight) desired = '#FF3B30';        // red when not straight
+  else if (isStraight) desired = '#66FF00';      // green when straight
+  else desired = '#FFB020';                      // orange in transition
+
+  if (!this._hl) this._hl = { lastColor: null, lastTs: 0 };
+  const now = Date.now();
+  const HOLD_MS = 250;
+  const { lastColor, lastTs } = this._hl;
+  if (lastColor === '#FFB020' && now - lastTs < HOLD_MS) desired = '#FFB020';
+  if (desired !== lastColor) { this._hl.lastColor = desired; this._hl.lastTs = now; }
+
+  setHighlight({ keypoints: pts, color: desired });
+};
+
+export default StandingStraightUp;

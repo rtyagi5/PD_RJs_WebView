@@ -37,7 +37,7 @@ function App() {
     //   });
       
     //   const defaultReps = parseInt(process.env.REACT_APP_DEFAULT_REPS) || 5;
-    //   const defaultSide = process.env.REACT_APP_DEFAULT_SIDE || 'left';
+    //   const defaultSide = (process.env.REACT_APP_DEFAULT_SIDE || 'left').toLowerCase();
     //   const defaultExercise = process.env.REACT_APP_DEFAULT_EXERCISE || 'SideArmRaise';
     //   const defaultVideo = process.env.REACT_APP_DEFAULT_VIDEO === 'true';
     //   const defaultSkeleton = process.env.REACT_APP_DEFAULT_SKELETON === 'true';
@@ -130,13 +130,15 @@ function App() {
               <option value="StandingStraightUp">Standing Straight Up</option>
               <option value="SeatedDorsiflexion">Seated Dorsiflexion</option>
               <option value="StandingDorsiflexion">Standing Dorsiflexion</option>
-              <option value="SeatedCalfRaises">Seated Calf Raises</option>
-              <option value="StandingCalfRaises">Standing Calf Raises</option>
+              <option value="CalfRaisesSeated">Seated Calf Raises</option>
+              <option value="CalfRaisesStanding">Standing Calf Raises</option>
+
               <option value="BicepCurls">Bicep Curls</option>
               <option value="MiniLunges">Mini Lunges</option>
-              <option value="LiftAndChops">Lift and Chops</option>
+              <option value="LiftsAndChops">Lift and Chops</option>
+
               <option value="StepUps">Step Ups</option>
-              <option value="WallPushUps">Wall Push-Ups</option>
+              <option value="WallPushUp">Wall Push-Ups</option>
               {/* Add more exercises as needed */}
             </select>
             <button onClick={handleStartExercise}>

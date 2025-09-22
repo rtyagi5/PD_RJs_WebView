@@ -43,21 +43,28 @@ const LongArcQuad = {
     rep: { from: 'flexed', to: 'extended' },
   
     feedback: [
-      { when: "phase=='flexed'",   say: 'Prepare to kick',
+      // Hyperextension guardrail (red)
+      { when: 'Number.isFinite(kneeAngle) && kneeAngle > laqAngleExtended', say: "Don't hyperextend",
         highlight: ({ setHighlight, features }) =>
-          setHighlight({ keypoints: [`${features.side}_hip`,`${features.side}_knee`,`${features.side}_ankle`],
-                         color: '#FF4D4D' })
+          setHighlight({ keypoints: [`${features.side}_hip`,`${features.side}_knee`,`${features.side}_ankle`], color: '#FF3B30' })
       },
-      { when: "phase=='extended'", say: 'Nice extension',
+      // Extended (green)
+      { when: "phase=='extended'", say: 'Extended - Lower slightly',
         highlight: ({ setHighlight, features }) =>
-          setHighlight({ keypoints: [`${features.side}_hip`,`${features.side}_knee`,`${features.side}_ankle`],
-                         color: '#66FF00' })
+          setHighlight({ keypoints: [`${features.side}_hip`,`${features.side}_knee`,`${features.side}_ankle`], color: '#66FF00' })
+      },
+      // Transition (orange)
+      { when: "!(phase=='flexed' || phase=='extended')", say: 'Keep going',
+        highlight: ({ setHighlight, features }) =>
+          setHighlight({ keypoints: [`${features.side}_hip`,`${features.side}_knee`,`${features.side}_ankle`], color: '#FFB020' })
+      },
+      // Flexed (green)
+      { when: "phase=='flexed'",   say: 'Start Position - Extend your knee',
+        highlight: ({ setHighlight, features }) =>
+          setHighlight({ keypoints: [`${features.side}_hip`,`${features.side}_knee`,`${features.side}_ankle`], color: '#66FF00' })
       },
       // Optional guardrails
-      { when: "kneeAngle > 175", say: "Don't hyperextend" },
-      { when: "!Number.isFinite(kneeAngle) && !Number.isFinite(hipToAnkleNorm)",
-        say:  'Keep hip, knee and ankle visible'
-      },
+      { when: "!Number.isFinite(kneeAngle) && !Number.isFinite(hipToAnkleNorm)", say:  'Keep hip, knee and ankle visible' },
     ],
   
     // Spec-local features: distance fallback (single side)
@@ -77,6 +84,37 @@ const LongArcQuad = {
   
       return { hipToAnkleNorm };
     },
+  };
+  
+  // Smooth color transitions with a short orange hold to avoid flicker.
+  LongArcQuad.highlights = function ({ setHighlight, features }) {
+    const side = features.side || 'left';
+    const angle = features.kneeAngle;
+    const hipToAnkleNorm = features.hipToAnkleNorm;
+    const pts = [`${side}_hip`,`${side}_knee`,`${side}_ankle`];
+
+    const flexA = LongArcQuad.laqAngleFlexed;
+    const extA  = LongArcQuad.laqAngleExtended;
+    const flexD = LongArcQuad.laqDistFlexed;
+    const extD  = LongArcQuad.laqDistExtended;
+
+    // Determine states from either angle or distance fallback
+    const finite = (v) => Number.isFinite(v);
+    const isFlexed = (finite(angle) && angle <= flexA) || (!finite(angle) && finite(hipToAnkleNorm) && hipToAnkleNorm <= flexD);
+    const isExtended = (finite(angle) && angle >= extA) || (!finite(angle) && finite(hipToAnkleNorm) && hipToAnkleNorm >= extD);
+
+    let desired = '#66FF00'; // green default
+    if (finite(angle) && angle > extA) desired = '#FF3B30'; // red when hyperextended
+    else if (!isFlexed && !isExtended) desired = '#FFB020'; // orange in transition
+
+    if (!this._hl) this._hl = { lastColor: null, lastTs: 0 };
+    const now = Date.now();
+    const HOLD_MS = 250;
+    const { lastColor, lastTs } = this._hl;
+    if (lastColor === '#FFB020' && now - lastTs < HOLD_MS) desired = '#FFB020';
+    if (desired !== lastColor) { this._hl.lastColor = desired; this._hl.lastTs = now; }
+
+    setHighlight({ keypoints: pts, color: desired });
   };
   
   export default LongArcQuad;

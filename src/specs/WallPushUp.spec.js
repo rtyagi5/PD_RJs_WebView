@@ -37,32 +37,25 @@ const WallPushUp = {
     rep: { from: 'lowered', to: 'raised' },
   
     feedback: [
-      {
-        when: "phase=='lowered'",
-        say: 'Push back',
-        highlight: ({ setHighlight }) => {
-          setHighlight({
-            keypoints: [
-              'left_shoulder','left_elbow',
-              'right_shoulder','right_elbow'
-            ],
-            color: '#FFB020'
-          });
-        }
+      // Lowered: start cue (green)
+      { when: "phase=='lowered'", say: 'Start Position - Push back',
+        highlight: ({ setHighlight }) =>
+          setHighlight({ keypoints: ['left_shoulder','left_elbow','right_shoulder','right_elbow'], color: '#66FF00' })
       },
-      {
-        when: "phase=='raised'",
-        say: 'Nice extension',
-        highlight: ({ setHighlight }) => {
-          setHighlight({
-            keypoints: [
-              'left_shoulder','left_elbow',
-              'right_shoulder','right_elbow'
-            ],
-            color: '#66FF00'
-          });
-        }
+
+      // Transition: neither lowered nor raised (orange)
+      { when: "!(phase=='lowered' || phase=='raised')", say: 'Keep going',
+        highlight: ({ setHighlight }) =>
+          setHighlight({ keypoints: ['left_shoulder','left_elbow','right_shoulder','right_elbow'], color: '#FFB020' })
       },
+
+      // Raised: top position (green)
+      { when: "phase=='raised'", say: 'Nice extension - Push forward',
+        highlight: ({ setHighlight }) =>
+          setHighlight({ keypoints: ['left_shoulder','left_elbow','right_shoulder','right_elbow'], color: '#66FF00' })
+      },
+
+      // Posture cues
       { when: "Number.isFinite(trunkAngleMin) && trunkAngleMin < trunkStraightMin", say: 'Keep your body straight' },
       { when: "Number.isFinite(elbowLevelDiff) && elbowLevelDiff > elbowLevelTol", say: 'Keep elbows level' },
     ],
@@ -136,6 +129,33 @@ const WallPushUp = {
       };
     },
   };
+
+// Smooth color transitions with a short hold for orange to avoid flicker.
+WallPushUp.highlights = function ({ setHighlight, features }) {
+  const down = WallPushUp.elbowOffsetDown;
+  const up   = WallPushUp.elbowOffsetUp;
+  const elbowOffset = features.elbowOffsetMax;
+
+  // Determine phase-like state using thresholds (mirrors spec logic)
+  const isLowered = Number.isFinite(elbowOffset) && elbowOffset >= up;
+  const isRaised  = Number.isFinite(elbowOffset) && elbowOffset <= down;
+
+  // Always highlight both arms for wall push-ups
+  const pts = ['left_shoulder','left_elbow','right_shoulder','right_elbow'];
+
+  // Color with orange hold
+  let desired = '#66FF00';
+  if (!isLowered && !isRaised) desired = '#FFB020';
+
+  if (!this._hl) this._hl = { lastColor: null, lastTs: 0 };
+  const now = Date.now();
+  const HOLD_MS = 250;
+  const { lastColor, lastTs } = this._hl;
+  if (lastColor === '#FFB020' && now - lastTs < HOLD_MS) desired = '#FFB020';
+  if (desired !== lastColor) { this._hl.lastColor = desired; this._hl.lastTs = now; }
+
+  setHighlight({ keypoints: pts, color: desired });
+};
   
   export default WallPushUp;
   

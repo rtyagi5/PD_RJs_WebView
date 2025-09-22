@@ -2,13 +2,13 @@
 // specs/StandingMarches.spec.js
 // ---------------------------------------------
 const StandingMarches = {
-    name: 'StandingMarches',
+    name: 'StandingMarch',
     side: 'both',
     mode: 'rep',
     primaryMetric: 'kneeToAnkleLiftNormMax',
     dwellMs: 160,              // a touch more dwell to reduce flicker
     refractoryMs: 300,
-  
+
     // Count alternating lifts as a pair (L then R or R then L)
     repMode: 'pair',
     selectActiveSide: (features) => {
@@ -43,24 +43,26 @@ const StandingMarches = {
     rep: { from: 'lowered', to: 'raised' },
   
     feedback: [
-      {
-        when: "phase=='lowered'",
-        say: 'Lift a knee',
-        highlight: ({ setHighlight }) => {
-          setHighlight({
-            keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'],
-            color: '#FFB020'
-          });
-        }
+      // Lowered: start cue (green)
+      { when: "phase=='lowered'", say: 'Start Position - Lift one knee up',
+        highlight: ({ setHighlight }) =>
+          setHighlight({ keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'], color: '#66FF00' })
       },
+
+      // Transition: neither lowered nor raised (orange)
+      { when: "!(phase=='lowered' || phase=='raised')", say: 'Keep going',
+        highlight: ({ setHighlight }) =>
+          setHighlight({ keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'], color: '#FFB020' })
+      },
+
+      // Raised: highlight the higher knee (green)
       {
         when: "phase=='raised'",
-        say: 'Nice lift',
+        say: 'Nice lift - lower the knee',
         highlight: ({ setHighlight, features }) => {
           const l = features.kneeToAnkleLiftNormL ?? -Infinity;
           const r = features.kneeToAnkleLiftNormR ?? -Infinity;
           if (Math.abs(l - r) < 0.01) {
-            // nearly tied -> show both green to avoid flicker
             setHighlight({
               keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'],
               color: '#66FF00'
@@ -74,6 +76,7 @@ const StandingMarches = {
           }
         }
       },
+
       // Posture cue independent of the phase gating
       { when: "Number.isFinite(trunkAngleMin) && trunkAngleMin < trunkUprightMin", say: 'Stand tall' },
     ],
@@ -132,6 +135,41 @@ const StandingMarches = {
       };
     },
   };
+
+// Smooth color transitions with a short hold for orange to avoid flicker.
+StandingMarches.highlights = function ({ setHighlight, features }) {
+  const down = StandingMarches.kneeToAnkleLiftNormDown;
+  const up   = StandingMarches.kneeToAnkleLiftNormUp;
+  const l = features.kneeToAnkleLiftNormL ?? -Infinity;
+  const r = features.kneeToAnkleLiftNormR ?? -Infinity;
+  const maxLift = features.kneeToAnkleLiftNormMax;
+
+  // Determine phase-like state using thresholds (mirrors spec logic)
+  const isLowered = Number.isFinite(maxLift) && maxLift <= down;
+  const isRaised  = Number.isFinite(maxLift) && maxLift >= up;
+
+  // Choose which side to highlight when raised
+  let pts = ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'];
+  if (isRaised) {
+    if (Math.abs((l ?? 0) - (r ?? 0)) >= 0.01) {
+      const side = (l ?? -Infinity) > (r ?? -Infinity) ? 'left' : 'right';
+      pts = [`${side}_hip`, `${side}_knee`, `${side}_ankle`];
+    }
+  }
+
+  // Color with orange hold
+  let desired = '#66FF00';
+  if (!isLowered && !isRaised) desired = '#FFB020';
+
+  if (!this._hl) this._hl = { lastColor: null, lastTs: 0 };
+  const now = Date.now();
+  const HOLD_MS = 250;
+  const { lastColor, lastTs } = this._hl;
+  if (lastColor === '#FFB020' && now - lastTs < HOLD_MS) desired = '#FFB020';
+  if (desired !== lastColor) { this._hl.lastColor = desired; this._hl.lastTs = now; }
+
+  setHighlight({ keypoints: pts, color: desired });
+};
   
   export default StandingMarches;
   

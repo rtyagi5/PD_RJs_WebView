@@ -33,15 +33,28 @@ const MiniSquats = {
   
     // Count when returning to up
     rep: { from: 'up', to: 'down' },
-  
+
     feedback: [
-      { when: "phase=='down'", say: 'Controlled dip',
-        highlight: ({ setHighlight }) =>
-          setHighlight({ keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'], color: '#FF4D4D' })
+      // Up position (green)
+      { when: "phase=='up'", say: 'Please Start Squatting down',
+        highlight: ({ setHighlight }) => setHighlight({
+          keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'],
+          color: '#66FF00'
+        })
       },
-      { when: "phase=='up'",   say: 'Stand tall',
-        highlight: ({ setHighlight }) =>
-          setHighlight({ keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'], color: '#66FF00' })
+      // Down position (green)
+      { when: "phase=='down'", say: 'Down - Start Standing up',
+        highlight: ({ setHighlight }) => setHighlight({
+          keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'],
+          color: '#66FF00'
+        })
+      },
+      // Transition (orange)
+      { when: "!(phase=='down' || phase=='up')", say: 'Keep going',
+        highlight: ({ setHighlight }) => setHighlight({
+          keypoints: ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'],
+          color: '#FFB020'
+        })
       },
       { when: "!Number.isFinite(kneeAngleMin) && !Number.isFinite(hipToKneeNormMin)",
         say:  'Face camera; keep hips, knees (ankles if possible) visible'
@@ -89,6 +102,42 @@ const MiniSquats = {
       };
     },
   };
-  
-  export default MiniSquats;
+
+// Smooth color highlight with a short hold on orange to avoid flicker.
+MiniSquats.highlights = function ({ setHighlight, features }) {
+  const pts = ['left_hip','left_knee','left_ankle','right_hip','right_knee','right_ankle'];
+  const {
+    kneeAngleMin, kneeAngleMax,
+    hipToKneeNormMin, hipToKneeNormMax,
+    downDistThresh = MiniSquats.downDistThresh,
+    upDistThresh = MiniSquats.upDistThresh,
+    squatAngleDown = MiniSquats.squatAngleDown,
+    squatAngleUp = MiniSquats.squatAngleUp,
+  } = features;
+
+  const finite = (v) => Number.isFinite(v);
+  const isDown = (finite(kneeAngleMin) && kneeAngleMin <= squatAngleDown) ||
+                 (!finite(kneeAngleMin) && finite(hipToKneeNormMin) && hipToKneeNormMin <= downDistThresh);
+  const isUp = (finite(kneeAngleMax) && kneeAngleMax >= squatAngleUp) ||
+               (!finite(kneeAngleMax) && finite(hipToKneeNormMax) && hipToKneeNormMax >= upDistThresh);
+
+  let desired = '#66FF00'; // green by default
+  if (!isDown && !isUp) desired = '#FFB020'; // orange during movement
+
+  if (!this._hl) this._hl = { lastColor: null, lastTs: 0 };
+  const now = Date.now();
+  const HOLD_MS = 250;
+  const { lastColor, lastTs } = this._hl;
+  if (lastColor === '#FFB020' && now - lastTs < HOLD_MS) {
+    desired = '#FFB020';
+  }
+  if (desired !== lastColor) {
+    this._hl.lastColor = desired;
+    this._hl.lastTs = now;
+  }
+
+  setHighlight({ keypoints: pts, color: desired });
+};
+
+export default MiniSquats;
   
