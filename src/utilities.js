@@ -63,8 +63,6 @@ export function drawKeypoints(keypoints, minConfidence, ctx, scale = 1, keypoint
 
 
 export const drawCanvas = (poses, videoWidth, videoHeight, ctx, keypoints, keypointColors, segmentColors) => {
-  ctx.clearRect(0, 0, videoWidth, videoHeight);
-
   if (poses.length > 0 && poses[0].keypoints) {
     drawKeypoints(poses[0].keypoints, 0.3, ctx, 1, keypoints, keypointColors);
     drawSkeleton(poses[0].keypoints, 0.3, ctx, 1, keypoints, segmentColors);

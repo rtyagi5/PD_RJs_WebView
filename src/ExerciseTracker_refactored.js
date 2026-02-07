@@ -423,20 +423,22 @@ export default function ExerciseTrackerRefactored({
 
       // ─── COACHING ────────────────────────────────────────────────
       else if (sessionState === 'coaching') {
+        // Draw order: skeleton → box → text (so overlays appear on top)
+        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
         const color = coachingColor(sessionResult.coachingChecks);
         const idealRatio = spec?.framing?.idealBodyRatio ?? IDEAL_BODY_RATIO;
         drawTargetBox(ctx, vw, vh, idealRatio, color);
         drawCoachingMessages(ctx, vw, vh, sessionResult.coachingChecks);
-        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
         feedbackRef.current = sessionResult.message || 'Position yourself in the frame';
         try { maybeSendUpdates({}); } catch { }
       }
 
       // ─── COUNTDOWN ───────────────────────────────────────────────
       else if (sessionState === 'countdown') {
+        // Draw order: skeleton → box → countdown (so overlays appear on top)
+        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
         const idealRatio = spec?.framing?.idealBodyRatio ?? IDEAL_BODY_RATIO;
         drawTargetBox(ctx, vw, vh, idealRatio, '#00E676');
-        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
         drawCountdown(ctx, vw, vh, sessionResult.countdownRemaining);
         feedbackRef.current = sessionResult.message;
         try { maybeSendUpdates({}); } catch { }
