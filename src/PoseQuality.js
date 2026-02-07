@@ -97,16 +97,16 @@ export function checkCameraAngle(keypoints, frameW, frameH, view = 'front') {
   const shMid = midpoint(lSh, rSh);
   const centerX = shMid.x / frameW;
   if (centerX < 0.25) {
-    return { status: 'off_center_right', message: 'Move to your right' };
-  }
-  if (centerX > 0.75) {
     return { status: 'off_center_left', message: 'Move to your left' };
   }
+  if (centerX > 0.75) {
+    return { status: 'off_center_right', message: 'Move to your right' };
+  }
   if (centerX < 0.35) {
-    return { status: 'off_center_right', message: 'Slightly move to your right' };
+    return { status: 'off_center_left', message: 'Slightly move to your left' };
   }
   if (centerX > 0.65) {
-    return { status: 'off_center_left', message: 'Slightly move to your left' };
+    return { status: 'off_center_right', message: 'Slightly move to your right' };
   }
 
   // Shoulder tilt: should be roughly horizontal
