@@ -70,11 +70,6 @@ export const METRIC_MAP = {
   StandingDorsiflexion: ['footPitchDelta', 'pitchUp', 'pitchDown', 'trunkAngleMin'],
 };
 
-// Smoothing config
-// function alphaFor(key) {
-//   if (key === 'hipToKneeDist' || key.startsWith('hipToKneeNorm')) return 0.4;
-//   return 0.35;
-// }
 function alphaFor(key) {
   const k = String(key || '').toLowerCase();
   if (k.includes('norm')) return 0.4;       // heavier smoothing for normalized distances
@@ -169,13 +164,7 @@ export default function ExerciseTrackerRefactored({
     smoothRef.current = {};
   }, [isDetecting, exerciseType, side]);
 
-  // Upload helper
   async function uploadVideo(file, type) {
-    // Skip upload in development mode (match original behavior)
-    // if (process.env.NODE_ENV === 'development' || process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
-    //   console.log('[DEV] Skipping video upload in development mode');
-    //   return { success: true, message: 'Skipped in development mode' };
-    // }
     const query = new URLSearchParams(window.location.search);
     if (!activityData?.tenant) throw new Error('Missing tenant information');
     const serviceUrl = getServiceUrl(activityData);
@@ -239,61 +228,13 @@ export default function ExerciseTrackerRefactored({
     [exerciseType, activityData]
   );
 
-  //   // Detector init (run once)
-  //   useEffect(() => {
-  //     if (didInitDetectorRef.current) return;
-  //     didInitDetectorRef.current = true;
-
-  //     let canceled = false;
-
-  //     (async () => {
-  //       try {
-  //         await tf.setBackend('webgl');
-  //         await tf.ready();
-
-  //         const modelPath =
-  //           window.location.hostname === 'localhost'
-  //             ? `/models/movenet/model.json`
-  //             : `${process.env.PUBLIC_URL}/models/movenet/model.json`;
-
-  //         console.time('[Tracker] MoveNet load');
-  //         const det = await posedetection.createDetector(
-  //           posedetection.SupportedModels.MoveNet,
-  //           {
-  //             modelType: posedetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-  //             modelUrl: modelPath,
-  //           }
-  //         );
-  //         console.timeEnd('[Tracker] MoveNet load');
-
-  //         if (!canceled) {
-  //           detectorRef.current = det;
-  //           console.log('[Tracker] detector ready');
-  //         } else {
-  //           await det?.dispose?.();
-  //         }
-  //       } catch (err) {
-  //         console.error('[Tracker] detector init failed:', err);
-  //       }
-  //     })();
-
-  //     return () => {
-  //       canceled = true;
-  //       detectorRef.current?.dispose?.();
-  //       detectorRef.current = null;
-  //     };
-  //   }, []);
-
-
   // Detector init (swap per exercise/spec)
   useEffect(() => {
     let canceled = false;
 
     (async () => {
       try {
-        // Which detector does the active spec want?
-        //  const kind = (specRef.current?.detector || 'movenet');
-        // Which detector does the active spec want? (allow ?backend=mp|movenet)
+        // Which detector does the active spec want? (allow ?backend=mp|movenet override)
         const q = new URLSearchParams(window.location.search);
         const forced = q.get('backend'); // "mp" or "movenet"
         const activeSpec = EXERCISE_SPECS[exerciseType] || EXERCISE_SPECS.SideArmRaise;
@@ -377,13 +318,7 @@ export default function ExerciseTrackerRefactored({
     console.log('[Engine] built:', spec?.name ?? exerciseType, 'phases:', phaseList);
   }, [exerciseType, targetReps]);
 
-  // // Auto-start detection locally
-  // useEffect(() => {
-  //   if (process.env.NODE_ENV === 'development') setIsDetecting?.(true);
-  // }, []); 
-  // Auto-start detection locally
   useEffect(() => {
-    // if (process.env.NODE_ENV === 'production')
     setIsDetecting?.(true);
   }, []);
 
@@ -530,11 +465,6 @@ export default function ExerciseTrackerRefactored({
           hudValue = `${secs}s / ${targetSecs}s`;
           setDisplayMessage?.(`${spec?.name || exerciseType}: phase=${phase || '—'} hold ${hudValue}`);
         } else {
-          //   const metricKey = spec?.primaryMetric || METRIC_MAP[exerciseType]?.[0] || null;
-          //   const mv = metricKey && Number.isFinite(feat[metricKey]) ? Math.round(feat[metricKey]) : '—';
-          //   hudLabel = metricKey || 'metric';
-          //   hudValue = mv;
-          //   setDisplayMessage(`${spec?.name || exerciseType}: phase=${phase || '—'} reps=${repCount} ${hudLabel}=${hudValue}`);
           const metricKey = spec?.primaryMetric || METRIC_MAP[exerciseType]?.[0] || null;
           const rawVal = metricKey && Number.isFinite(feat[metricKey]) ? feat[metricKey] : NaN;
           hudLabel = metricKey || 'metric';
@@ -634,7 +564,6 @@ export default function ExerciseTrackerRefactored({
 // Map which metrics to sync per exercise
 function pickExerciseMetrics(exerciseType, feat) {
   const keys = METRIC_MAP[exerciseType] || [];
-  //const out = {}; keys.forEach(k => { if (Number.isFinite(feat[k])) out[k] = Math.round(feat[k]); });
   const out = {};
   keys.forEach(k => {
     const v = feat[k];

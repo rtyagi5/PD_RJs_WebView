@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
-//import ExerciseTracker from "./ExerciseTracker";
 import ExerciseTracker from "./ExerciseTracker_refactored";
 import { useLocation } from "react-router-dom";
 import {jwtDecode} from "jwt-decode";
