@@ -13,6 +13,12 @@ import SkeletonRecorder from './SkeletonRecorder';
 import { getServiceUrl } from './config';
 import axios from 'axios';
 import { createPoseDetector } from './detectors';
+import { SessionStateMachine } from './SessionStateMachine';
+import {
+  drawTargetBox, drawCountdown, drawCoachingMessages,
+  drawInactiveOverlay, drawLoadingOverlay, coachingColor
+} from './CoachingOverlay';
+import { IDEAL_BODY_RATIO } from './PoseQuality';
 
 
 const { EMA, kp, present, computeCommonFeatures, angle } = Features;
@@ -156,6 +162,7 @@ export default function ExerciseTrackerRefactored({
 
   // Smoothers: lazily created per-feature
   const smoothRef = useRef({});
+  const sessionSMRef = useRef(null);
 
   // wipe smoothers on (re)start or exercise/side change
   useEffect(() => {
@@ -311,6 +318,9 @@ export default function ExerciseTrackerRefactored({
     const eng = new PhaseMachine(spec, { targetReps, targetSeconds });
     setEngine(eng);
 
+    // Create/reset session state machine for coaching flow
+    sessionSMRef.current = new SessionStateMachine(spec);
+
     const phaseList = Array.isArray(spec?.phases)
       ? spec.phases.map(p => p.id).join(', ')
       : '(no phases)';
@@ -331,7 +341,6 @@ export default function ExerciseTrackerRefactored({
     prevRepRef.current = 0;
     lastFeedbackSentRef.current = null;
     feedbackRef.current = 'Initializing...';
-    detectionStartTimeRef.current = performance.now();
 
     let rafId = 0;
     // FPS measurement (match original tracker behavior)
@@ -368,7 +377,22 @@ export default function ExerciseTrackerRefactored({
         console.error('[Tracker] estimatePoses failed:', e);
       }
 
-      // Compute & smooth features EARLY so we can color-code during countdown
+      // ─── Session State Machine ───────────────────────────────────
+      const rawKps = (poses?.[0]?.keypoints) || [];
+      const sm = sessionSMRef.current;
+      const sessionResult = sm
+        ? sm.step({
+            keypoints: rawKps,
+            frameW: vw,
+            frameH: vh,
+            hasDetector: true,
+            hasVideo: true,
+            engineDone: false,
+          })
+        : { state: 'active', coachingChecks: [], countdownRemaining: null, message: '' };
+      const sessionState = sessionResult.state;
+
+      // ─── Compute & smooth features (all states) ─────────────────
       const feat = computeFeaturesForExercise(poses, exerciseType, side, specRef.current);
       const smooth = smoothRef.current;
       for (const [k, raw] of Object.entries(feat)) {
@@ -378,44 +402,62 @@ export default function ExerciseTrackerRefactored({
         if (Number.isFinite(v)) feat[k] = v;
       }
 
-      // Apply highlights from current spec before drawing
+      // Highlight helper (shared across states)
       const setHighlight = ({ keypoints, color }) => {
         keypointsRef.current = keypoints || [];
         keypointColorsRef.current = color || '#66FF00';
         segmentColorsRef.current = color || '#66FF00';
       };
       const spec = specRef.current;
-      if (spec?.highlights) {
+
+      // Apply spec highlights except during loading/inactive
+      if (sessionState !== 'loading' && sessionState !== 'inactive' && spec?.highlights) {
         try { spec.highlights({ setHighlight, features: { ...feat, side } }); } catch { }
       }
 
-      // Draw overlay + recorders every frame (even during countdown)
-      drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
-      videoRecorderRef.current?.updateFrame?.(poses, vw, vh);
-      skeletonRecorderRef.current?.updateFrame?.(poses, vw, vh);
+      // ─── LOADING ─────────────────────────────────────────────────
+      if (sessionState === 'loading') {
+        drawLoadingOverlay(ctx, vw, vh);
+        feedbackRef.current = sessionResult.message;
+      }
 
-      // Countdown (fixed)
-      const elapsed = performance.now() - detectionStartTimeRef.current;
-      const INITIAL_DELAY = 10000;
-      if (elapsed < INITIAL_DELAY) {
-        const remaining = Math.ceil((INITIAL_DELAY - elapsed) / 1000);
-        const msg = remaining === INITIAL_DELAY / 1000 ? `Get ready in ${remaining}` : `${remaining}`;
-        if (remaining !== previousRemainingTimeRef.current) {
-          feedbackRef.current = msg;
-          previousRemainingTimeRef.current = remaining;
-        }
-        // Send countdown feedback to WebView during calibration
-        // This mirrors the legacy behavior where WebView shows the countdown
-        try {
-          // minimal payload; maybeSendUpdates will include fps, repCount and feedbackRef
-          maybeSendUpdates({});
-        } catch { }
-      } else {
-        previousRemainingTimeRef.current = null;
+      // ─── COACHING ────────────────────────────────────────────────
+      else if (sessionState === 'coaching') {
+        const color = coachingColor(sessionResult.coachingChecks);
+        const idealRatio = spec?.framing?.idealBodyRatio ?? IDEAL_BODY_RATIO;
+        drawTargetBox(ctx, vw, vh, idealRatio, color);
+        drawCoachingMessages(ctx, vw, vh, sessionResult.coachingChecks);
+        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+        feedbackRef.current = sessionResult.message || 'Position yourself in the frame';
+        try { maybeSendUpdates({}); } catch { }
+      }
 
-        // We already computed feat and highlights above; proceed with engine step
+      // ─── COUNTDOWN ───────────────────────────────────────────────
+      else if (sessionState === 'countdown') {
+        const idealRatio = spec?.framing?.idealBodyRatio ?? IDEAL_BODY_RATIO;
+        drawTargetBox(ctx, vw, vh, idealRatio, '#00E676');
+        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+        drawCountdown(ctx, vw, vh, sessionResult.countdownRemaining);
+        feedbackRef.current = sessionResult.message;
+        try { maybeSendUpdates({}); } catch { }
+      }
 
-        // Step state machine — ensure engine matches active spec
+      // ─── INACTIVE ────────────────────────────────────────────────
+      else if (sessionState === 'inactive') {
+        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+        drawInactiveOverlay(ctx, vw, vh);
+        feedbackRef.current = sessionResult.message;
+        try { maybeSendUpdates({}); } catch { }
+      }
+
+      // ─── ACTIVE (exercise running) ──────────────────────────────
+      else {
+        // Draw skeleton + feed frames to recorders (only during ACTIVE)
+        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+        videoRecorderRef.current?.updateFrame?.(poses, vw, vh);
+        skeletonRecorderRef.current?.updateFrame?.(poses, vw, vh);
+
+        // Step PhaseMachine — ensure engine matches active spec
         const activeSpecName = specRef.current?.name;
         if (!engine || engine.spec?.name !== activeSpecName) {
           if (isDetecting) requestAnimationFrame(loop);
@@ -447,8 +489,6 @@ export default function ExerciseTrackerRefactored({
           console.log(`[Feedback] ${engine?.spec?.name}: ${feedbackRef.current}`);
           feedbackLogRef.current = feedbackRef.current;
         }
-
-        // (debug logs removed to minimize changes)
 
         // HUD metric selection (time mode vs rep mode)
         const isTimeMode = (specRef.current?.mode === 'time' || specRef.current?.isTimeBased);
@@ -484,6 +524,7 @@ export default function ExerciseTrackerRefactored({
 
         // finish?
         if (done) {
+          if (sm) sm.step({ keypoints: rawKps, frameW: vw, frameH: vh, hasDetector: true, hasVideo: true, engineDone: true });
           await onComplete();
           return; // stop scheduling
         }

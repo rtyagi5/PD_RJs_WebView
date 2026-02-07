@@ -45,6 +45,16 @@ const SeatedDorsiflexion = {
   // posture (same spirit as seated calf raise)
   trunkUprightMin: 155,
 
+  // Coaching: seated exercises have a smaller body-to-frame ratio
+  framing: {
+    view: 'front',
+    idealBodyRatio: 0.45,
+    requiredKeypoints: [
+      'left_shoulder', 'right_shoulder', 'left_hip', 'right_hip',
+      'left_ankle', 'right_ankle', 'left_heel', 'right_heel',
+    ],
+  },
+
   onStart: () => {
     __footDYBaseline = NaN;
     __toeBaseline    = NaN;
