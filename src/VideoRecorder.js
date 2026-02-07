@@ -1,6 +1,5 @@
 // VideoRecorder.js
 import React, { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
-import { drawCanvas } from './utilities'; // or wherever your drawCanvas is
 
 const VideoRecorder = forwardRef(
   (
@@ -97,14 +96,6 @@ const VideoRecorder = forwardRef(
         mediaRecorderRef.current = null;
       }
 
-    //   return () => {
-    //     // Cleanup if unmounted or isRecording changes
-    //     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-    //       console.log('VideoRecorder: Unmounting. Stopping recorder...');
-    //       mediaRecorderRef.current.stop();
-    //     }
-    //     mediaRecorderRef.current = null;
-    //   };
     }, [isVideoRecording, onRecordingComplete]);
 
      // A separate effect that runs only once for true unmount

@@ -106,14 +106,6 @@ const SkeletonRecorder = forwardRef(
         mediaRecorderRef.current = null;
       }
 
-    //   return () => {
-    //     // Cleanup if unmounted or isRecording changes
-    //     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-    //       console.log('SkeletonRecorder: Unmounting. Stopping recorder...');
-    //       mediaRecorderRef.current.stop();
-    //     }
-    //     mediaRecorderRef.current = null;
-    //   };
     }, [isSkeletonRecording, onRecordingComplete]);
 
      // A separate effect that runs only once for true unmount

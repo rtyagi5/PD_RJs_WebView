@@ -16,12 +16,6 @@ export function angle(p1, p2, p3) {
     export const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
     export const slope = (a, b) => (Math.abs(b.x - a.x) < 1e-4 ? Infinity : (b.y - a.y) / (b.x - a.x));
     
-    
-    // export class EMA {
-    // constructor(alpha = 0.35) { this.a = alpha; this.v = null; }
-    // next(x) { this.v = this.v == null ? x : this.a * x + (1 - this.a) * this.v; return this.v; }
-    // }
-    // features.js
     export class EMA {
         constructor(alpha = 0.35) {
         this.a = alpha;
@@ -60,16 +54,6 @@ export function angle(p1, p2, p3) {
     return { shoulderAngle, armAngle, kneeAngle };
     }
 
-    // export function makeEMA(alpha = 0.35) {
-    //     let v = null;
-    //     const a = alpha;
-    //     return {
-    //       next(x) {
-    //         v = v == null ? x : a * x + (1 - a) * v;
-    //         return v;
-    //       }
-    //     };
-    //   }
     export function makeEMA(alpha = 0.35) {
         let v = null; const a = alpha;
         return {

@@ -3,6 +3,12 @@ import { getServiceUrl } from "./config";
 import { METRIC_MAP } from "./ExerciseTracker_refactored";
 const lineWidth = 2;  // Adjusted line width
 let messageCache = {}
+let updates = []
+
+export function resetSyncState() {
+  updates = [];
+  messageCache = {};
+}
 
 export function drawPoint(ctx, y, x, r, color) {
   ctx.beginPath();
@@ -56,22 +62,6 @@ export function drawKeypoints(keypoints, minConfidence, ctx, scale = 1, keypoint
 }
 
 
-export const calculateInteriorAngle = (p1, p2, p3) => {
-  const v1 = { x: p1.x - p2.x, y: p1.y - p2.y };
-  const v2 = { x: p3.x - p2.x, y: p3.y - p2.y };
-
-  const dotProduct = v1.x * v2.x + v1.y * v2.y;
-  const magnitude1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
-  const magnitude2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
-
-  if (magnitude1 === 0 || magnitude2 === 0) {
-    return NaN;
-  }
-
-  const angle = Math.acos(dotProduct / (magnitude1 * magnitude2)) * (180 / Math.PI);
-  return Math.round(angle);  // Round the angle to the nearest integer
-};
-
 export const drawCanvas = (poses, videoWidth, videoHeight, ctx, keypoints, keypointColors, segmentColors) => {
   ctx.clearRect(0, 0, videoWidth, videoHeight);
 
@@ -81,7 +71,6 @@ export const drawCanvas = (poses, videoWidth, videoHeight, ctx, keypoints, keypo
   }
 };
 
-const updates = []
 export const sendUpdates = async (data, exerciseType, activityData, setDisplayMessage) => {
   const cacheKey = `${data.repCount}_${data?.feedback}`
   // Do NOT skip completion updates, even if duplicate
@@ -95,7 +84,7 @@ export const sendUpdates = async (data, exerciseType, activityData, setDisplayMe
     fps: data.fps,
     repCount: data.repCount,
     feedback: data.feedback,
-    exerciseType: exerciseType, // Include the exerciseType here
+    exerciseType: exerciseType,
     completionStatusRef: data.completionStatusRef,
   };
 
@@ -110,22 +99,23 @@ export const sendUpdates = async (data, exerciseType, activityData, setDisplayMe
   if (data?.completionStatusRef) {
     setDisplayMessage("Syncing exercise data...");
     const query = new URLSearchParams(window.location.search);
-    await axios.post(`${getServiceUrl(activityData).EXERCISE_SERVICE}/activities/exercise-data`, {
-      updates,
-      activity: activityData?.activity,
-      activityType: "exercise"
-    }, {
-      headers: {
-        Authorization: `Bearer ${query.get("token")}`,
-        tenantId: activityData?.tenant
-      }
-    }).catch((err) => {
-      setDisplayMessage("Failed to sync exercise data. Please try again.");
-      console.log("failed in sending the data to server");
-    }).then((res) => {
+    try {
+      const res = await axios.post(`${getServiceUrl(activityData).EXERCISE_SERVICE}/activities/exercise-data`, {
+        updates,
+        activity: activityData?.activity,
+        activityType: "exercise"
+      }, {
+        headers: {
+          Authorization: `Bearer ${query.get("token")}`,
+          tenantId: activityData?.tenant
+        }
+      });
       setDisplayMessage("Data synced successfully!!");
       console.log("server sync success", res);
-    })
+    } catch (err) {
+      setDisplayMessage("Failed to sync exercise data. Please try again.");
+      console.log("failed in sending the data to server", err);
+    }
   }
 
   messageCache[cacheKey] = 1
@@ -133,7 +123,7 @@ export const sendUpdates = async (data, exerciseType, activityData, setDisplayMe
   if (window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage(JSON.stringify(filteredData));
   } else if (window.parent) {
-    window.parent.postMessage(filteredData, "*"); // Send the message to the parent window
+    window.parent.postMessage(filteredData, "*");
   }
 };
 
@@ -144,28 +134,3 @@ export function calculateDistance(point1, point2) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-/**
- * Calculates the midpoint between two points
- * @param {Object} point1 - First point with x and y coordinates
- * @param {Object} point2 - Second point with x and y coordinates
- * @returns {Object} Midpoint coordinates {x, y}
- */
-export function getMidpoint(point1, point2) {
-  if (!point1 || !point2) return null;
-  return {
-    x: (point1.x + point2.x) / 2,
-    y: (point1.y + point2.y) / 2
-  };
-}
-
-/**
- * Calculates the slope between two points
- * @param {Object} point1 - First point with x and y coordinates
- * @param {Object} point2 - Second point with x and y coordinates
- * @returns {number} Slope between the two points
- */
-export function calculateSlope(point1, point2) {
-  if (!point1 || !point2) return 0;
-  if (Math.abs(point2.x - point1.x) < 0.0001) return Number.POSITIVE_INFINITY; // Vertical line
-  return (point2.y - point1.y) / (point2.x - point1.x);
-}

@@ -5,7 +5,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Webcam from 'react-webcam';
 import { PhaseMachine } from './phase_machine';
 import { EXERCISE_SPECS } from './registry';
-import { drawCanvas, sendUpdates, calculateDistance } from './utilities';
+import { drawCanvas, sendUpdates, calculateDistance, resetSyncState } from './utilities';
 import * as Features from "./features";
 
 import VideoRecorder from './VideoRecorder';
@@ -87,12 +87,11 @@ const SKIP_SMOOTH = new Set([
   // Standing Straight Up thresholds
   'standKneeUp', 'standTrunkUp', 'standHipOverAnkleMax',
   'slumpKnee', 'slumpTrunk', 'slumpHipOverAnkleMax',
-  // Seated Marches thresholds
-  'hipFlexAngleUp', 'hipFlexAngleDown', 'kneeLiftNormUp', 'kneeLiftNormDown', 'trunkUprightMin',
-  // Standing Marches thresholds
+  // Seated / Standing Marches thresholds
+  'hipFlexAngleUp', 'hipFlexAngleDown', 'kneeLiftNormUp', 'kneeLiftNormDown',
   'kneeToAnkleLiftNormUp', 'kneeToAnkleLiftNormDown',
   // Mini Lunges thresholds
-  'lungeKneeDown', 'lungeKneeUp', 'trunkUprightMin',
+  'lungeKneeDown', 'lungeKneeUp',
   // Bicep Curls thresholds
   'elbowFlexUp', 'elbowFlexDown',
   // LiftsAndChops thresholds
@@ -102,21 +101,23 @@ const SKIP_SMOOTH = new Set([
   // Wall Push-Up thresholds
   'elbowOffsetDown', 'elbowOffsetUp', 'trunkStraightMin', 'elbowLevelTol',
   // Calf Raises Seated dynamic thresholds
-  'plantarMetric', 'plantarUp', 'plantarDown', 'plantarDelta', 'ankleAngle', 'ankleAngleUp', 'ankleAngleDown', 'footPitchDelta', 'footPitchDeltaMin', 'footPitchDeltaActive',
-  // New CalfRaisesSeated (angle-based) primary/gates
+  'plantarMetric', 'plantarUp', 'plantarDown', 'plantarDelta',
+  'ankleAngle', 'ankleAngleUp', 'ankleAngleDown',
+  'footPitchDelta', 'footPitchDeltaMin', 'footPitchDeltaActive',
   'anklePlantarPctActive', 'pctUp', 'pctDown', 'anklePlantarDeltaActive', 'degUp', 'degDown',
-  // New CalfRaisesSeated gates (do NOT smooth)
-  'toeDeltaActive', 'toeStayTol', 'dPitchActive', 'dPitchMin', 'ankleAngleDeltaActive', 'ankleAngleDeltaMin', 'angleGateOn',
-  // Degree-based extras
+  'toeDeltaActive', 'toeStayTol', 'dPitchActive', 'dPitchMin',
+  'ankleAngleDeltaActive', 'ankleAngleDeltaMin', 'angleGateOn',
   'dPlantarPerSec', 'degSlopeMin', 'heelLiftActive', 'heelLiftMin',
-  // Angle-only ready/raise gates
-  'ankleAngleActive', 'activeToeAngle', 'readyAngleActive', 'raiseDeltaActive', 'readyMin', 'readyMax', 'raiseUp', 'raiseDown',
+  'ankleAngleActive', 'activeToeAngle', 'readyAngleActive', 'raiseDeltaActive',
+  'readyMin', 'readyMax', 'raiseUp', 'raiseDown',
   // Calf Raises Standing dynamic thresholds
-  'footPitchDelta', 'pitchUp', 'pitchDown', 'kneeAngleMin', 'kneeStraightMin', 'trunkAngleMin',
-  // Seated Dorsiflexion thresholds & guards (do NOT smooth)
-  'pitchUp', 'pitchDown', 'heelStayTol', 'toeUpDeltaMin',
-  // Standing Dorsiflexion
-  'heelStayTol', 'ankleStayTol', 'toeUpDeltaMin', 'pitchUp', 'pitchDown',
+  'kneeStraightMin',
+  // Dorsiflexion thresholds & guards (seated + standing)
+  'pitchUp', 'pitchDown', 'heelStayTol', 'toeUpDeltaMin', 'ankleStayTol',
+  // Shared posture thresholds
+  'trunkUprightMin', 'trunkAngleMin', 'kneeAngleMin',
+  // Calf Raises Seated passthrough
+  'heelBelowKneeUp', 'heelBelowKneeDown', 'ankleBelowKneeUp', 'ankleBelowKneeDown',
 ]);
 
 export default function ExerciseTrackerRefactored({
@@ -155,9 +156,6 @@ export default function ExerciseTrackerRefactored({
 
   // Smoothers: lazily created per-feature
   const smoothRef = useRef({});
-
-  // Prevent double-init in React 18 StrictMode
-  const didInitDetectorRef = useRef(false);
 
   // wipe smoothers on (re)start or exercise/side change
   useEffect(() => {
@@ -289,6 +287,7 @@ export default function ExerciseTrackerRefactored({
     lastFeedbackSentRef.current = null;
     feedbackRef.current = 'Initializing...';
     smoothRef.current = {}; // wipe smoothers on spec switch
+    resetSyncState(); // clear accumulated updates & message cache
     // reset any per-session calibration in the spec
     try { spec?.onStart?.(); } catch { }
     // Derive target seconds for time mode
@@ -338,7 +337,6 @@ export default function ExerciseTrackerRefactored({
     // FPS measurement (match original tracker behavior)
     let frameCount = 0;
     let lastFpsUpdate = performance.now();
-    let dbgCounter = 0;
 
     const loop = async () => {
       if (!isDetecting) return;
@@ -592,78 +590,13 @@ function computeFeaturesForExercise(poses, exerciseType, side, specFromRef) {
     ? (spec.computeExtraFeatures({ kps, side, utils }) || {})
     : {};
 
-  // Bring thresholds from spec (if it defined any)
+  // Auto-copy any spec-level thresholds whose keys are in SKIP_SMOOTH
   const thresholds = {};
-  // STS v2 names (distance fallback)
-  if (spec?.seatedDistThresh != null) thresholds.seatedDistThresh = spec.seatedDistThresh;
-  if (spec?.standingDistThresh != null) thresholds.standingDistThresh = spec.standingDistThresh;
-
-  // Mini Squats (angle & distance hysteresis)
-  if (spec?.downDistThresh != null) thresholds.downDistThresh = spec.downDistThresh;
-  if (spec?.upDistThresh != null) thresholds.upDistThresh = spec.upDistThresh;
-  if (spec?.squatAngleDown != null) thresholds.squatAngleDown = spec.squatAngleDown;
-  if (spec?.squatAngleUp != null) thresholds.squatAngleUp = spec.squatAngleUp;
-
-  // Long Arc Quad
-  if (spec?.laqAngleFlexed != null) thresholds.laqAngleFlexed = spec.laqAngleFlexed;
-  if (spec?.laqAngleExtended != null) thresholds.laqAngleExtended = spec.laqAngleExtended;
-  if (spec?.laqDistFlexed != null) thresholds.laqDistFlexed = spec.laqDistFlexed;
-  if (spec?.laqDistExtended != null) thresholds.laqDistExtended = spec.laqDistExtended;
-
-  // Standing Straight Up
-  if (spec?.standKneeUp != null) thresholds.standKneeUp = spec.standKneeUp;
-  if (spec?.standTrunkUp != null) thresholds.standTrunkUp = spec.standTrunkUp;
-  if (spec?.standHipOverAnkleMax != null) thresholds.standHipOverAnkleMax = spec.standHipOverAnkleMax;
-  if (spec?.slumpKnee != null) thresholds.slumpKnee = spec.slumpKnee;
-  if (spec?.slumpTrunk != null) thresholds.slumpTrunk = spec.slumpTrunk;
-  if (spec?.slumpHipOverAnkleMax != null) thresholds.slumpHipOverAnkleMax = spec.slumpHipOverAnkleMax;
-
-  // Seated Marches
-  if (spec?.hipFlexAngleUp != null) thresholds.hipFlexAngleUp = spec.hipFlexAngleUp;
-  if (spec?.hipFlexAngleDown != null) thresholds.hipFlexAngleDown = spec.hipFlexAngleDown;
-  if (spec?.kneeLiftNormUp != null) thresholds.kneeLiftNormUp = spec.kneeLiftNormUp;
-  if (spec?.kneeLiftNormDown != null) thresholds.kneeLiftNormDown = spec.kneeLiftNormDown;
-  if (spec?.trunkUprightMin != null) thresholds.trunkUprightMin = spec.trunkUprightMin;
-
-  // Standing Marches
-  if (spec?.kneeToAnkleLiftNormUp != null) thresholds.kneeToAnkleLiftNormUp = spec.kneeToAnkleLiftNormUp;
-  if (spec?.kneeToAnkleLiftNormDown != null) thresholds.kneeToAnkleLiftNormDown = spec.kneeToAnkleLiftNormDown;
-  if (spec?.hipFlexAngleUp != null) thresholds.hipFlexAngleUp = spec.hipFlexAngleUp;
-  if (spec?.hipFlexAngleDown != null) thresholds.hipFlexAngleDown = spec.hipFlexAngleDown;
-  if (spec?.trunkUprightMin != null) thresholds.trunkUprightMin = spec.trunkUprightMin;
-
-  // Mini Lunges
-  if (spec?.lungeKneeDown != null) thresholds.lungeKneeDown = spec.lungeKneeDown;
-  if (spec?.lungeKneeUp != null) thresholds.lungeKneeUp = spec.lungeKneeUp;
-  if (spec?.trunkUprightMin != null) thresholds.trunkUprightMin = spec.trunkUprightMin;
-
-  // ---- NEW: Bicep Curls thresholds ----
-  if (spec?.elbowFlexUp != null) thresholds.elbowFlexUp = spec.elbowFlexUp;
-  if (spec?.elbowFlexDown != null) thresholds.elbowFlexDown = spec.elbowFlexDown;
-
-  // Lifts & Chops thresholds passthrough
-  if (spec?.liftHigh != null) thresholds.liftHigh = spec.liftHigh;
-  if (spec?.chopLow != null) thresholds.chopLow = spec.chopLow;
-  if (spec?.xSideEnter != null) thresholds.xSideEnter = spec.xSideEnter;
-
-  // StepUps
-  if (spec?.ankleLiftNormUp != null) thresholds.ankleLiftNormUp = spec.ankleLiftNormUp;
-  if (spec?.ankleLiftNormDown != null) thresholds.ankleLiftNormDown = spec.ankleLiftNormDown;
-  if (spec?.kneeExtendedUp != null) thresholds.kneeExtendedUp = spec.kneeExtendedUp;
-  if (spec?.kneeFlexedDown != null) thresholds.kneeFlexedDown = spec.kneeFlexedDown;
-
-  // Wall Push-Up passthrough
-  if (spec?.elbowOffsetDown != null) thresholds.elbowOffsetDown = spec.elbowOffsetDown;
-  if (spec?.elbowOffsetUp != null) thresholds.elbowOffsetUp = spec.elbowOffsetUp;
-  if (spec?.trunkStraightMin != null) thresholds.trunkStraightMin = spec.trunkStraightMin;
-  if (spec?.elbowLevelTol != null) thresholds.elbowLevelTol = spec.elbowLevelTol;
-
-  // Calf Raises Seated passthrough
-  if (spec?.heelBelowKneeUp != null) thresholds.heelBelowKneeUp = spec.heelBelowKneeUp;
-  if (spec?.heelBelowKneeDown != null) thresholds.heelBelowKneeDown = spec.heelBelowKneeDown;
-  if (spec?.ankleBelowKneeUp != null) thresholds.ankleBelowKneeUp = spec.ankleBelowKneeUp;
-  if (spec?.ankleBelowKneeDown != null) thresholds.ankleBelowKneeDown = spec.ankleBelowKneeDown;
-  if (spec?.trunkUprightMin != null) thresholds.trunkUprightMin = spec.trunkUprightMin;
+  for (const key of SKIP_SMOOTH) {
+    if (key !== 'side' && spec?.[key] != null) {
+      thresholds[key] = spec[key];
+    }
+  }
 
   return { ...base, ...extra, ...thresholds, side };
 }
