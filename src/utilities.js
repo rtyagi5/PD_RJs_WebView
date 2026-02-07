@@ -122,6 +122,7 @@ export const sendUpdates = async (data, exerciseType, activityData, setDisplayMe
 
   messageCache[cacheKey] = 1
 
+  console.log('[WebView] postMessage:', filteredData);
   if (window.ReactNativeWebView) {
     window.ReactNativeWebView.postMessage(JSON.stringify(filteredData));
   } else if (window.parent) {
