@@ -24,12 +24,12 @@ export function drawTargetBox(ctx, frameW, frameH, idealBodyRatio, color) {
   ctx.save();
 
   // Semi-transparent fill
-  ctx.fillStyle = hexToRGBA(color, 0.08);
+  ctx.fillStyle = hexToRGBA(color, 0.15);
   ctx.fillRect(boxX, boxY, boxW, boxH);
 
   // Dashed border
   ctx.setLineDash([12, 8]);
-  ctx.strokeStyle = hexToRGBA(color, 0.6);
+  ctx.strokeStyle = hexToRGBA(color, 0.8);
   ctx.lineWidth = 3;
   ctx.strokeRect(boxX, boxY, boxW, boxH);
 
@@ -48,42 +48,46 @@ export function drawTargetBox(ctx, frameW, frameH, idealBodyRatio, color) {
 
 export function drawCoachingMessages(ctx, frameW, frameH, checks) {
   const failing = (checks || []).filter(c => c.status !== 'good' && c.message);
-  if (failing.length === 0) return;
 
-  // Show the highest-priority failing message
-  const priorityOrder = ['visibility', 'distance', 'angle', 'lighting'];
-  let primary = failing[0];
-  for (const name of priorityOrder) {
-    const found = failing.find(c => c.name === name);
-    if (found) { primary = found; break; }
+  // Determine text: highest-priority failure, or positive message if all good
+  let text;
+  let pillColor = 'rgba(0, 0, 0, 0.7)';
+  let textColor = '#FFFFFF';
+
+  if (failing.length > 0) {
+    const priorityOrder = ['visibility', 'distance', 'angle', 'lighting'];
+    let primary = failing[0];
+    for (const name of priorityOrder) {
+      const found = failing.find(c => c.name === name);
+      if (found) { primary = found; break; }
+    }
+    text = primary.message;
+  } else {
+    text = 'Great position! Hold still\u2026';
+    pillColor = 'rgba(0, 100, 0, 0.75)';
+    textColor = '#B9F6CA';
   }
 
-  const text = primary.message;
-  const y = frameH * 0.08;
+  withUnmirroredText(ctx, frameW, () => {
+    const y = frameH * 0.08;
+    ctx.font = `bold ${Math.round(frameH * 0.035)}px sans-serif`;
+    const metrics = ctx.measureText(text);
+    const padX = 24;
+    const padY = 14;
+    const pillW = metrics.width + padX * 2;
+    const pillH = frameH * 0.035 + padY * 2;
+    const pillX = (frameW - pillW) / 2;
+    const pillY = y - padY - frameH * 0.02;
 
-  ctx.save();
+    ctx.fillStyle = pillColor;
+    roundRect(ctx, pillX, pillY, pillW, pillH, 12);
+    ctx.fill();
 
-  // Background pill
-  ctx.font = `bold ${Math.round(frameH * 0.035)}px sans-serif`;
-  const metrics = ctx.measureText(text);
-  const padX = 24;
-  const padY = 14;
-  const pillW = metrics.width + padX * 2;
-  const pillH = frameH * 0.035 + padY * 2;
-  const pillX = (frameW - pillW) / 2;
-  const pillY = y - padY - frameH * 0.02;
-
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-  roundRect(ctx, pillX, pillY, pillW, pillH, 12);
-  ctx.fill();
-
-  // Text
-  ctx.fillStyle = '#FFFFFF';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, frameW / 2, pillY + pillH / 2);
-
-  ctx.restore();
+    ctx.fillStyle = textColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, frameW / 2, pillY + pillH / 2);
+  });
 }
 
 // ── Countdown Number ─────────────────────────────────────────────────────────
@@ -93,63 +97,72 @@ export function drawCountdown(ctx, frameW, frameH, secondsRemaining) {
 
   const text = String(secondsRemaining);
 
-  ctx.save();
+  withUnmirroredText(ctx, frameW, () => {
+    // Large centered number with glow
+    const fontSize = Math.round(frameH * 0.18);
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
 
-  // Large centered number with glow
-  const fontSize = Math.round(frameH * 0.18);
-  ctx.font = `bold ${fontSize}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+    // Glow
+    ctx.shadowColor = '#00E676';
+    ctx.shadowBlur = 30;
+    ctx.fillStyle = '#00E676';
+    ctx.fillText(text, frameW / 2, frameH * 0.45);
 
-  // Glow
-  ctx.shadowColor = '#00E676';
-  ctx.shadowBlur = 30;
-  ctx.fillStyle = '#00E676';
-  ctx.fillText(text, frameW / 2, frameH * 0.45);
-
-  // Subtitle
-  ctx.shadowBlur = 0;
-  ctx.font = `bold ${Math.round(frameH * 0.03)}px sans-serif`;
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-  ctx.fillText('Get ready…', frameW / 2, frameH * 0.56);
-
-  ctx.restore();
+    // Subtitle
+    ctx.shadowBlur = 0;
+    ctx.font = `bold ${Math.round(frameH * 0.03)}px sans-serif`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fillText('Get ready\u2026', frameW / 2, frameH * 0.56);
+  });
 }
 
 // ── Inactive Overlay ─────────────────────────────────────────────────────────
 
 export function drawInactiveOverlay(ctx, frameW, frameH) {
   ctx.save();
-
-  // Dim the screen
+  // Dim the screen (not mirrored — symmetric fill)
   ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
   ctx.fillRect(0, 0, frameW, frameH);
-
-  // Message
-  const fontSize = Math.round(frameH * 0.04);
-  ctx.font = `bold ${fontSize}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#FFD740';
-  ctx.fillText('Return to the frame to continue', frameW / 2, frameH * 0.45);
-
-  ctx.font = `${Math.round(frameH * 0.025)}px sans-serif`;
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-  ctx.fillText('Your exercise is paused', frameW / 2, frameH * 0.52);
-
   ctx.restore();
+
+  withUnmirroredText(ctx, frameW, () => {
+    const fontSize = Math.round(frameH * 0.04);
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#FFD740';
+    ctx.fillText('Return to the frame to continue', frameW / 2, frameH * 0.45);
+
+    ctx.font = `${Math.round(frameH * 0.025)}px sans-serif`;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.fillText('Your exercise is paused', frameW / 2, frameH * 0.52);
+  });
 }
 
 // ── Loading Overlay ──────────────────────────────────────────────────────────
 
 export function drawLoadingOverlay(ctx, frameW, frameH) {
+  withUnmirroredText(ctx, frameW, () => {
+    const fontSize = Math.round(frameH * 0.035);
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.fillText('Loading pose detector\u2026', frameW / 2, frameH / 2);
+  });
+}
+
+// ── Mirror fix ───────────────────────────────────────────────────────────────
+// The canvas has CSS transform: scaleX(-1) for selfie-mode. This helper
+// counter-transforms so text renders left-to-right.
+
+function withUnmirroredText(ctx, frameW, fn) {
   ctx.save();
-  const fontSize = Math.round(frameH * 0.035);
-  ctx.font = `bold ${fontSize}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-  ctx.fillText('Loading pose detector…', frameW / 2, frameH / 2);
+  ctx.scale(-1, 1);
+  ctx.translate(-frameW, 0);
+  fn();
   ctx.restore();
 }
 

@@ -28,6 +28,7 @@ const DEFAULTS = {
   inactiveThreshold: 15,     // frames with missing keypoints before INACTIVE
   reactivateFrames:  10,     // frames with keypoints back before resuming ACTIVE
   maxInactiveMs:     15000,  // 15 s absent → fall back to COACHING
+  minCoachingMs:     3000,   // coaching phase visible for at least 3 s
 };
 
 export class SessionStateMachine {
@@ -43,6 +44,7 @@ export class SessionStateMachine {
 
     // Coaching stability counter
     this._goodFrames = 0;
+    this._coachingEnteredMs = null;
 
     // Countdown
     this._countdownStartMs = null;
@@ -60,6 +62,7 @@ export class SessionStateMachine {
   reset() {
     this.state = SESSION_STATES.LOADING;
     this._goodFrames = 0;
+    this._coachingEnteredMs = null;
     this._countdownStartMs = null;
     this._missingFrames = 0;
     this._presentFrames = 0;
@@ -105,9 +108,14 @@ export class SessionStateMachine {
 
     // ── COACHING ───────────────────────────────────────────────────────────
     if (this.state === S.COACHING) {
+      // Track when we first entered coaching
+      if (this._coachingEnteredMs == null) this._coachingEnteredMs = now;
+      const coachingElapsed = now - this._coachingEnteredMs;
+
       if (allGood) {
         this._goodFrames++;
-        if (this._goodFrames >= this.cfg.stableFrames) {
+        // Only transition after minimum coaching duration AND stable frames
+        if (this._goodFrames >= this.cfg.stableFrames && coachingElapsed >= this.cfg.minCoachingMs) {
           this.state = S.COUNTDOWN;
           this._countdownStartMs = now;
         }
