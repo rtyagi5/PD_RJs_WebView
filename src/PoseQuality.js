@@ -93,11 +93,20 @@ export function checkCameraAngle(keypoints, frameW, frameH, view = 'front') {
 
   // ---- Front-view checks ----
 
-  // Horizontal centering: shoulder midpoint in middle 50 %
+  // Horizontal centering (mirrored camera: left on screen = patient's right)
   const shMid = midpoint(lSh, rSh);
   const centerX = shMid.x / frameW;
-  if (centerX < 0.25 || centerX > 0.75) {
-    return { status: 'off_center', message: 'Center yourself in the camera' };
+  if (centerX < 0.25) {
+    return { status: 'off_center_right', message: 'Move to your right' };
+  }
+  if (centerX > 0.75) {
+    return { status: 'off_center_left', message: 'Move to your left' };
+  }
+  if (centerX < 0.35) {
+    return { status: 'off_center_right', message: 'Slightly move to your right' };
+  }
+  if (centerX > 0.65) {
+    return { status: 'off_center_left', message: 'Slightly move to your left' };
   }
 
   // Shoulder tilt: should be roughly horizontal
