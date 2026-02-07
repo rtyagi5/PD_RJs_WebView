@@ -430,7 +430,7 @@ export default function ExerciseTrackerRefactored({
         drawTargetBox(ctx, vw, vh, idealRatio, color);
         drawCoachingMessages(ctx, vw, vh, sessionResult.coachingChecks);
         feedbackRef.current = sessionResult.message || 'Position yourself in the frame';
-        try { maybeSendUpdates({}); } catch { }
+        try { maybeSendUpdates({ sessionState: 'coaching', coachingChecks: sessionResult.coachingChecks }); } catch { }
       }
 
       // ─── COUNTDOWN ───────────────────────────────────────────────
@@ -441,7 +441,7 @@ export default function ExerciseTrackerRefactored({
         drawTargetBox(ctx, vw, vh, idealRatio, '#00E676');
         drawCountdown(ctx, vw, vh, sessionResult.countdownRemaining);
         feedbackRef.current = sessionResult.message;
-        try { maybeSendUpdates({}); } catch { }
+        try { maybeSendUpdates({ sessionState: 'countdown', countdownRemaining: sessionResult.countdownRemaining }); } catch { }
       }
 
       // ─── INACTIVE ────────────────────────────────────────────────
@@ -449,7 +449,7 @@ export default function ExerciseTrackerRefactored({
         drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
         drawInactiveOverlay(ctx, vw, vh);
         feedbackRef.current = sessionResult.message;
-        try { maybeSendUpdates({}); } catch { }
+        try { maybeSendUpdates({ sessionState: 'inactive' }); } catch { }
       }
 
       // ─── ACTIVE (exercise running) ──────────────────────────────
@@ -543,7 +543,7 @@ export default function ExerciseTrackerRefactored({
         };
         // Keep latest snapshot for completion payload
         lastExerciseDataRef.current = exerciseData;
-        await maybeSendUpdates(exerciseData);
+        await maybeSendUpdates({ ...exerciseData, sessionState: 'active' });
       }
 
       // FPS measurement (update roughly every 100ms)

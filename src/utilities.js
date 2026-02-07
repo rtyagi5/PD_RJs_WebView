@@ -84,6 +84,10 @@ export const sendUpdates = async (data, exerciseType, activityData, setDisplayMe
     feedback: data.feedback,
     exerciseType: exerciseType,
     completionStatusRef: data.completionStatusRef,
+    // Session state context for WebView TTS / coaching
+    ...(data.sessionState != null && { sessionState: data.sessionState }),
+    ...(data.coachingChecks != null && { coachingChecks: data.coachingChecks }),
+    ...(data.countdownRemaining != null && { countdownRemaining: data.countdownRemaining }),
   };
 
   selectedConfig.forEach(param => {
