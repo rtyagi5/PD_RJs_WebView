@@ -19,6 +19,12 @@ import {
   drawInactiveOverlay, drawLoadingOverlay, coachingColor
 } from './CoachingOverlay';
 import { IDEAL_BODY_RATIO } from './PoseQuality';
+import { DTWPhaseMachine, computeUniversalFeatures } from './dtw';
+import { getReference } from './dtw/referenceRegistry';
+import { bootstrapAllReferences } from './dtw/bootstrapReferences';
+
+// Auto-register all 16 synthetic DTW references on first load
+bootstrapAllReferences();
 
 
 const { EMA, kp, present, computeCommonFeatures, angle } = Features;
@@ -193,12 +199,26 @@ export default function ExerciseTrackerRefactored({
   }
 
   const onComplete = useCallback(async () => {
+    // Save patient baseline & session summary (DTW mode)
+    const eng = engine;
+    if (eng?.saveBaseline) {
+      try { eng.saveBaseline(); } catch (e) { console.warn('[Baseline] save failed:', e); }
+    }
+    const sessionSummary = eng?.getSessionSummary?.() || {};
+
     const finalData = {
       fps: fpsRef.current,
       feedback: 'Target reps achieved!',
       completionStatusRef: true,
       repCount: repCountRef.current,
       ...lastExerciseDataRef.current,
+      // Phase D: attempts vs completed reps
+      ...(sessionSummary.reps ? {
+        completedReps: sessionSummary.reps.completed,
+        attemptedReps: sessionSummary.reps.attempts,
+        totalReps: sessionSummary.reps.total,
+        completionRate: sessionSummary.completionRate,
+      } : {}),
     };
     await sendUpdates(finalData, exerciseType, activityData, setDisplayMessage);
 
@@ -211,6 +231,7 @@ export default function ExerciseTrackerRefactored({
   }, [
     exerciseType,
     activityData,
+    engine,
     setIsDetecting,
     setIsVideoRecording,
     setIsSkeletonRecording,
@@ -315,16 +336,26 @@ export default function ExerciseTrackerRefactored({
         (Number.isFinite(targetReps) ? targetReps : undefined); // final fallback
     }
 
-    const eng = new PhaseMachine(spec, { targetReps, targetSeconds });
+    // Choose engine: DTWPhaseMachine (if reference exists) or PhaseMachine (hand-coded spec)
+    const ref = getReference(exerciseType);
+    const patientId = activityData?.patient?.id || activityData?.userId || activityData?.activity || null;
+    let eng;
+    if (ref) {
+      eng = new DTWPhaseMachine(ref, { targetReps, targetSeconds, patientId, side });
+      console.log('[Engine] DTW mode for', exerciseType, patientId ? `(patient: ${patientId})` : '(no patient)');
+    } else {
+      eng = new PhaseMachine(spec, { targetReps, targetSeconds });
+    }
     setEngine(eng);
 
     // Create/reset session state machine for coaching flow
-    sessionSMRef.current = new SessionStateMachine(spec);
+    // DTWPhaseMachine exposes a .spec object for compatibility
+    sessionSMRef.current = new SessionStateMachine(ref ? eng.spec : spec);
 
-    const phaseList = Array.isArray(spec?.phases)
-      ? spec.phases.map(p => p.id).join(', ')
+    const phaseList = Array.isArray((ref ? eng.spec : spec)?.phases)
+      ? (ref ? eng.spec : spec).phases.map(p => p.id ?? p).join(', ')
       : '(no phases)';
-    console.log('[Engine] built:', spec?.name ?? exerciseType, 'phases:', phaseList);
+    console.log('[Engine] built:', spec?.name ?? exerciseType, ref ? '(DTW)' : '(spec)', 'phases:', phaseList);
   }, [exerciseType, targetReps]);
 
   useEffect(() => {
@@ -393,7 +424,11 @@ export default function ExerciseTrackerRefactored({
       const sessionState = sessionResult.state;
 
       // ─── Compute & smooth features (all states) ─────────────────
-      const feat = computeFeaturesForExercise(poses, exerciseType, side, specRef.current);
+      // DTW mode: use universal features; spec mode: use per-spec features
+      const isDTW = engine instanceof DTWPhaseMachine;
+      const feat = isDTW
+        ? computeUniversalFeaturesFromPoses(poses)
+        : computeFeaturesForExercise(poses, exerciseType, side, specRef.current);
       const smooth = smoothRef.current;
       for (const [k, raw] of Object.entries(feat)) {
         if (SKIP_SMOOTH.has(k) || !Number.isFinite(raw)) continue;
@@ -410,9 +445,25 @@ export default function ExerciseTrackerRefactored({
       };
       const spec = specRef.current;
 
-      // Apply spec highlights except during loading/inactive
-      if (sessionState !== 'loading' && sessionState !== 'inactive' && spec?.highlights) {
-        try { spec.highlights({ setHighlight, features: { ...feat, side } }); } catch { }
+      // Apply highlights except during loading/inactive
+      if (sessionState !== 'loading' && sessionState !== 'inactive') {
+        if (isDTW) {
+          // DTW mode: highlight exercise-specific body parts
+          const ref = getReference(exerciseType);
+          const hlParts = ref?.highlightKeypoints;
+          let hlKps = [];
+          if (hlParts && hlParts.length) {
+            const s = (side || '').toLowerCase();
+            if (s === 'left' || s === 'right') {
+              hlKps = hlParts.map(p => `${s}_${p}`);
+            } else {
+              hlKps = hlParts.flatMap(p => [`left_${p}`, `right_${p}`]);
+            }
+          }
+          setHighlight({ keypoints: hlKps, color: '#66FF00' });
+        } else if (spec?.highlights) {
+          try { spec.highlights({ setHighlight, features: { ...feat, side } }); } catch { }
+        }
       }
 
       // ─── LOADING ─────────────────────────────────────────────────
@@ -466,6 +517,13 @@ export default function ExerciseTrackerRefactored({
           return;
         }
 
+        const stepResult = engine.step({
+          t: performance.now(),
+          features: { ...feat, side },
+          now: performance.now(),
+          say: (m) => { feedbackRef.current = m; },
+          setHighlight
+        });
         const {
           repDelta,
           repCount,
@@ -474,13 +532,14 @@ export default function ExerciseTrackerRefactored({
           phase,
           timeHeldMs,
           timeRemainingMs
-        } = engine.step({
-          t: performance.now(),
-          features: { ...feat, side },
-          now: performance.now(),
-          say: (m) => { feedbackRef.current = m; },
-          setHighlight
-        });
+        } = stepResult;
+
+        // DTW mode: update color based on match quality, keep same keypoints
+        if (isDTW) {
+          const q = stepResult.quality ?? 0;
+          const color = q > 0.7 ? '#66FF00' : '#FFB020';
+          setHighlight({ keypoints: keypointsRef.current, color });
+        }
 
         // unify counters / feedback
         repCountRef.current = repCount;
@@ -519,8 +578,11 @@ export default function ExerciseTrackerRefactored({
           prevPhaseRef.current = phase;
         }
         if (repDelta > 0 || repCount !== prevRepRef.current) {
-          console.log(`[${engine?.spec?.name}] Rep +1 -> ${repCount}`);
-          setDisplayMessage?.(`${spec?.name || exerciseType}: Rep +1 → ${repCount} (${hudLabel}=${hudValue})`);
+          const rc = stepResult.repClassification;
+          const attemptInfo = rc && !rc.completed
+            ? ` [ATTEMPT: ROM ${Math.round((rc.romPct || 0) * 100)}%]` : '';
+          console.log(`[${engine?.spec?.name}] Rep +1 -> ${repCount}${attemptInfo}`);
+          setDisplayMessage?.(`${spec?.name || exerciseType}: Rep +1 → ${repCount} (${hudLabel}=${hudValue})${attemptInfo}`);
           prevRepRef.current = repCount;
         }
 
@@ -539,7 +601,14 @@ export default function ExerciseTrackerRefactored({
           ...(isTimeMode ? {
             timeHeldMs: timeHeldMs ?? 0,
             timeRemainingMs: timeRemainingMs ?? 0
-          } : {})
+          } : {}),
+          // Phase D: attempts vs completed reps (DTW mode)
+          ...(stepResult.totalReps != null ? {
+            completedReps: stepResult.completedReps,
+            attemptedReps: stepResult.attemptedReps,
+            totalReps: stepResult.totalReps,
+            isCalibrating: stepResult.isCalibrating,
+          } : {}),
         };
         // Keep latest snapshot for completion payload
         lastExerciseDataRef.current = exerciseData;
@@ -642,4 +711,16 @@ function computeFeaturesForExercise(poses, exerciseType, side, specFromRef) {
   }
 
   return { ...base, ...extra, ...thresholds, side };
+}
+
+// Compute universal features for DTW mode (no per-spec logic)
+function computeUniversalFeaturesFromPoses(poses) {
+  const MOVE_NET_NAMES = [
+    'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
+    'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow', 'left_wrist', 'right_wrist',
+    'left_hip', 'right_hip', 'left_knee', 'right_knee', 'left_ankle', 'right_ankle'
+  ];
+  const raw = (poses?.[0]?.keypoints) || [];
+  const kps = raw.map((k, i) => (k?.name ? k : { ...k, name: MOVE_NET_NAMES[i] }));
+  return computeUniversalFeatures(kps);
 }
