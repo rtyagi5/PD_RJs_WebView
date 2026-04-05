@@ -4,10 +4,13 @@
 // label phases → add feedback → export reference JSON.
 // ---------------------------------------------
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import axios from 'axios';
 import { createPoseDetector } from '../detectors';
 import { extractFeaturesFromVideo, detectRepBoundaries, buildTemplateFromReps, getTopFeatures } from './videoFeatureExtractor';
 import { computeFeatureRanges, validateReference } from './referenceSchema';
 import { registerReference } from './referenceRegistry';
+import { getServiceUrl } from '../config';
+import { clearCachedReference } from './referenceStorage';
 
 // ─── Styles (inline for portability) ──────────────────────
 const S = {
@@ -121,6 +124,8 @@ export default function ReferenceExtractor() {
   });
   const [exportedJSON, setExportedJSON] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
+  const [publishing, setPublishing] = useState(false);
+  const [publishStatus, setPublishStatus] = useState(null); // null | 'success' | 'error'
   const [currentFrame, setCurrentFrame] = useState(0); // video playback position as frame index
   const [currentTime, setCurrentTime] = useState(0);   // video playback position in seconds
   const [topFeatures, setTopFeatures] = useState([]);   // top features by range for dropdown
@@ -442,6 +447,26 @@ export default function ReferenceExtractor() {
     a.download = `${exportedJSON.name || 'reference'}.ref.json`;
     a.click();
     URL.revokeObjectURL(url);
+  }, [exportedJSON]);
+
+  const handlePublish = useCallback(async () => {
+    if (!exportedJSON) return;
+    setPublishing(true);
+    setPublishStatus(null);
+    try {
+      const tenant = process.env.REACT_APP_TENANT || 'dev';
+      const { REFERENCE_SERVICE } = getServiceUrl({ tenant });
+      await axios.post(REFERENCE_SERVICE, exportedJSON);
+      clearCachedReference(exportedJSON.name); // bust client cache so next session re-fetches
+      setPublishStatus('success');
+      setStatusMsg(`"${exportedJSON.name}" published to the platform. All devices will use this reference from their next session.`);
+    } catch (e) {
+      console.error('[ReferenceExtractor] Publish failed:', e);
+      setPublishStatus('error');
+      setStatusMsg('Publish failed — download the .ref.json and add it manually, or check the backend.');
+    } finally {
+      setPublishing(false);
+    }
   }, [exportedJSON]);
 
   // ─── Timeline click → seek video ───────────────────
@@ -889,6 +914,19 @@ export default function ReferenceExtractor() {
               </pre>
 
               <div style={{ marginTop: 12 }}>
+                <button
+                  style={{ ...S.btn, background: publishing ? '#335533' : '#226622', marginRight: 8 }}
+                  onClick={handlePublish}
+                  disabled={publishing}
+                >
+                  {publishing ? 'Publishing…' : 'Publish to Platform'}
+                </button>
+                {publishStatus === 'success' && (
+                  <span style={{ color: '#66ff88', fontSize: 13, marginRight: 8 }}>Published</span>
+                )}
+                {publishStatus === 'error' && (
+                  <span style={{ color: '#ff6666', fontSize: 13, marginRight: 8 }}>Failed — use Download below</span>
+                )}
                 <button style={S.btn} onClick={handleDownload}>
                   Download .ref.json
                 </button>

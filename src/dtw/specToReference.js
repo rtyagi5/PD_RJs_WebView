@@ -96,6 +96,7 @@ export function generateReference(config) {
     repCycle: config.repCycle,
     feedback: config.feedback || { phase: {} },
     highlightKeypoints: config.highlightKeypoints || null,
+    minRomPct: config.minRomPct ?? null,
     timing: {
       fps: 30,
       repDurationMs: config.timing?.repDurationMs || 2000,
@@ -330,6 +331,7 @@ export const EXERCISE_CONFIGS = {
     name: 'SeatedMarch',
     mode: 'rep',
     side: 'alternating',
+    minRomPct: 0.35,
     detector: 'movenet',
     highlightKeypoints: ['hip', 'knee', 'ankle'],
     phases: [
@@ -364,6 +366,7 @@ export const EXERCISE_CONFIGS = {
     name: 'StandingMarch',
     mode: 'rep',
     side: 'alternating',
+    minRomPct: 0.35, // Require 35% of hipAngle range (~38°) to reject settling noise at exercise start
     detector: 'movenet',
     highlightKeypoints: ['hip', 'knee', 'ankle'],
     phases: [

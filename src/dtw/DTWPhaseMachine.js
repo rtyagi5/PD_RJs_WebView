@@ -17,10 +17,15 @@ export class DTWPhaseMachine {
     this.reference = reference;
     this.targetReps = targetReps;
     this.patientId = patientId || null;
-    this.side = side || null; // 'left', 'right', or null (both)
 
     // Mode
     this.mode = reference.mode === 'time' ? 'time' : 'reps';
+    this.isAlternating = reference.side === 'alternating';
+
+    // For alternating exercises, use 'alternating' mode in the DTW engine so it
+    // compares only aggregate features (Min/Max/Avg), making both legs visible.
+    // The JWT 'side' indicates the affected side but must not restrict rep counting.
+    this.side = this.isAlternating ? 'alternating' : (side || null);
 
     // Compute feature ranges if not provided
     this.featureRanges = reference.featureRanges || computeFeatureRanges(reference.template);
@@ -76,12 +81,20 @@ export class DTWPhaseMachine {
     // Rep tracking — full cycle state machine: idle → sawStart → sawEffort → completed
     this.cycleState = 'idle'; // 'idle' | 'sawStart' | 'sawEffort'
 
+    // Alternating guardrail: track which side was used per rep
+    this.lastActiveSide = null;        // side counted on the previous rep
+    this.activeSideDuringCycle = null; // side detected during the current cycle
+
     // Primary feature ROM tracking: measure actual movement instead of template position
     // Find the feature with the largest range (filtered by active side)
     let bestKey = null;
     let bestRange = 0;
     for (const [key, stats] of Object.entries(this.featureRanges)) {
-      if (this.side) {
+      if (this.isAlternating) {
+        // Alternating: primary feature must be an aggregate (Min/Max/Avg) so it
+        // captures whichever leg is active rather than one specific side.
+        if (key.endsWith('L') || key.endsWith('R')) continue;
+      } else if (this.side) {
         if (this.side === 'left' && key.endsWith('R')) continue;
         if (this.side === 'right' && key.endsWith('L')) continue;
         if (key.endsWith('Min') || key.endsWith('Max') || key.endsWith('Avg')) continue;
@@ -93,7 +106,7 @@ export class DTWPhaseMachine {
     }
     this.primaryFeature = bestKey;
     this.primaryFeatureRange = bestRange;
-    this.minRomForRep = 0.25 * bestRange; // 25% of template range = meaningful movement
+    this.minRomForRep = (reference.minRomPct ?? 0.25) * bestRange; // % of template range = meaningful movement
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
     console.log(`[DTW] Primary feature: ${bestKey} range=${bestRange.toFixed(1)} minROM=${this.minRomForRep.toFixed(1)} side=${this.side}`);
@@ -140,6 +153,8 @@ export class DTWPhaseMachine {
     this.cycleState = 'idle';
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
+    this.lastActiveSide = null;
+    this.activeSideDuringCycle = null;
     this.dtw.reset();
     // Don't reset patient baseline on counter reset — it persists across the session
   }
@@ -186,6 +201,7 @@ export class DTWPhaseMachine {
         this.cycleState = 'sawStart';
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
+        this.activeSideDuringCycle = null;
       }
     } else if (newPhase !== this.phase) {
       if (now - this.lastPhaseEnterAt >= this.dwellMs) {
@@ -206,6 +222,17 @@ export class DTWPhaseMachine {
     const actualRom = this.cycleFeatureMax - this.cycleFeatureMin;
     const romOk = actualRom >= this.minRomForRep;
 
+    // Detect which leg is active during this cycle (alternating guardrail)
+    if (this.isAlternating && this.cycleState !== 'idle') {
+      const hL = features.hipAngleL;
+      const hR = features.hipAngleR;
+      // Only assign when one leg is clearly more flexed (>30° difference) to avoid
+      // mis-detecting side when both legs are near the resting position
+      if (Number.isFinite(hL) && Number.isFinite(hR) && Math.abs(hL - hR) > 30) {
+        this.activeSideDuringCycle = hL < hR ? 'left' : 'right';
+      }
+    }
+
     // Rep counting (reps mode): full cycle start → effort → return
     // Runs every frame (not just on phase transitions) for responsiveness
     if (this.mode === 'reps') {
@@ -213,23 +240,28 @@ export class DTWPhaseMachine {
         this.cycleState = 'sawStart';
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
+        this.activeSideDuringCycle = null;
       }
       if (this.cycleState === 'sawStart' && this.effortPhases.has(this.phase)) {
         this.cycleState = 'sawEffort';
       }
       if (this.cycleState === 'sawEffort' && this.phase === this.repCycle.return
           && romOk && now >= this.refractoryUntil) {
-        // Full cycle complete with meaningful movement — classify and count
-        repClassification = this._classifyRep(features, result.quality);
-        if (repClassification.completed) {
-          this.repCount++;
-          repDelta = 1;
+        // Full cycle complete with meaningful movement — check alternating guardrail
+        if (this._alternatingSideOk()) {
+          repClassification = this._classifyRep(features, result.quality);
+          if (repClassification.completed) {
+            this.repCount++;
+            repDelta = 1;
+            this.lastActiveSide = this.activeSideDuringCycle;
+          }
         }
-        console.log(`[DTW] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} side=${this.side}`);
+        console.log(`[DTW] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
         this.refractoryUntil = now + this.refractoryMs;
         this.cycleState = 'sawStart'; // ready for next cycle (already at start)
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
+        this.activeSideDuringCycle = null;
       }
     }
 
@@ -238,16 +270,20 @@ export class DTWPhaseMachine {
     if (result.cycleComplete && repDelta === 0 && this.mode === 'reps' && now >= this.refractoryUntil) {
       // Only count if we've seen at least the effort phase AND meaningful ROM
       if (this.cycleState === 'sawEffort' && romOk) {
-        repClassification = this._classifyRep(features, result.quality);
-        if (repClassification.completed) {
-          this.repCount++;
-          repDelta = 1;
+        if (this._alternatingSideOk()) {
+          repClassification = this._classifyRep(features, result.quality);
+          if (repClassification.completed) {
+            this.repCount++;
+            repDelta = 1;
+            this.lastActiveSide = this.activeSideDuringCycle;
+          }
         }
-        console.log(`[DTW-backup] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} side=${this.side}`);
+        console.log(`[DTW-backup] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
         this.refractoryUntil = now + this.refractoryMs;
         this.cycleState = 'idle';
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
+        this.activeSideDuringCycle = null;
       }
     }
 
@@ -301,19 +337,31 @@ export class DTWPhaseMachine {
       completedReps: this.patientBaseline?.reps?.completed ?? this.repCount,
       attemptedReps: this.patientBaseline?.reps?.attempts ?? 0,
       totalReps: this.patientBaseline?.reps?.total ?? this.repCount,
+      activeSide: this.activeSideDuringCycle,   // null when idle; 'left'/'right' during rep
     };
   }
 
   /**
-   * Pick the best feedback message based on priority:
-   * 1. Form/safety deviations (highest priority)
-   * 2. Range feedback
-   * 3. Tempo feedback (future)
-   * 4. Phase feedback (default)
+   * Returns true if the current rep is on the correct side (alternating guardrail).
+   * Non-alternating exercises always return true.
    */
+  _alternatingSideOk() {
+    if (!this.isAlternating) return true;
+    if (!this.activeSideDuringCycle) return true; // couldn't detect side: benefit of doubt
+    if (!this.lastActiveSide) return true;         // first rep: any side OK
+    return this.activeSideDuringCycle !== this.lastActiveSide;
+  }
+
   _pickFeedback(dtwResult, features) {
     const fb = this.feedback;
     const deviations = dtwResult.deviations;
+
+    // 0. Alternating guardrail: warn when same leg used twice in a row
+    if (this.isAlternating && this.cycleState === 'sawEffort'
+        && this.activeSideDuringCycle && this.lastActiveSide
+        && this.activeSideDuringCycle === this.lastActiveSide) {
+      return 'Switch legs — alternate each step!';
+    }
 
     // 1. Form/safety: check if any body part deviates significantly
     if (fb.form && Array.isArray(fb.form)) {

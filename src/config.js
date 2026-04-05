@@ -4,5 +4,6 @@ export const getServiceUrl = (activityData) => {
   return {
     EXERCISE_SERVICE: `https://${activityData?.tenant}.${baseURL}/exercise-service`,
     USER_SERVICE: `https://${activityData?.tenant}.${baseURL}/user-service`,
+    REFERENCE_SERVICE: `https://${activityData?.tenant}.${baseURL}/exercise-service/references`,
   };
 };

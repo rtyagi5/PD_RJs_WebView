@@ -21,7 +21,7 @@ import {
 import { IDEAL_BODY_RATIO } from './PoseQuality';
 import { DTWPhaseMachine, computeUniversalFeatures } from './dtw';
 import { getReference } from './dtw/referenceRegistry';
-import { bootstrapAllReferences } from './dtw/bootstrapReferences';
+import { bootstrapAllReferences, fetchAndCacheReference } from './dtw/bootstrapReferences';
 
 // Auto-register all 16 synthetic DTW references on first load
 bootstrapAllReferences();
@@ -169,6 +169,14 @@ export default function ExerciseTrackerRefactored({
   // Smoothers: lazily created per-feature
   const smoothRef = useRef({});
   const sessionSMRef = useRef(null);
+
+  // Fetch video-extracted reference from platform API (background, non-blocking).
+  // First session uses synthetic ref; subsequent sessions use the cached video ref.
+  useEffect(() => {
+    if (exerciseType && activityData?.tenant) {
+      fetchAndCacheReference(exerciseType, activityData).catch(() => {});
+    }
+  }, [exerciseType, activityData?.tenant]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // wipe smoothers on (re)start or exercise/side change
   useEffect(() => {
@@ -453,10 +461,12 @@ export default function ExerciseTrackerRefactored({
           const hlParts = ref?.highlightKeypoints;
           let hlKps = [];
           if (hlParts && hlParts.length) {
+            const isAlternating = ref?.side === 'alternating';
             const s = (side || '').toLowerCase();
-            if (s === 'left' || s === 'right') {
+            if (!isAlternating && (s === 'left' || s === 'right')) {
               hlKps = hlParts.map(p => `${s}_${p}`);
             } else {
+              // Alternating (or bilateral): always start with both sides highlighted
               hlKps = hlParts.flatMap(p => [`left_${p}`, `right_${p}`]);
             }
           }
@@ -534,11 +544,26 @@ export default function ExerciseTrackerRefactored({
           timeRemainingMs
         } = stepResult;
 
-        // DTW mode: update color based on match quality, keep same keypoints
+        // DTW mode: update color based on match quality; for alternating exercises
+        // also switch which leg is highlighted based on the active side
         if (isDTW) {
           const q = stepResult.quality ?? 0;
           const color = q > 0.7 ? '#66FF00' : '#FFB020';
-          setHighlight({ keypoints: keypointsRef.current, color });
+          const ref = getReference(exerciseType);
+          const hlParts = ref?.highlightKeypoints ?? [];
+
+          if (ref?.side === 'alternating' && hlParts.length) {
+            const activeSide = stepResult.activeSide; // null when idle / undetected
+            let hlKps;
+            if (activeSide === 'left' || activeSide === 'right') {
+              hlKps = hlParts.map(p => `${activeSide}_${p}`);
+            } else {
+              hlKps = hlParts.flatMap(p => [`left_${p}`, `right_${p}`]);
+            }
+            setHighlight({ keypoints: hlKps, color });
+          } else {
+            setHighlight({ keypoints: keypointsRef.current, color });
+          }
         }
 
         // unify counters / feedback

@@ -21,9 +21,13 @@ export function featureDistance(a, b, featureRanges, weights, side) {
   const fin = Number.isFinite;
 
   for (const key of Object.keys(b)) {
-    // Side-aware filtering: skip opposite side and ALL aggregate features
-    // Aggregates (Min, Max, Avg) are polluted by the inactive arm
-    if (side) {
+    // Side-aware filtering
+    if (side === 'alternating') {
+      // Alternating exercises: skip per-side L/R features; compare only bilateral
+      // aggregates (Min/Max/Avg) so whichever leg is active drives the match.
+      if (key.endsWith('L') || key.endsWith('R')) continue;
+    } else if (side) {
+      // Single-side exercise: skip opposite side AND aggregates (polluted by inactive side)
       if (side === 'left' && key.endsWith('R')) continue;
       if (side === 'right' && key.endsWith('L')) continue;
       if (key.endsWith('Min') || key.endsWith('Max') || key.endsWith('Avg')) continue;
