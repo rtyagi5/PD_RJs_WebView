@@ -13,9 +13,9 @@ import { IDEAL_BODY_RATIO } from './PoseQuality';
 export function drawTargetBox(ctx, frameW, frameH, idealBodyRatio, color) {
   const ratio = idealBodyRatio ?? IDEAL_BODY_RATIO;
 
-  // Box dimensions: width ~40 % of frame, height from ratio
+  // Box dimensions: width 50 % of frame, height from ratio
   const boxH = frameH * ratio;
-  const boxW = frameW * 0.38;
+  const boxW = frameW * 0.50;
 
   // Centered, slight vertical offset (body center ≈ 45 % from top)
   const boxX = (frameW - boxW) / 2;

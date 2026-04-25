@@ -130,6 +130,19 @@ export class DTWPhaseMachine {
       });
     }
 
+    // Reference start value for the primary feature — used as a guard to prevent
+    // counting a rep when the DTW mislabels the return phase while the limb is
+    // still mid-range (happens when DTW quality is low and template position drifts).
+    // Computed as the mean primary-feature value across all start-phase frames.
+    this.refStartValue = null;
+    if (this.primaryFeature && Array.isArray(reference.template) && reference.template.length > 0) {
+      const startFrames = reference.template.filter(f => f.phase === this.repCycle.start);
+      const vals = startFrames.map(f => f.features?.[this.primaryFeature]).filter(Number.isFinite);
+      if (vals.length > 0) {
+        this.refStartValue = vals.reduce((a, b) => a + b, 0) / vals.length;
+      }
+    }
+
     // Build a spec-like object for compatibility
     this.spec = {
       name: reference.name,
@@ -243,10 +256,14 @@ export class DTWPhaseMachine {
         this.activeSideDuringCycle = null;
       }
       if (this.cycleState === 'sawStart' && this.effortPhases.has(this.phase)) {
-        this.cycleState = 'sawEffort';
+        const pVal = this.primaryFeature ? features[this.primaryFeature] : null;
+        const effortThreshold = (this.refStartValue ?? 0) + this.minRomForRep;
+        if (!Number.isFinite(pVal) || pVal >= effortThreshold) {
+          this.cycleState = 'sawEffort';
+        }
       }
       if (this.cycleState === 'sawEffort' && this.phase === this.repCycle.return
-          && romOk && now >= this.refractoryUntil) {
+          && romOk && now >= this.refractoryUntil && this._primaryFeatureNearStart(features)) {
         // Full cycle complete with meaningful movement — check alternating guardrail
         if (this._alternatingSideOk()) {
           repClassification = this._classifyRep(features, result.quality);
@@ -269,7 +286,7 @@ export class DTWPhaseMachine {
     // phase transitions (handles edge cases where phase labels are noisy)
     if (result.cycleComplete && repDelta === 0 && this.mode === 'reps' && now >= this.refractoryUntil) {
       // Only count if we've seen at least the effort phase AND meaningful ROM
-      if (this.cycleState === 'sawEffort' && romOk) {
+      if (this.cycleState === 'sawEffort' && romOk && this._primaryFeatureNearStart(features)) {
         if (this._alternatingSideOk()) {
           repClassification = this._classifyRep(features, result.quality);
           if (repClassification.completed) {
@@ -339,6 +356,19 @@ export class DTWPhaseMachine {
       totalReps: this.patientBaseline?.reps?.total ?? this.repCount,
       activeSide: this.activeSideDuringCycle,   // null when idle; 'left'/'right' during rep
     };
+  }
+
+  /**
+   * Guard: primary feature must be near the reference's start position before a rep counts.
+   * Prevents false counts when DTW quality is low and the phase label says "lowered/start"
+   * while the limb is actually still mid-range (e.g. shoulderAngle=67° labelled "lowered").
+   * Tolerance = minRomForRep (25-35% of reference range).
+   */
+  _primaryFeatureNearStart(features) {
+    if (!this.primaryFeature || this.refStartValue == null) return true;
+    const pVal = features[this.primaryFeature];
+    if (!Number.isFinite(pVal)) return true; // can't verify — give benefit of doubt
+    return Math.abs(pVal - this.refStartValue) <= this.minRomForRep;
   }
 
   /**

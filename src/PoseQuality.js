@@ -8,9 +8,9 @@
 import { kp, present } from './features';
 
 // ── Global defaults ──────────────────────────────────────────────────────────
-export const IDEAL_BODY_RATIO   = 0.65;  // body height ≈ 65 % of frame height
-export const DISTANCE_TOL_CLOSE = 0.15;  // ratio > ideal + this → "too close"
-export const DISTANCE_TOL_FAR   = 0.20;  // ratio < ideal - this → "too far"
+export const IDEAL_BODY_RATIO   = 0.50;  // body height ≈ 50 % of frame height (calibrated for mobile, phone on table 3-5 ft away)
+export const DISTANCE_TOL_CLOSE = 0.20;  // ratio > ideal + this → "too close"  (max: 0.70)
+export const DISTANCE_TOL_FAR   = 0.30;  // ratio < ideal - this → "too far"    (min: 0.20 — allows normal standing distance)
 export const MIN_CONFIDENCE     = 0.3;   // per-keypoint visibility threshold
 export const LIGHTING_THRESHOLD = 0.25;  // avg score below this → poor lighting
 
