@@ -27,7 +27,16 @@ export function angle(p1, p2, p3) {
         this.v = this.v == null ? x : this.a * x + (1 - this.a) * this.v;
         return this.v;
         }
-        reset() { this.v = null; } // optional helper
+        // FPS-adaptive variant: adjusts alpha so smoothing half-life stays constant
+        // regardless of actual frame rate. At 30fps identical to next(); at 5fps
+        // follows peaks ~6x faster so peaks aren't smoothed away on slow devices.
+        nextWithDt(x, dt, targetDt = 33) {
+        if (!Number.isFinite(x)) return this.v;
+        const a = 1 - Math.pow(1 - this.a, Math.max(dt, 1) / targetDt);
+        this.v = this.v == null ? x : a * x + (1 - a) * this.v;
+        return this.v;
+        }
+        reset() { this.v = null; }
     }
     
     
@@ -60,6 +69,12 @@ export function angle(p1, p2, p3) {
           next(x) {
             if (!Number.isFinite(x)) return v;
             v = v == null ? x : a * x + (1 - a) * v;
+            return v;
+          },
+          nextWithDt(x, dt, targetDt = 33) {
+            if (!Number.isFinite(x)) return v;
+            const aa = 1 - Math.pow(1 - a, Math.max(dt, 1) / targetDt);
+            v = v == null ? x : aa * x + (1 - aa) * v;
             return v;
           },
           reset() { v = null; }

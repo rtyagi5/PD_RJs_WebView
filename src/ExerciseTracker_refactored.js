@@ -157,6 +157,9 @@ export default function ExerciseTrackerRefactored({
 
   const lastFeedbackSentRef = useRef(null);
   const detectionStartTimeRef = useRef(null);
+  const lastFrameTimeRef = useRef(performance.now());
+  const latestPosesRef = useRef([]);
+  const inferenceRunningRef = useRef(false);
   const previousRemainingTimeRef = useRef(null);
   const fpsRef = useRef(0);
   const lastExerciseDataRef = useRef({});
@@ -386,6 +389,9 @@ export default function ExerciseTrackerRefactored({
     let frameCount = 0;
     let lastFpsUpdate = performance.now();
 
+    // Non-blocking inference: fire-and-forget so RAF runs at 60fps while
+    // inference runs alongside at device-max rate. On mobile this prevents
+    // the 100–300ms per-frame stall that caused visible canvas pausing.
     const loop = async () => {
       if (!isDetecting) return;
 
@@ -398,6 +404,17 @@ export default function ExerciseTrackerRefactored({
         return;
       }
 
+      // Kick off inference if none is in flight (fire-and-forget).
+      // Canvas draws using the most recent completed result.
+      if (!inferenceRunningRef.current) {
+        inferenceRunningRef.current = true;
+        det.estimatePoses(video).then(p => {
+          latestPosesRef.current = p;
+          inferenceRunningRef.current = false;
+        }).catch(() => { inferenceRunningRef.current = false; });
+      }
+      const poses = latestPosesRef.current;
+
       // Ensure canvas matches the actual video size
       const vw = video.videoWidth;
       const vh = video.videoHeight;
@@ -407,14 +424,6 @@ export default function ExerciseTrackerRefactored({
         canvasRef.current.height = vh;
       }
       ctx.clearRect(0, 0, vw, vh);
-
-      // Estimate poses
-      let poses = [];
-      try {
-        poses = await det.estimatePoses(video);
-      } catch (e) {
-        console.error('[Tracker] estimatePoses failed:', e);
-      }
 
       // ─── Session State Machine ───────────────────────────────────
       const rawKps = (poses?.[0]?.keypoints) || [];
@@ -438,10 +447,13 @@ export default function ExerciseTrackerRefactored({
         ? computeUniversalFeaturesFromPoses(poses)
         : computeFeaturesForExercise(poses, exerciseType, side, specRef.current);
       const smooth = smoothRef.current;
+      const frameNow = performance.now();
+      const frameDt = frameNow - lastFrameTimeRef.current;
+      lastFrameTimeRef.current = frameNow;
       for (const [k, raw] of Object.entries(feat)) {
         if (SKIP_SMOOTH.has(k) || !Number.isFinite(raw)) continue;
         if (!smooth[k]) smooth[k] = new EMA(alphaFor(k));
-        const v = smooth[k].next(raw);
+        const v = smooth[k].nextWithDt(raw, frameDt);
         if (Number.isFinite(v)) feat[k] = v;
       }
 
@@ -637,7 +649,7 @@ export default function ExerciseTrackerRefactored({
         };
         // Keep latest snapshot for completion payload
         lastExerciseDataRef.current = exerciseData;
-        await maybeSendUpdates({ ...exerciseData, sessionState: 'active' });
+        maybeSendUpdates({ ...exerciseData, sessionState: 'active' }).catch(() => {});
       }
 
       // FPS measurement (update roughly every 100ms)

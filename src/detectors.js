@@ -7,6 +7,7 @@ export async function createMoveNet() {
     // ensure webgl for performance
     await tf.setBackend('webgl');
     await tf.ready();
+    console.log('[TF] backend:', tf.getBackend(), '| webgl version:', tf.ENV.get('WEBGL_VERSION'));
   const det = await posedetection.createDetector(
     posedetection.SupportedModels.MoveNet,
     {
