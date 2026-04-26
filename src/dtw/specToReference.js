@@ -181,7 +181,12 @@ export const EXERCISE_CONFIGS = {
     repCycle: { from: 'lowered', to: 'raised' },
     staticFeatures: { trunkAngle: 172, kneeAngle: 175, hipAngle: 170 },
     feedback: {
-      phase: { lowered: 'Raise your arm out to the side', raised: 'Good — lower slowly' },
+      phase: {
+        lowered: 'Raise your arm out to the side',
+        transition_up: 'Keep going',
+        raised: 'Good — lower slowly',
+        transition_down: 'Lower slowly',
+      },
       form: [{ bodyPart: 'trunk', say: 'Keep your back straight' }],
       range: { tooLittle: 'Try to raise a bit higher', tooMuch: "That's high enough" },
       tempo: { tooFast: 'Slow down, control the movement' },

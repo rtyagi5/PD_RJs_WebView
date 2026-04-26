@@ -184,12 +184,14 @@ export class OnlineSubsequenceDTW {
     for (const [key, refVal] of Object.entries(alignedFrame.features)) {
       const liveVal = liveFeatures[key];
       if (Number.isFinite(refVal) && Number.isFinite(liveVal)) {
-        const range = this.featureRanges?.[key]?.range || 1;
+        // Use same floor as distance calculation so static features (range≈0) don't
+        // produce inflated normalizedDelta values and trigger false form warnings.
+        const range = Math.max(this.featureRanges?.[key]?.range || 0, 10);
         deviations[key] = {
           live: liveVal,
           reference: refVal,
           delta: liveVal - refVal,
-          normalizedDelta: (liveVal - refVal) / (range || 1),
+          normalizedDelta: (liveVal - refVal) / range,
         };
       }
     }

@@ -64,7 +64,7 @@ export class DTWPhaseMachine {
 
     // Feedback config
     this.feedback = reference.feedback || {};
-    this.formDeviationThreshold = reference.formDeviationThreshold ?? 0.3;
+    this.formDeviationThreshold = reference.formDeviationThreshold ?? 0.5;
 
     // State
     this.phase = null;
@@ -73,6 +73,7 @@ export class DTWPhaseMachine {
     this.lastFeedback = '';
     this.refractoryUntil = 0;
     this.lastPhaseEnterAt = 0;
+    this._repAnnouncedUntil = 0; // suppress other feedback for 1.5s after a rep counts
 
     // Time-mode timers
     this.holdStartMs = null;
@@ -168,6 +169,7 @@ export class DTWPhaseMachine {
     this.cycleFeatureMax = -Infinity;
     this.lastActiveSide = null;
     this.activeSideDuringCycle = null;
+    this._repAnnouncedUntil = 0;
     this.dtw.reset();
     // Don't reset patient baseline on counter reset — it persists across the session
   }
@@ -255,10 +257,17 @@ export class DTWPhaseMachine {
         this.cycleFeatureMax = -Infinity;
         this.activeSideDuringCycle = null;
       }
-      if (this.cycleState === 'sawStart' && this.effortPhases.has(this.phase)) {
+      if (this.cycleState === 'sawStart') {
         const pVal = this.primaryFeature ? features[this.primaryFeature] : null;
-        const effortThreshold = (this.refStartValue ?? 0) + this.minRomForRep;
-        if (!Number.isFinite(pVal) || pVal >= effortThreshold) {
+        // Direction-agnostic gate: arm/limb has moved meaningfully away from the
+        // start position (works for both increasing AND decreasing exercises).
+        // Uses raw feature value directly so fast movements aren't missed when
+        // the DTW phase label is too noisy to pass the dwell filter.
+        const movedEnough = Number.isFinite(pVal) && this.refStartValue !== null
+          && Math.abs(pVal - this.refStartValue) >= this.minRomForRep;
+        // Phase-label fallback: only when keypoints are missing (pVal=NaN).
+        const phaseFallback = !Number.isFinite(pVal) && this.effortPhases.has(this.phase);
+        if (movedEnough || phaseFallback) {
           this.cycleState = 'sawEffort';
         }
       }
@@ -274,6 +283,7 @@ export class DTWPhaseMachine {
           }
         }
         console.log(`[DTW] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
+        if (repDelta > 0) this._repAnnouncedUntil = now + 1500;
         this.refractoryUntil = now + this.refractoryMs;
         this.cycleState = 'sawStart'; // ready for next cycle (already at start)
         this.cycleFeatureMin = Infinity;
@@ -296,6 +306,7 @@ export class DTWPhaseMachine {
           }
         }
         console.log(`[DTW-backup] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
+        if (repDelta > 0) this._repAnnouncedUntil = now + 1500;
         this.refractoryUntil = now + this.refractoryMs;
         this.cycleState = 'idle';
         this.cycleFeatureMin = Infinity;
@@ -386,15 +397,22 @@ export class DTWPhaseMachine {
     const fb = this.feedback;
     const deviations = dtwResult.deviations;
 
-    // 0. Alternating guardrail: warn when same leg used twice in a row
+    // 0a. Rep just counted: announce the number for 1.5 s (highest priority)
+    if (performance.now() < this._repAnnouncedUntil) {
+      return String(this.repCount);
+    }
+
+    // 0b. Alternating guardrail: warn when same leg used twice in a row
     if (this.isAlternating && this.cycleState === 'sawEffort'
         && this.activeSideDuringCycle && this.lastActiveSide
         && this.activeSideDuringCycle === this.lastActiveSide) {
       return 'Switch legs — alternate each step!';
     }
 
-    // 1. Form/safety: check if any body part deviates significantly
-    if (fb.form && Array.isArray(fb.form)) {
+    // 1. Form/safety: only check posture during stable phases (lowered/raised).
+    // During movement phases the user can't act on posture cues — let phase cues through.
+    const isStablePhase = this.phase === this.repCycle.start || this.phase === this.repCycle.effort;
+    if (isStablePhase && fb.form && Array.isArray(fb.form)) {
       for (const formRule of fb.form) {
         const featureKeys = BODY_PART_FEATURE_MAP[formRule.bodyPart] || [];
         for (const key of featureKeys) {
@@ -420,7 +438,6 @@ export class DTWPhaseMachine {
     }
 
     // 3. Tempo (future: needs movement speed tracking)
-    // Placeholder for when we add speed comparison
 
     // 4. Phase feedback (default)
     if (fb.phase && this.phase) {
@@ -434,15 +451,15 @@ export class DTWPhaseMachine {
    * Check if any feature significantly overshoots the reference range.
    */
   _detectOvershoot(deviations) {
-    for (const [key, dev] of Object.entries(deviations)) {
-      const range = this.featureRanges[key];
-      if (!range) continue;
-      // Feature exceeds reference max by more than 20% of range
-      if (dev.live > range.max + 0.2 * range.range) return true;
-      // Feature below reference min by more than 20% of range
-      if (dev.live < range.min - 0.2 * range.range) return true;
-    }
-    return false;
+    // Only check the primary movement feature — checking all features causes static
+    // posture features (trunk/hip with range≈0) to trigger false "too much" warnings.
+    if (!this.primaryFeature) return false;
+    const dev = deviations[this.primaryFeature];
+    if (!dev) return false;
+    const range = this.featureRanges[this.primaryFeature];
+    if (!range || range.range < 20) return false;
+    return dev.live > range.max + 0.2 * range.range
+        || dev.live < range.min - 0.2 * range.range;
   }
 
   /**
