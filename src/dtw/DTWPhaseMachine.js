@@ -81,6 +81,7 @@ export class DTWPhaseMachine {
 
     // Rep tracking — full cycle state machine: idle → sawStart → sawEffort → completed
     this.cycleState = 'idle'; // 'idle' | 'sawStart' | 'sawEffort'
+    this.effortEnteredAt = 0; // timestamp when arm entered sawEffort (used for time-based return gate)
 
     // Alternating guardrail: track which side was used per rep
     this.lastActiveSide = null;        // side counted on the previous rep
@@ -165,6 +166,7 @@ export class DTWPhaseMachine {
     this.holdStartMs = null;
     this.accumHoldMs = 0;
     this.cycleState = 'idle';
+    this.effortEnteredAt = 0;
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
     this.lastActiveSide = null;
@@ -269,9 +271,11 @@ export class DTWPhaseMachine {
         const phaseFallback = !Number.isFinite(pVal) && this.effortPhases.has(this.phase);
         if (movedEnough || phaseFallback) {
           this.cycleState = 'sawEffort';
+          this.effortEnteredAt = now;
         }
       }
-      if (this.cycleState === 'sawEffort' && this.phase === this.repCycle.return
+      if (this.cycleState === 'sawEffort'
+          && (now - this.effortEnteredAt) >= 300
           && romOk && now >= this.refractoryUntil && this._primaryFeatureNearStart(features)) {
         // Full cycle complete with meaningful movement — check alternating guardrail
         if (this._alternatingSideOk()) {
@@ -283,7 +287,7 @@ export class DTWPhaseMachine {
           }
         }
         console.log(`[DTW] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
-        if (repDelta > 0) this._repAnnouncedUntil = now + 1500;
+        if (repDelta > 0) this._repAnnouncedUntil = now + 3000;
         this.refractoryUntil = now + this.refractoryMs;
         this.cycleState = 'sawStart'; // ready for next cycle (already at start)
         this.cycleFeatureMin = Infinity;
@@ -306,7 +310,7 @@ export class DTWPhaseMachine {
           }
         }
         console.log(`[DTW-backup] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
-        if (repDelta > 0) this._repAnnouncedUntil = now + 1500;
+        if (repDelta > 0) this._repAnnouncedUntil = now + 3000;
         this.refractoryUntil = now + this.refractoryMs;
         this.cycleState = 'idle';
         this.cycleFeatureMin = Infinity;
@@ -411,7 +415,7 @@ export class DTWPhaseMachine {
 
     // 1. Form/safety: only check posture during stable phases (lowered/raised).
     // During movement phases the user can't act on posture cues — let phase cues through.
-    const isStablePhase = this.phase === this.repCycle.start || this.phase === this.repCycle.effort;
+    const isStablePhase = this.cycleState === 'idle' || this.cycleState === 'sawStart';
     if (isStablePhase && fb.form && Array.isArray(fb.form)) {
       for (const formRule of fb.form) {
         const featureKeys = BODY_PART_FEATURE_MAP[formRule.bodyPart] || [];
