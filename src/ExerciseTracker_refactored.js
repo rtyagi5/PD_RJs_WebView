@@ -218,11 +218,12 @@ export default function ExerciseTrackerRefactored({
     const sessionSummary = eng?.getSessionSummary?.() || {};
 
     const finalData = {
+      // Spread fallback first so explicit fields below override stale data.
+      ...lastExerciseDataRef.current,
       fps: fpsRef.current,
       feedback: 'Target reps achieved!',
       completionStatusRef: true,
       repCount: repCountRef.current,
-      ...lastExerciseDataRef.current,
       // Phase D: attempts vs completed reps
       ...(sessionSummary.reps ? {
         completedReps: sessionSummary.reps.completed,
@@ -623,14 +624,9 @@ export default function ExerciseTrackerRefactored({
           prevRepRef.current = repCount;
         }
 
-        // finish?
-        if (done) {
-          if (sm) sm.step({ keypoints: rawKps, frameW: vw, frameH: vh, hasDetector: true, hasVideo: true, engineDone: true });
-          await onComplete();
-          return; // stop scheduling
-        }
-
-        // sync payload
+        // sync payload — build BEFORE the done check so the final rep's
+        // announcement reaches the host AND lastExerciseDataRef holds fresh
+        // data when onComplete reads it.
         const exerciseData = {
           ...pickExerciseMetrics(exerciseType, feat),
           repCount: repCountRef.current,
@@ -639,7 +635,6 @@ export default function ExerciseTrackerRefactored({
             timeHeldMs: timeHeldMs ?? 0,
             timeRemainingMs: timeRemainingMs ?? 0
           } : {}),
-          // Phase D: attempts vs completed reps (DTW mode)
           ...(stepResult.totalReps != null ? {
             completedReps: stepResult.completedReps,
             attemptedReps: stepResult.attemptedReps,
@@ -647,9 +642,15 @@ export default function ExerciseTrackerRefactored({
             isCalibrating: stepResult.isCalibrating,
           } : {}),
         };
-        // Keep latest snapshot for completion payload
         lastExerciseDataRef.current = exerciseData;
         maybeSendUpdates({ ...exerciseData, sessionState: 'active' }).catch(() => {});
+
+        // finish?
+        if (done) {
+          if (sm) sm.step({ keypoints: rawKps, frameW: vw, frameH: vh, hasDetector: true, hasVideo: true, engineDone: true });
+          await onComplete();
+          return; // stop scheduling
+        }
       }
 
       // FPS measurement (update roughly every 100ms)
