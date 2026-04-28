@@ -280,11 +280,12 @@ export class DTWPhaseMachine {
         // Full cycle complete with meaningful movement — check alternating guardrail
         if (this._alternatingSideOk()) {
           repClassification = this._classifyRep(features, result.quality);
-          if (repClassification.completed) {
-            this.repCount++;
-            repDelta = 1;
-            this.lastActiveSide = this.activeSideDuringCycle;
-          }
+          // Always count the rep — cycleState/time/ROM/refractory gates already validated it.
+          // completed vs attempt is metadata for telemetry, not a counting gate.
+          this.repCount++;
+          repDelta = 1;
+          this.lastActiveSide = this.activeSideDuringCycle;
+          console.log(`[DTW] Rep ${this.repCount} | classification=${repClassification.completed ? 'completed' : 'attempt'} romPct=${((repClassification.romPct ?? 0) * 100).toFixed(0)}% details=`, repClassification.details);
         }
         console.log(`[DTW] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
         if (repDelta > 0) this._repAnnouncedUntil = now + 3000;
@@ -303,11 +304,11 @@ export class DTWPhaseMachine {
       if (this.cycleState === 'sawEffort' && romOk && this._primaryFeatureNearStart(features)) {
         if (this._alternatingSideOk()) {
           repClassification = this._classifyRep(features, result.quality);
-          if (repClassification.completed) {
-            this.repCount++;
-            repDelta = 1;
-            this.lastActiveSide = this.activeSideDuringCycle;
-          }
+          // Always count — see primary-path comment above.
+          this.repCount++;
+          repDelta = 1;
+          this.lastActiveSide = this.activeSideDuringCycle;
+          console.log(`[DTW-backup] Rep ${this.repCount} | classification=${repClassification.completed ? 'completed' : 'attempt'} romPct=${((repClassification.romPct ?? 0) * 100).toFixed(0)}% details=`, repClassification.details);
         }
         console.log(`[DTW-backup] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
         if (repDelta > 0) this._repAnnouncedUntil = now + 3000;

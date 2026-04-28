@@ -13,7 +13,7 @@
 
 const CALIBRATION_REPS = 2;         // reps to capture before locking baseline
 const CALIBRATION_MIN_FRAMES = 60;  // minimum frames before allowing lock
-const TOLERANCE = 0.05;             // 5% tolerance for "good rep" classification
+const TOLERANCE = 0.30;             // 30% tolerance — mobile keypoint noise needs more headroom
 const STORAGE_PREFIX = 'dtw_baseline_';
 
 export class PatientBaseline {
@@ -307,6 +307,8 @@ export class PatientBaseline {
     console.log(`[PatientBaseline] Locked baseline for "${this.exerciseName}" ` +
       `(${Object.keys(this.baseline).length} features, ${this.calibrationFrames} frames, ` +
       `${this.calibrationRepsCompleted} reps)`);
+    console.log(`[PatientBaseline] Baseline ranges:`,
+      Object.fromEntries(Object.entries(this.baseline).map(([k, v]) => [k, v.range.toFixed(1)])));
   }
 
   _updateRepBuffer(features) {
