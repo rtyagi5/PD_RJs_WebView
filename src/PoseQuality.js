@@ -65,11 +65,14 @@ export function checkDistance(keypoints, frameW, frameH, overrides = {}) {
 }
 
 // ── Check: Camera Angle / Framing ────────────────────────────────────────────
-// Front-view: centering + shoulder tilt + vertical position.
-// Side-view:  shoulder overlap check.
-// Returns { status: 'good'|'off_center'|'tilted'|'too_high'|'too_low'|'not_side', message }
+// Front-view:    centering + shoulder tilt + vertical position.
+// Side-view:     shoulder overlap check (shoulderGap < 0.12).
+// Diagonal-view: shoulderGap in 0.08–0.22 range (between front and side).
+// `customInstruction` (optional) replaces the generic messaging — used to provide
+// per-exercise guidance like "Sit sideways with active leg toward camera".
+// Returns { status: 'good'|'off_center'|'tilted'|'too_high'|'too_low'|'not_side'|'not_diagonal', message }
 
-export function checkCameraAngle(keypoints, frameW, frameH, view = 'front') {
+export function checkCameraAngle(keypoints, frameW, frameH, view = 'front', customInstruction) {
   const lSh  = kp(keypoints, 'left_shoulder');
   const rSh  = kp(keypoints, 'right_shoulder');
   const lHip = kp(keypoints, 'left_hip');
@@ -86,7 +89,20 @@ export function checkCameraAngle(keypoints, frameW, frameH, view = 'front') {
     // Shoulders should be close together (foreshortened) in a side view
     const shoulderGap = Math.abs(lSh.x - rSh.x) / frameW;
     if (shoulderGap > 0.12) {
-      return { status: 'not_side', message: 'Turn sideways to the camera' };
+      return { status: 'not_side', message: customInstruction || 'Turn sideways to the camera' };
+    }
+    return { status: 'good', message: '' };
+  }
+
+  if (view === 'diagonal') {
+    // 45° angle → cos(45°) × shoulder-span ≈ 70% of full width.
+    // Wide gap (≥0.22) means user is too front-on; tiny gap (<0.08) means too side-on.
+    const shoulderGap = Math.abs(lSh.x - rSh.x) / frameW;
+    if (shoulderGap > 0.22) {
+      return { status: 'not_diagonal', message: customInstruction || 'Angle yourself slightly toward the camera' };
+    }
+    if (shoulderGap < 0.08) {
+      return { status: 'not_diagonal', message: customInstruction || 'Turn slightly toward the camera' };
     }
     return { status: 'good', message: '' };
   }
@@ -175,7 +191,7 @@ export function runAllChecks(keypoints, frameW, frameH, spec) {
   const view = framing.view || 'front';
 
   const distance   = checkDistance(keypoints, frameW, frameH, framing);
-  const angle      = checkCameraAngle(keypoints, frameW, frameH, view);
+  const angle      = checkCameraAngle(keypoints, frameW, frameH, view, framing.instruction);
   const visibility = checkVisibility(keypoints, framing.requiredKeypoints);
   const lighting   = checkLighting(keypoints);
 

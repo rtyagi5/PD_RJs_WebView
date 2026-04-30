@@ -29,6 +29,7 @@ const DEFAULTS = {
   reactivateFrames:  10,     // frames with keypoints back before resuming ACTIVE
   maxInactiveMs:     15000,  // 15 s absent → fall back to COACHING
   minCoachingMs:     3000,   // coaching phase visible for at least 3 s
+  countdownBadFramesAllowed: 30, // tolerate brief check failures during countdown (≈1s @ 30fps)
 };
 
 export class SessionStateMachine {
@@ -48,6 +49,7 @@ export class SessionStateMachine {
 
     // Countdown
     this._countdownStartMs = null;
+    this._countdownBadFrames = 0;
 
     // Inactive tracking
     this._missingFrames = 0;
@@ -64,6 +66,7 @@ export class SessionStateMachine {
     this._goodFrames = 0;
     this._coachingEnteredMs = null;
     this._countdownStartMs = null;
+    this._countdownBadFrames = 0;
     this._missingFrames = 0;
     this._presentFrames = 0;
     this._inactiveSinceMs = null;
@@ -128,13 +131,21 @@ export class SessionStateMachine {
 
     // ── COUNTDOWN ──────────────────────────────────────────────────────────
     if (this.state === S.COUNTDOWN) {
-      // If patient moves out of alignment, fall back to COACHING
+      // Hysteresis: tolerate brief check failures during countdown (mobile keypoints
+      // flicker between good/bad frames). Only fall back to COACHING when the failure
+      // is sustained, avoiding the "Get away → Starting in 4 → Get away" oscillation.
       if (!allGood) {
-        this.state = S.COACHING;
-        this._goodFrames = 0;
-        this._countdownStartMs = null;
-        const msg = this._primaryCoachingMessage(checks);
-        return this._result(checks, msg || 'Position yourself in the frame');
+        this._countdownBadFrames++;
+        if (this._countdownBadFrames >= this.cfg.countdownBadFramesAllowed) {
+          this.state = S.COACHING;
+          this._goodFrames = 0;
+          this._countdownStartMs = null;
+          this._countdownBadFrames = 0;
+          const msg = this._primaryCoachingMessage(checks);
+          return this._result(checks, msg || 'Position yourself in the frame');
+        }
+      } else {
+        this._countdownBadFrames = 0;
       }
 
       const elapsed = now - this._countdownStartMs;
@@ -145,7 +156,10 @@ export class SessionStateMachine {
         this.state = S.ACTIVE;
         this._missingFrames = 0;
         this._presentFrames = 0;
-        return this._result(checks, 'Go!', 0);
+        // Per-exercise start cue tells the user exactly what to do (raise arm, squat, etc.)
+        // Falls back to a generic "Begin!" if the spec didn't define one.
+        const startCue = this.spec?.startCue || 'Begin!';
+        return this._result(checks, startCue, 0);
       }
 
       return this._result(checks, `Starting in ${remaining}…`, remaining);

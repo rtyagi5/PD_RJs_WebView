@@ -153,7 +153,23 @@ export class DTWPhaseMachine {
       phases: this.phaseOrder.map(id => ({ id })),
       rep: { from: this.repCycle.start, to: this.repCycle.effort },
       framing: reference.framing || undefined,
+      startCue: reference.startCue || undefined,
     };
+
+    // One-line health summary — verifies the engine resolved sensible defaults.
+    // primaryFeature and minRomForRep are the two most common silent-failure points.
+    // Adaptive precision so tiny thresholds (e.g. footPitchNorm) aren't shown as "0.0"
+    const fmt = (n) => (n == null ? 'null' : (Math.abs(n) >= 10 ? n.toFixed(1) : n.toFixed(3)));
+    console.log(
+      `[DTW] Engine ready: ${reference.name} | mode=${this.mode} side=${this.side} ` +
+      `detector=${this.spec.detector} primary=${this.primaryFeature} ` +
+      `refStartValue=${fmt(this.refStartValue)} ` +
+      `minRomForRep=${fmt(this.minRomForRep)} ` +
+      `effortPhases=${[...this.effortPhases].join(',')} ` +
+      `repCycle=${this.repCycle.start}->${this.repCycle.effort}->${this.repCycle.return || this.repCycle.start} ` +
+      `targetReps=${this.targetReps ?? '—'} targetMs=${this.targetMs ?? '—'} ` +
+      `patientBaseline=${this.patientBaseline ? 'on' : 'off'}`
+    );
   }
 
   resetCounters() {
@@ -167,6 +183,7 @@ export class DTWPhaseMachine {
     this.accumHoldMs = 0;
     this.cycleState = 'idle';
     this.effortEnteredAt = 0;
+    this._movedAwayAt = null;
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
     this.lastActiveSide = null;
@@ -270,8 +287,20 @@ export class DTWPhaseMachine {
         // Phase-label fallback: only when keypoints are missing (pVal=NaN).
         const phaseFallback = !Number.isFinite(pVal) && this.effortPhases.has(this.phase);
         if (movedEnough || phaseFallback) {
-          this.cycleState = 'sawEffort';
-          this.effortEnteredAt = now;
+          // Hysteresis: require sustained movement for ≥100ms before transitioning.
+          // A single-frame keypoint spike won't satisfy this, killing spike-triggered
+          // false reps (esp. on BicepCurls where wrist jitter swings elbowAngle 20-30°).
+          if (this._movedAwayAt == null) this._movedAwayAt = now;
+          if ((now - this._movedAwayAt) >= 100) {
+            this.cycleState = 'sawEffort';
+            this.effortEnteredAt = now;
+            this._movedAwayAt = null;
+            // Reset cycle ROM trackers so the spike sample doesn't pollute actualRom.
+            this.cycleFeatureMin = Number.isFinite(pVal) ? pVal : Infinity;
+            this.cycleFeatureMax = Number.isFinite(pVal) ? pVal : -Infinity;
+          }
+        } else {
+          this._movedAwayAt = null;
         }
       }
       if (this.cycleState === 'sawEffort'
@@ -294,6 +323,7 @@ export class DTWPhaseMachine {
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
         this.activeSideDuringCycle = null;
+        this._movedAwayAt = null;
       }
     }
 
@@ -317,6 +347,7 @@ export class DTWPhaseMachine {
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
         this.activeSideDuringCycle = null;
+        this._movedAwayAt = null;
       }
     }
 
