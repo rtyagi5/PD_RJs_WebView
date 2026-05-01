@@ -8,6 +8,20 @@ import { computeFeatureRanges, extractPhaseOrder } from './referenceSchema.js';
 import { BODY_PART_FEATURE_MAP } from './universalFeatures.js';
 import { PatientBaseline } from './PatientBaseline.js';
 
+// Resolve a startCue against the active side. Accepts either a plain string (returned
+// as-is) or an object keyed by side ('left' | 'right' | 'alternating' | 'both').
+// Resolution order: exact side match → 'both' → first available variant.
+function resolveStartCue(cue, side) {
+  if (!cue) return null;
+  if (typeof cue === 'string') return cue;
+  if (typeof cue === 'object') {
+    if (side && cue[side]) return cue[side];
+    if (cue.both) return cue.both;
+    return cue.left || cue.right || cue.alternating || null;
+  }
+  return null;
+}
+
 export class DTWPhaseMachine {
   /**
    * @param {Object} reference - Reference JSON object (see referenceSchema.js)
@@ -87,23 +101,30 @@ export class DTWPhaseMachine {
     this.lastActiveSide = null;        // side counted on the previous rep
     this.activeSideDuringCycle = null; // side detected during the current cycle
 
-    // Primary feature ROM tracking: measure actual movement instead of template position
-    // Find the feature with the largest range (filtered by active side)
+    // Primary feature ROM tracking: measure actual movement instead of template position.
+    // Honor an explicit `reference.primaryFeature` override first (used by bilateral-symmetric
+    // exercises like MiniSquats that want side-independent tracking via an aggregate feature).
+    // Otherwise fall back to the auto-picker: largest-range feature filtered by active side.
     let bestKey = null;
     let bestRange = 0;
-    for (const [key, stats] of Object.entries(this.featureRanges)) {
-      if (this.isAlternating) {
-        // Alternating: primary feature must be an aggregate (Min/Max/Avg) so it
-        // captures whichever leg is active rather than one specific side.
-        if (key.endsWith('L') || key.endsWith('R')) continue;
-      } else if (this.side) {
-        if (this.side === 'left' && key.endsWith('R')) continue;
-        if (this.side === 'right' && key.endsWith('L')) continue;
-        if (key.endsWith('Min') || key.endsWith('Max') || key.endsWith('Avg')) continue;
-      }
-      if ((stats.range || 0) > bestRange) {
-        bestRange = stats.range;
-        bestKey = key;
+    if (reference.primaryFeature && this.featureRanges[reference.primaryFeature]) {
+      bestKey = reference.primaryFeature;
+      bestRange = this.featureRanges[reference.primaryFeature].range || 0;
+    } else {
+      for (const [key, stats] of Object.entries(this.featureRanges)) {
+        if (this.isAlternating) {
+          // Alternating: primary feature must be an aggregate (Min/Max/Avg) so it
+          // captures whichever leg is active rather than one specific side.
+          if (key.endsWith('L') || key.endsWith('R')) continue;
+        } else if (this.side) {
+          if (this.side === 'left' && key.endsWith('R')) continue;
+          if (this.side === 'right' && key.endsWith('L')) continue;
+          if (key.endsWith('Min') || key.endsWith('Max') || key.endsWith('Avg')) continue;
+        }
+        if ((stats.range || 0) > bestRange) {
+          bestRange = stats.range;
+          bestKey = key;
+        }
       }
     }
     this.primaryFeature = bestKey;
@@ -153,7 +174,7 @@ export class DTWPhaseMachine {
       phases: this.phaseOrder.map(id => ({ id })),
       rep: { from: this.repCycle.start, to: this.repCycle.effort },
       framing: reference.framing || undefined,
-      startCue: reference.startCue || undefined,
+      startCue: resolveStartCue(reference.startCue, this.side) || undefined,
     };
 
     // One-line health summary — verifies the engine resolved sensible defaults.
@@ -270,7 +291,13 @@ export class DTWPhaseMachine {
     // Rep counting (reps mode): full cycle start → effort → return
     // Runs every frame (not just on phase transitions) for responsiveness
     if (this.mode === 'reps') {
-      if (this.cycleState === 'idle' && this.phase === this.repCycle.start) {
+      // Two paths to advance idle → sawStart:
+      // (a) DTW labels current phase as the start phase, OR
+      // (b) Primary feature is at the start position (covers the case where the user
+      //     starts at rest before DTW phase has stabilized — common on mobile, fixes
+      //     "first rep not detected" on exercises like LiftsAndChops).
+      if (this.cycleState === 'idle'
+          && (this.phase === this.repCycle.start || this._primaryFeatureNearStart(features))) {
         this.cycleState = 'sawStart';
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
@@ -303,9 +330,13 @@ export class DTWPhaseMachine {
           this._movedAwayAt = null;
         }
       }
-      if (this.cycleState === 'sawEffort'
+      // Rep-gate conditions (excluding refractory). Used both to count a rep AND to
+      // detect "would-have-counted" cycles that need to be absorbed during refractory.
+      const repGateReady = this.cycleState === 'sawEffort'
           && (now - this.effortEnteredAt) >= 300
-          && romOk && now >= this.refractoryUntil && this._primaryFeatureNearStart(features)) {
+          && romOk && this._primaryFeatureNearStart(features);
+
+      if (repGateReady && now >= this.refractoryUntil) {
         // Full cycle complete with meaningful movement — check alternating guardrail
         if (this._alternatingSideOk()) {
           repClassification = this._classifyRep(features, result.quality);
@@ -320,6 +351,16 @@ export class DTWPhaseMachine {
         if (repDelta > 0) this._repAnnouncedUntil = now + 3000;
         this.refractoryUntil = now + this.refractoryMs;
         this.cycleState = 'sawStart'; // ready for next cycle (already at start)
+        this.cycleFeatureMin = Infinity;
+        this.cycleFeatureMax = -Infinity;
+        this.activeSideDuringCycle = null;
+        this._movedAwayAt = null;
+      } else if (repGateReady && now < this.refractoryUntil) {
+        // Block-and-reset: rep would have counted but refractory blocks it. Reset
+        // cycleState anyway so the suppressed sawEffort doesn't carry over and trigger
+        // a rep the moment refractory expires. Critical for StepUps where the down
+        // motion looks like a complete rep cycle to the engine.
+        this.cycleState = 'sawStart';
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
         this.activeSideDuringCycle = null;

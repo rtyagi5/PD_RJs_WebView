@@ -109,7 +109,13 @@ export function validateExercise(exerciseName, opts = {}) {
   const ref = getReference(exerciseName);
   if (!ref) return { name: exerciseName, status: 'SKIP', reason: 'No reference' };
 
-  const sequence = generateSyntheticSequence(exerciseName, numReps, 60, noise);
+  // Scale rep duration to the exercise's refractoryMs (synthetic frames are ~33ms each).
+  // Without this, exercises with large refractory windows (e.g. StepUps at 2500ms) get
+  // every other rep blocked because consecutive synthetic reps fall inside refractory.
+  const refractoryMs = ref?.timing?.refractoryMs || 300;
+  const framesPerRep = Math.max(60, Math.ceil((refractoryMs + 1500) / 33));
+
+  const sequence = generateSyntheticSequence(exerciseName, numReps, framesPerRep, noise);
   const dtwResult = runDTWOnSequence(exerciseName, sequence, numReps);
 
   // Analyze results

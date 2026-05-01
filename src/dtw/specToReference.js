@@ -97,6 +97,7 @@ export function generateReference(config) {
     feedback: config.feedback || { phase: {} },
     highlightKeypoints: config.highlightKeypoints || null,
     minRomPct: config.minRomPct ?? null,
+    primaryFeature: config.primaryFeature || null,
     startCue: config.startCue || null,
     framing: config.framing || null,
     timing: {
@@ -150,7 +151,11 @@ export const EXERCISE_CONFIGS = {
     side: 'both',
     detector: 'movenet',
     framing: { view: 'front', instruction: 'Face the camera, full upper body in frame' },
-    startCue: 'Raise your arm out to the side',
+    startCue: {
+      left: 'Raise your left arm out to the side',
+      right: 'Raise your right arm out to the side',
+      both: 'Raise both arms out to the sides',
+    },
     highlightKeypoints: ['shoulder', 'elbow', 'wrist'],
     phases: [
       {
@@ -203,7 +208,11 @@ export const EXERCISE_CONFIGS = {
     side: 'both',
     detector: 'movenet',
     framing: { view: 'front', instruction: 'Face the camera, arms visible at your sides' },
-    startCue: 'Curl your arm up toward your shoulder',
+    startCue: {
+      left: 'Curl your left arm up toward your shoulder',
+      right: 'Curl your right arm up toward your shoulder',
+      both: 'Curl your arms up toward your shoulders',
+    },
     // Higher than default 0.25 — wrist keypoint is the noisiest in the upper-body chain,
     // and a few-pixel jitter swings elbowAngle 20-30°. Tighter ROM gate prevents
     // single-spike false reps. 0.40 still allows a half-curl (~42° ROM) to count.
@@ -245,8 +254,14 @@ export const EXERCISE_CONFIGS = {
     mode: 'rep',
     side: 'both',
     detector: 'movenet',
-    framing: { view: 'front', instruction: 'Face the camera, full body visible' },
+    // Side-facing gives a much cleaner kneeAngle measurement (knee moves in the camera plane,
+    // not toward/away from it). Either side toward camera is fine — primary is kneeAngleMin
+    // which falls back to whichever knee is visible (see minF in universalFeatures.js).
+    framing: { view: 'side', instruction: 'Stand sideways to the camera, either side OK' },
     startCue: 'Begin squatting — bend your knees',
+    // Track the more-bent knee so either side facing the camera works. minF returns the
+    // visible knee when the other is occluded (NaN), giving graceful degradation.
+    primaryFeature: 'kneeAngleMin',
     // Knee keypoint can jump when occluded by torso; require a clear squat (>20°)
     minRomPct: 0.40,
     highlightKeypoints: ['hip', 'knee', 'ankle'],
@@ -320,7 +335,11 @@ export const EXERCISE_CONFIGS = {
     side: 'both',
     detector: 'movenet',
     framing: { view: 'side', instruction: 'Sit sideways to the camera, exercising leg toward the camera' },
-    startCue: 'Straighten your leg out in front of you',
+    startCue: {
+      left: 'Straighten your left leg out in front',
+      right: 'Straighten your right leg out in front',
+      both: 'Straighten your leg out in front',
+    },
     highlightKeypoints: ['hip', 'knee', 'ankle'],
     phases: [
       {
@@ -430,8 +449,17 @@ export const EXERCISE_CONFIGS = {
     mode: 'rep',
     side: 'both',
     detector: 'movenet',
+    // Mobile body-weight shift during a R-lunge contaminates the L knee keypoint by
+    // 15-25°, crossing the default 15° gate and double-counting alternating lunges.
+    // 0.45 raises the gate to 27°, comfortably above the contamination band while
+    // still allowing real partial lunges (range is 60°).
+    minRomPct: 0.45,
     framing: { view: 'side', instruction: 'Stand sideways to the camera, lead leg toward the camera' },
-    startCue: 'Step forward and lower into a lunge',
+    startCue: {
+      left: 'Step forward with your left leg into a lunge',
+      right: 'Step forward with your right leg into a lunge',
+      both: 'Step forward into a lunge — use the same leg for every rep',
+    },
     highlightKeypoints: ['hip', 'knee', 'ankle'],
     phases: [
       {
@@ -468,8 +496,13 @@ export const EXERCISE_CONFIGS = {
     detector: 'movenet',
     framing: { view: 'front', instruction: 'Face the camera, full upper body in frame' },
     startCue: 'Lift hands up across your body, then chop down',
-    // Wrist-derived feature is jittery on mobile (same noise class as BicepCurls).
-    minRomPct: 0.45,
+    // Wrist-derived feature is jittery on mobile. 0.55 tightens nearStart band so
+    // rep counts closer to actual bottom (not mid-descent), and raises the bar
+    // for re-entering sawEffort from a bouncy descent.
+    minRomPct: 0.55,
+    // 500ms refractory blocks within-cycle double-counts even if a bounce sneaks
+    // past the ROM gate. Lift-chop cycles are ~1-2s so this doesn't block real reps.
+    timing: { refractoryMs: 500 },
     highlightKeypoints: ['shoulder', 'elbow', 'wrist'],
     phases: [
       {
@@ -505,9 +538,18 @@ export const EXERCISE_CONFIGS = {
     side: 'both',
     detector: 'movenet',
     framing: { view: 'diagonal', instruction: 'Stand at a 45° angle to the camera, step toward you' },
-    startCue: 'Step up onto the step, then step back down',
+    startCue: {
+      left: 'Step up leading with your left leg, then step back down',
+      right: 'Step up leading with your right leg, then step back down',
+      both: 'Step up onto the step, then step back down',
+    },
     // Knee/ankle keypoints can spike when occluded by the step itself.
     minRomPct: 0.40,
+    // One full step-up rep = up + down. The knee bends DEEPLY twice per rep (lifting
+    // up, lowering back) — without this guard the engine counts each bend as a separate
+    // rep. 2500ms covers the step-down duration for typical pacing. Combined with the
+    // block-and-reset behavior in DTWPhaseMachine, the down-motion's "rep" is absorbed.
+    timing: { refractoryMs: 2500 },
     highlightKeypoints: ['hip', 'knee', 'ankle'],
     phases: [
       {
@@ -578,10 +620,16 @@ export const EXERCISE_CONFIGS = {
     mode: 'rep',
     side: 'both',
     detector: 'mediapipe',
-    framing: { view: 'side', instruction: 'Sit sideways to the camera, exercising foot toward the camera' },
+    // Critical: place the active foot in FRONT of the chair, not beside a chair leg.
+    // MediaPipe routinely mistakes vertical chair legs for foot_index/heel keypoints,
+    // which causes wild ankle-angle swings and false reps.
+    framing: { view: 'side', instruction: 'Sit at the edge of the chair, active foot in front of you (NOT next to chair leg)' },
     startCue: 'Push up onto your toes, then lower your heels',
-    // Foot keypoints (heel, foot_index) are noisy; tight reference range (20°) needs a stricter ROM gate.
-    minRomPct: 0.50,
+    // 0.65 + dwell tightens the gate. Real calf raise sweeps ankleAngleToe ~20°,
+    // so 13° threshold (was 10°) still allows partial reps but rejects more chair-leg noise.
+    minRomPct: 0.65,
+    // 400ms dwell requires sustained phase positioning, filtering transient glitches.
+    timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
     phases: [
       {
@@ -654,11 +702,21 @@ export const EXERCISE_CONFIGS = {
     mode: 'rep',
     side: 'both',
     detector: 'mediapipe',
-    framing: { view: 'side', instruction: 'Sit sideways to the camera, exercising foot toward the camera' },
-    startCue: 'Pull your toes up toward you, then lower',
-    // CRITICAL: was auto-counting from foot keypoint noise alone. footPitchNorm range is tiny (0.17),
-    // so 0.25 default left minRomForRep at 0.042 — well within mobile noise. Bumped to 0.60 → 0.10.
-    minRomPct: 0.60,
+    // Critical: place the active foot in FRONT of the chair, not beside a chair leg.
+    // MediaPipe routinely mistakes vertical chair legs for foot_index keypoints, which
+    // causes wild footPitchNorm swings and false reps.
+    framing: { view: 'side', instruction: 'Sit at the edge of the chair, active foot in front of you (NOT next to chair leg)' },
+    startCue: {
+      left: 'Pull your left toes up toward you, then lower',
+      right: 'Pull your right toes up toward you, then lower',
+      both: 'Pull your toes up toward you, then lower',
+    },
+    // 0.80 + dwell tightens the gate aggressively. footPitchNorm is the noisiest
+    // feature in the system (only 2 keypoints, both prone to chair-leg / occlusion
+    // confusion). Patient must dorsiflex ~80% of full range AND hold each phase
+    // for 400ms — together these reject most spurious noise.
+    minRomPct: 0.80,
+    timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
     phases: [
       {
@@ -693,10 +751,18 @@ export const EXERCISE_CONFIGS = {
     mode: 'rep',
     side: 'both',
     detector: 'mediapipe',
-    framing: { view: 'side', instruction: 'Stand sideways to the camera, exercising foot toward the camera' },
-    startCue: 'Pull your toes up toward you, keeping heels down',
-    // Same as seated — was auto-counting; bumped from 0.25 → 0.60.
-    minRomPct: 0.60,
+    framing: { view: 'side', instruction: 'Stand sideways to the camera, exercising foot toward the camera, clear floor area' },
+    startCue: {
+      left: 'Pull your left toes up, keeping heel down',
+      right: 'Pull your right toes up, keeping heel down',
+      both: 'Pull your toes up, keeping heels down',
+    },
+    // 0.80 + dwell tightens the gate aggressively. Standing version is even more prone
+    // to body-sway-induced auto-counting because micro-balance adjustments shift the
+    // foot keypoints. Patient must dorsiflex ~80% of full range AND hold each phase
+    // for 400ms — only sustained, deliberate motion counts.
+    minRomPct: 0.80,
+    timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
     phases: [
       {
