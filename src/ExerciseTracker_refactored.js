@@ -581,7 +581,11 @@ export default function ExerciseTrackerRefactored({
 
         // unify counters / feedback
         repCountRef.current = repCount;
-        feedbackRef.current = feedback || feedbackRef.current;
+        // Session-level message takes priority on the COUNTDOWN→ACTIVE transition frame
+        // so the per-exercise startCue ("Raise your right arm out to the side") reaches the
+        // host. Without this, the engine's null feedback + existing fallback would keep
+        // showing "Starting in 1…" from the countdown instead.
+        feedbackRef.current = sessionResult.message || feedback || feedbackRef.current;
 
         // Log feedback changes for validation
         if (feedbackRef.current && feedbackRef.current !== feedbackLogRef.current) {
