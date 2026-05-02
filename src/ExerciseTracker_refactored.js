@@ -356,6 +356,11 @@ export default function ExerciseTrackerRefactored({
       eng = new DTWPhaseMachine(ref, { targetReps, targetSeconds, patientId, side });
       console.log('[Engine] DTW mode for', exerciseType, patientId ? `(patient: ${patientId})` : '(no patient)');
     } else {
+      console.warn(
+        `[Engine] No DTW reference for "${exerciseType}" — falling back to legacy PhaseMachine. ` +
+        `None of the recent fixes (startCue, side-aware cues, mobile ROM tuning) apply on this path. ` +
+        `Check spelling against EXERCISE_CONFIGS keys in src/dtw/specToReference.js.`
+      );
       eng = new PhaseMachine(spec, { targetReps, targetSeconds });
     }
     setEngine(eng);
