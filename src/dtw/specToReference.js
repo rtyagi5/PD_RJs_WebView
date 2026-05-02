@@ -631,22 +631,28 @@ export const EXERCISE_CONFIGS = {
     // 400ms dwell requires sustained phase positioning, filtering transient glitches.
     timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
+    // ankleAngleHeel discriminates calf raise from dorsiflexion. Both motions decrease
+    // ankleAngleToe (knee→ankle→foot_index), so the engine couldn't tell them apart.
+    // ankleAngleHeel (knee→ankle→heel) only changes when the heel moves — which it does
+    // for calf raises (heel rises) but NOT for dorsiflexion (heel stays planted).
+    // Auto-picker selects ankleAngleHeel as primary because its range (50°) is larger
+    // than ankleAngleToe's (20°). Both features stay in the template for richer DTW match.
     phases: [
       {
         id: 'lowered', weight: 1,
-        features: { ankleAngleToe: { from: 85, to: 85 } },
+        features: { ankleAngleToe: { from: 85, to: 85 }, ankleAngleHeel: { from: 130, to: 130 } },
       },
       {
         id: 'raising', weight: 2,
-        features: { ankleAngleToe: { from: 85, to: 65, easing: 'sine' } },
+        features: { ankleAngleToe: { from: 85, to: 65, easing: 'sine' }, ankleAngleHeel: { from: 130, to: 80, easing: 'sine' } },
       },
       {
         id: 'raised', weight: 1,
-        features: { ankleAngleToe: { from: 65, to: 65 } },
+        features: { ankleAngleToe: { from: 65, to: 65 }, ankleAngleHeel: { from: 80, to: 80 } },
       },
       {
         id: 'lowering', weight: 2,
-        features: { ankleAngleToe: { from: 65, to: 85, easing: 'sine' } },
+        features: { ankleAngleToe: { from: 65, to: 85, easing: 'sine' }, ankleAngleHeel: { from: 80, to: 130, easing: 'sine' } },
       },
     ],
     repCycle: { from: 'lowered', to: 'raised' },
