@@ -158,11 +158,21 @@ export class DTWPhaseMachine {
     // still mid-range (happens when DTW quality is low and template position drifts).
     // Computed as the mean primary-feature value across all start-phase frames.
     this.refStartValue = null;
+    this.refEffortValue = null;
+    this.templateDirection = 0; // -1 (effort decreases primary), +1 (increases), 0 (same)
     if (this.primaryFeature && Array.isArray(reference.template) && reference.template.length > 0) {
       const startFrames = reference.template.filter(f => f.phase === this.repCycle.start);
-      const vals = startFrames.map(f => f.features?.[this.primaryFeature]).filter(Number.isFinite);
-      if (vals.length > 0) {
-        this.refStartValue = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const startVals = startFrames.map(f => f.features?.[this.primaryFeature]).filter(Number.isFinite);
+      if (startVals.length > 0) {
+        this.refStartValue = startVals.reduce((a, b) => a + b, 0) / startVals.length;
+      }
+      const effortFrames = reference.template.filter(f => f.phase === this.repCycle.effort);
+      const effortVals = effortFrames.map(f => f.features?.[this.primaryFeature]).filter(Number.isFinite);
+      if (effortVals.length > 0) {
+        this.refEffortValue = effortVals.reduce((a, b) => a + b, 0) / effortVals.length;
+      }
+      if (this.refStartValue !== null && this.refEffortValue !== null) {
+        this.templateDirection = Math.sign(this.refEffortValue - this.refStartValue);
       }
     }
 
@@ -205,6 +215,7 @@ export class DTWPhaseMachine {
     this.cycleState = 'idle';
     this.effortEnteredAt = 0;
     this._movedAwayAt = null;
+    this._prevPrimaryValue = null;
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
     this.lastActiveSide = null;
@@ -220,6 +231,27 @@ export class DTWPhaseMachine {
    * @returns {Object} - { phase, repDelta, repCount, feedback, done, timeHeldMs?, timeRemainingMs? }
    */
   step({ t, features, now = performance.now(), say, setHighlight }) {
+    // Velocity filter on the primary feature. At typical FPS (10-30), a real exercise
+    // motion changes the joint angle by at most ~10° per frame. Single-frame jumps of
+    // 25°+ are body-translation artifacts, MediaPipe heel/foot keypoint instability, or
+    // background-edge confusion — NOT real motion. Mask such jumps as NaN so they don't
+    // pollute movedEnough / nearStart / cycleFeatureMin/Max.
+    //
+    // _prevPrimaryValue stays at the last GOOD value during a rejection streak so the
+    // engine doesn't lose track of the legitimate baseline.
+    //
+    // Trade-off: at very low FPS (<5), real motion can exceed 25°/frame and get filtered.
+    // For rehab-grade exercises at 10+ FPS this is the right cutoff.
+    if (this.primaryFeature) {
+      const pVal = features[this.primaryFeature];
+      const prev = this._prevPrimaryValue;
+      if (Number.isFinite(pVal) && Number.isFinite(prev) && Math.abs(pVal - prev) > 20) {
+        features = { ...features, [this.primaryFeature]: NaN };
+      } else if (Number.isFinite(pVal)) {
+        this._prevPrimaryValue = pVal;
+      }
+    }
+
     // Feed frame to patient baseline tracker
     if (this.patientBaseline) {
       this.patientBaseline.updateFrame(features);
@@ -305,12 +337,20 @@ export class DTWPhaseMachine {
       }
       if (this.cycleState === 'sawStart') {
         const pVal = this.primaryFeature ? features[this.primaryFeature] : null;
-        // Direction-agnostic gate: arm/limb has moved meaningfully away from the
-        // start position (works for both increasing AND decreasing exercises).
-        // Uses raw feature value directly so fast movements aren't missed when
-        // the DTW phase label is too noisy to pass the dwell filter.
-        const movedEnough = Number.isFinite(pVal) && this.refStartValue !== null
-          && Math.abs(pVal - this.refStartValue) >= this.minRomForRep;
+        // Direction-aware gate: motion must be in the SAME direction as the template's
+        // effort phase (e.g. CalfRaisesSeated expects footPitchNorm to INCREASE; if the
+        // user dorsiflexes or shifts their body and the value DECREASES, that's not a rep).
+        // templateDirection is -1 (effort decreases primary), +1 (increases), or 0 (no
+        // direction defined — fall back to direction-agnostic).
+        // Uses raw feature value directly so fast movements aren't missed when the DTW
+        // phase label is too noisy to pass the dwell filter.
+        let movedEnough = false;
+        if (Number.isFinite(pVal) && this.refStartValue !== null) {
+          const delta = pVal - this.refStartValue;
+          const sameDirection = this.templateDirection === 0
+            || Math.sign(delta) === this.templateDirection;
+          movedEnough = sameDirection && Math.abs(delta) >= this.minRomForRep;
+        }
         // Phase-label fallback: only when keypoints are missing (pVal=NaN).
         const phaseFallback = !Number.isFinite(pVal) && this.effortPhases.has(this.phase);
         if (movedEnough || phaseFallback) {

@@ -51,21 +51,31 @@ export function computeUniversalFeatures(kps) {
   const trunkAngleL = (P(Ls) && P(Lh) && P(La)) ? A(Ls, Lh, La) : NaN;
   const trunkAngleR = (P(Rs) && P(Rh) && P(Ra)) ? A(Rs, Rh, Ra) : NaN;
 
-  // 6. Ankle-toe angle (knee → ankle → foot_index)  — calf raises
-  const ankleAngleToeL  = (P(Lk) && P(La) && P(Lfi)) ? A(Lk, La, Lfi) : NaN;
-  const ankleAngleToeR  = (P(Rk) && P(Ra) && P(Rfi)) ? A(Rk, Ra, Rfi) : NaN;
-
-  // 7. Ankle-heel angle (knee → ankle → heel)
-  const ankleAngleHeelL = (P(Lk) && P(La) && P(Lhe)) ? A(Lk, La, Lhe) : NaN;
-  const ankleAngleHeelR = (P(Rk) && P(Ra) && P(Rhe)) ? A(Rk, Ra, Rhe) : NaN;
-
-  // --- Reference lengths for normalization ---
+  // --- Reference lengths for normalization (moved up so foot-keypoint sanity check can use them) ---
   const torsoLenL = (P(Ls) && P(Lh)) ? Math.max(D(Ls, Lh), 1e-6) : NaN;
   const torsoLenR = (P(Rs) && P(Rh)) ? Math.max(D(Rs, Rh), 1e-6) : NaN;
   const torsoLen  = avgFinite([torsoLenL, torsoLenR]);
 
   const shankLenL = (P(Lk) && P(La)) ? Math.max(D(Lk, La), 1e-6) : NaN;
   const shankLenR = (P(Rk) && P(Ra)) ? Math.max(D(Rk, Ra), 1e-6) : NaN;
+
+  // Foot-keypoint sanity check: heel↔foot_index distance should be at most ~90% of shank length.
+  // When MediaPipe latches onto a chair leg / vertical background line, heel & foot_index get
+  // smeared along it and the heel-toe distance balloons. Invalidate foot-derived features
+  // (ankleAngleToe/Heel, footPitchNorm) for that frame so chair-leg hallucinations don't
+  // produce false reps. 0.9 is generous — a real foot is typically 60-70% of shank length.
+  const footSpanL = (P(Lhe) && P(Lfi)) ? D(Lhe, Lfi) : NaN;
+  const footSpanR = (P(Rhe) && P(Rfi)) ? D(Rhe, Rfi) : NaN;
+  const footValidL = fin(footSpanL) && fin(shankLenL) && footSpanL <= shankLenL * 0.9;
+  const footValidR = fin(footSpanR) && fin(shankLenR) && footSpanR <= shankLenR * 0.9;
+
+  // 6. Ankle-toe angle (knee → ankle → foot_index)  — calf raises
+  const ankleAngleToeL  = (P(Lk) && P(La) && P(Lfi) && footValidL) ? A(Lk, La, Lfi) : NaN;
+  const ankleAngleToeR  = (P(Rk) && P(Ra) && P(Rfi) && footValidR) ? A(Rk, Ra, Rfi) : NaN;
+
+  // 7. Ankle-heel angle (knee → ankle → heel)
+  const ankleAngleHeelL = (P(Lk) && P(La) && P(Lhe) && footValidL) ? A(Lk, La, Lhe) : NaN;
+  const ankleAngleHeelR = (P(Rk) && P(Ra) && P(Rhe) && footValidR) ? A(Rk, Ra, Rhe) : NaN;
 
   const hipAnkleLenL = (P(Lh) && P(La)) ? Math.max(D(Lh, La), 1e-6) : NaN;
   const hipAnkleLenR = (P(Rh) && P(Ra)) ? Math.max(D(Rh, Ra), 1e-6) : NaN;
@@ -105,9 +115,10 @@ export function computeUniversalFeatures(kps) {
   }
 
   // 10. Foot pitch (toe.y - heel.y) / shank  — dorsiflexion
-  const footPitchNormL = (P(Lfi) && P(Lhe) && fin(shankLenL))
+  // Also gated by footValid so chair-leg hallucinations don't produce false dorsiflexion reps.
+  const footPitchNormL = (P(Lfi) && P(Lhe) && fin(shankLenL) && footValidL)
     ? (Lfi.y - Lhe.y) / shankLenL : NaN;
-  const footPitchNormR = (P(Rfi) && P(Rhe) && fin(shankLenR))
+  const footPitchNormR = (P(Rfi) && P(Rhe) && fin(shankLenR) && footValidR)
     ? (Rfi.y - Rhe.y) / shankLenR : NaN;
 
   // --- Aggregate / bilateral features ---

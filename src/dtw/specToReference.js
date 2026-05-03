@@ -631,28 +631,29 @@ export const EXERCISE_CONFIGS = {
     // 400ms dwell requires sustained phase positioning, filtering transient glitches.
     timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
-    // ankleAngleHeel discriminates calf raise from dorsiflexion. Both motions decrease
-    // ankleAngleToe (knee→ankle→foot_index), so the engine couldn't tell them apart.
-    // ankleAngleHeel (knee→ankle→heel) only changes when the heel moves — which it does
-    // for calf raises (heel rises) but NOT for dorsiflexion (heel stays planted).
-    // Auto-picker selects ankleAngleHeel as primary because its range (50°) is larger
-    // than ankleAngleToe's (20°). Both features stay in the template for richer DTW match.
+    // footPitchNorm = (toe.y - heel.y) / shankLen directly measures heel elevation.
+    // For a seated calf raise, the foot pivots around the toe — the ankle joint barely
+    // flexes (so ankleAngle features were producing only 5-15° of real change despite
+    // 50° template assumptions). footPitchNorm captures the actual physical motion
+    // (heel rising above toe level) and produces opposite signs for calf raise (POSITIVE)
+    // vs dorsiflexion (NEGATIVE) — combined with direction-aware movedEnough it cleanly
+    // discriminates the two motions and rejects body-translation noise.
     phases: [
       {
         id: 'lowered', weight: 1,
-        features: { ankleAngleToe: { from: 85, to: 85 }, ankleAngleHeel: { from: 130, to: 130 } },
+        features: { footPitchNorm: { from: 0.0, to: 0.0 } },
       },
       {
         id: 'raising', weight: 2,
-        features: { ankleAngleToe: { from: 85, to: 65, easing: 'sine' }, ankleAngleHeel: { from: 130, to: 80, easing: 'sine' } },
+        features: { footPitchNorm: { from: 0.0, to: 0.12, easing: 'sine' } },
       },
       {
         id: 'raised', weight: 1,
-        features: { ankleAngleToe: { from: 65, to: 65 }, ankleAngleHeel: { from: 80, to: 80 } },
+        features: { footPitchNorm: { from: 0.12, to: 0.12 } },
       },
       {
         id: 'lowering', weight: 2,
-        features: { ankleAngleToe: { from: 65, to: 85, easing: 'sine' }, ankleAngleHeel: { from: 80, to: 130, easing: 'sine' } },
+        features: { footPitchNorm: { from: 0.12, to: 0.0, easing: 'sine' } },
       },
     ],
     repCycle: { from: 'lowered', to: 'raised' },
@@ -672,25 +673,28 @@ export const EXERCISE_CONFIGS = {
     detector: 'mediapipe',
     framing: { view: 'side', instruction: 'Stand sideways to the camera, exercising foot toward the camera' },
     startCue: 'Rise up onto your toes, then lower your heels slowly',
-    // Same reasoning as seated variant; tight ROM needs stricter gate against foot keypoint noise.
-    minRomPct: 0.50,
+    // Same fix as the seated variant: ankleAngleToe template (88→68) doesn't match real
+    // standing geometry — actual values land in the 100-130 range, way outside the template.
+    // footPitchNorm directly measures heel elevation (0 flat → +0.12 on toes), independent
+    // of body posture and stance, and produces opposite signs vs dorsiflexion/body-shift.
+    minRomPct: 0.65,
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
     phases: [
       {
         id: 'lowered', weight: 1,
-        features: { ankleAngleToe: { from: 88, to: 88 } },
+        features: { footPitchNorm: { from: 0.0, to: 0.0 } },
       },
       {
         id: 'raising', weight: 2,
-        features: { ankleAngleToe: { from: 88, to: 68, easing: 'sine' } },
+        features: { footPitchNorm: { from: 0.0, to: 0.12, easing: 'sine' } },
       },
       {
         id: 'raised', weight: 1,
-        features: { ankleAngleToe: { from: 68, to: 68 } },
+        features: { footPitchNorm: { from: 0.12, to: 0.12 } },
       },
       {
         id: 'lowering', weight: 2,
-        features: { ankleAngleToe: { from: 68, to: 88, easing: 'sine' } },
+        features: { footPitchNorm: { from: 0.12, to: 0.0, easing: 'sine' } },
       },
     ],
     repCycle: { from: 'lowered', to: 'raised' },
