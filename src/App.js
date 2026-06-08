@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
-import ExerciseTracker from "./ExerciseTracker";
+import ExerciseTracker from "./ExerciseTracker_refactored";
 import { useLocation } from "react-router-dom";
-
-function useQuery() {
+import {jwtDecode} from "jwt-decode";
+import axios from "axios";
+import { getServiceUrl } from "./config";
+export function useQuery() {
   return new URLSearchParams(useLocation().search);
 }
 
@@ -13,28 +15,80 @@ function App() {
   const [side, setSide] = useState("left");
   const query = useQuery();
   const [exerciseType, setExerciseType] = useState("SelectExercise"); // Default exercise type
+  const [isVideoRecording, setIsVideoRecording] = useState(false);
+  const [isSkeletonRecording, setIsSkeletonRecording] = useState(false);
+  const [displayMessage, setDisplayMessage] = useState()
+  const [activityData, setActivityData] = useState({})
 
   useEffect(() => {
-    const repsFromURL = query.get("reps");
-    const sideFromURL = query.get("side");
-    const exerciseTypeFromURL = query.get("exerciseType"); // Get exercise type from URL
+    manageExerciseData()
+  }, []);
 
-    if (repsFromURL && sideFromURL && exerciseTypeFromURL) {
-      setTargetReps(parseInt(repsFromURL));
-      setSide(sideFromURL);
-      setExerciseType(exerciseTypeFromURL); // set exercise type
-      setIsDetecting(true); // Start detection automatically
+  const manageExerciseData = async () => {
+    // if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
+    //   const defaultReps = parseInt(process.env.REACT_APP_DEFAULT_REPS) || 5;
+    //   const defaultSide = (process.env.REACT_APP_DEFAULT_SIDE || 'left').toLowerCase();
+    //   const defaultExercise = process.env.REACT_APP_DEFAULT_EXERCISE || 'SideArmRaise';
+    //   const defaultVideo = process.env.REACT_APP_ALLOW_VIDEO_RECORDING === 'true';
+    //   const defaultSkeleton = process.env.REACT_APP_ALLOW_SKELETON_RECORDING === 'true';
+
+    //   console.log(`[Dev] exercise=${defaultExercise} reps=${defaultReps} side=${defaultSide}`);
+
+    //   setTargetReps(defaultReps);
+    //   setSide(defaultSide);
+    //   setExerciseType(defaultExercise);
+    //   setIsDetecting(true);
+    //   setIsVideoRecording(defaultVideo);
+    //   setIsSkeletonRecording(defaultSkeleton);
+    //   return;
+    // }
+
+    try {
+      const token = query.get("token");
+      const decodeResponse = jwtDecode(token)
+      if(decodeResponse) {
+        const repsFromURL = decodeResponse?.reps
+        const sideFromURL = decodeResponse?.side
+        const exerciseTypeFromURL = decodeResponse?.exerciseType
+        const activity = await axios.get(`${getServiceUrl(decodeResponse).EXERCISE_SERVICE}/assigned-exercises/${decodeResponse?.activity}`, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        });
+        const details = activity.data?.data
+        if(details?.status === "completed") {
+           setDisplayMessage("Activity is either completed or expired. Please start other exercise.")
+           return
+        }
+        
+        setActivityData(decodeResponse);
+        if (repsFromURL && exerciseTypeFromURL) {
+          setTargetReps(parseInt(repsFromURL));
+          setSide(sideFromURL ?? "left"); // default to left if side is not provided
+          setExerciseType(exerciseTypeFromURL); // set exercise type
+          setIsDetecting(true); // Start detection automatically
+          setIsVideoRecording(details?.patient?.allowExerciseVideo ?? true);   // video recording
+          setIsSkeletonRecording(details?.patient?.allowSkeletonVideo ?? true);   // skeleton recording
+        }
+      } else {
+        setDisplayMessage("Cannot initate exercise. Please contact support")
+      }
+    } catch(err) {
+      setDisplayMessage("Cannot initate exercise. Please contact support")
     }
-  }, [query]);
+  }
 
   const handleStartExercise = () => {
     setIsDetecting(true); // Start detection
+    setIsSkeletonRecording(true);   // new line
+    setIsVideoRecording(true);   // new line
   };
 
   return (
     <div className="App">
       <header className="App-header">
-        {!isDetecting && (
+      {displayMessage ? displayMessage : 
+        !isDetecting && (
           <div style={{ position: "absolute", bottom: 10, left: 10 }}>
             <input
               type="number"
@@ -47,6 +101,7 @@ function App() {
               <select value={side} onChange={(e) => setSide(e.target.value)}>
                 <option value="left">Left</option>
                 <option value="right">Right</option>
+                <option value="both">Both</option>
               </select>
             )}
             <select 
@@ -58,7 +113,20 @@ function App() {
               <option value="SitToStand">Sit to Stand</option>
               <option value="MiniSquats">Mini Squats</option>
               <option value="LongArcQuad">Long Arc Quad</option>
-              <option value="StandingStraightUp">Standing Straight Up</option>  {/* New Option */}
+              <option value="SeatedMarch">Seated March</option>
+              <option value="StandingMarch">Standing March</option>
+              <option value="StandingStraightUp">Standing Straight Up</option>
+              <option value="SeatedDorsiflexion">Seated Dorsiflexion</option>
+              <option value="StandingDorsiflexion">Standing Dorsiflexion</option>
+              <option value="CalfRaisesSeated">Seated Calf Raises</option>
+              <option value="CalfRaisesStanding">Standing Calf Raises</option>
+
+              <option value="BicepCurls">Bicep Curls</option>
+              <option value="MiniLunges">Mini Lunges</option>
+              <option value="LiftsAndChops">Lift and Chops</option>
+
+              <option value="StepUps">Step Ups</option>
+              <option value="WallPushUp">Wall Push-Ups</option>
               {/* Add more exercises as needed */}
             </select>
             <button onClick={handleStartExercise}>
@@ -73,9 +141,15 @@ function App() {
             targetReps={targetReps}
             isDetecting={isDetecting}
             setIsDetecting={setIsDetecting}
+            isVideoRecording={isVideoRecording}
+            setIsVideoRecording={setIsVideoRecording}  
+            isSkeletonRecording={isSkeletonRecording}
+            setIsSkeletonRecording={setIsSkeletonRecording}
+            setDisplayMessage={setDisplayMessage}
+            activityData={activityData}
           />
         )}
-      </header>
+     </header>
     </div>
   );
 }

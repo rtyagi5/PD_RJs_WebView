@@ -2,13 +2,17 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
-import { BrowserRouter as Router } from 'react-router-dom';
+import ReferenceExtractor from './dtw/ReferenceExtractor';
+import ValidationPage from './dtw/ValidationPage';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
-  <React.StrictMode>
     <Router>
-      <App />
+      <Routes>
+        <Route path="/reference-extractor" element={<ReferenceExtractor />} />
+        <Route path="/dtw-validation" element={<ValidationPage />} />
+        <Route path="*" element={<App />} />
+      </Routes>
     </Router>
- </React.StrictMode>
 );
