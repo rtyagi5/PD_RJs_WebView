@@ -632,6 +632,8 @@ export default function ExerciseTrackerRefactored({
           setDisplayMessage?.(`${spec?.name || exerciseType}: Rep +1 → ${repCount} (${hudLabel}=${hudValue})${attemptInfo}`);
           prevRepRef.current = repCount;
         }
+        console.log(`[${engine?.spec?.name}] Feedback: ${feedbackRef.current}`);
+        console.log(`[${engine?.spec?.name}] Syncing exercise data:`, pickExerciseMetrics(exerciseType, feat, side));
 
         // sync payload — build BEFORE the done check so the final rep's
         // announcement reaches the host AND lastExerciseDataRef holds fresh
@@ -651,6 +653,9 @@ export default function ExerciseTrackerRefactored({
             isCalibrating: stepResult.isCalibrating,
           } : {}),
         };
+
+        console.log(`[${engine?.spec?.name}] Syncing exercise data:`, exerciseData);
+        
         lastExerciseDataRef.current = exerciseData;
         maybeSendUpdates({ ...exerciseData, sessionState: 'active' }).catch(() => {});
 
