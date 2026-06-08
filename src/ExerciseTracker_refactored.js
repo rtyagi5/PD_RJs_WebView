@@ -637,7 +637,7 @@ export default function ExerciseTrackerRefactored({
         // announcement reaches the host AND lastExerciseDataRef holds fresh
         // data when onComplete reads it.
         const exerciseData = {
-          ...pickExerciseMetrics(exerciseType, feat),
+          ...pickExerciseMetrics(exerciseType, feat, side),
           repCount: repCountRef.current,
           feedback: feedbackRef.current,
           ...(isTimeMode ? {
@@ -719,13 +719,38 @@ export default function ExerciseTrackerRefactored({
 }
 
 // Map which metrics to sync per exercise
-function pickExerciseMetrics(exerciseType, feat) {
+// function pickExerciseMetrics(exerciseType, feat) {
+//   const keys = METRIC_MAP[exerciseType] || [];
+//   const out = {};
+//   keys.forEach(k => {
+//     const v = feat[k];
+//     const pv = prettyNum(k, v);
+//     if (pv !== undefined) out[k] = pv;
+//   });
+//   return out;
+// }
+function pickExerciseMetrics(exerciseType, feat, side) {
   const keys = METRIC_MAP[exerciseType] || [];
   const out = {};
-  keys.forEach(k => {
-    const v = feat[k];
-    const pv = prettyNum(k, v);
-    if (pv !== undefined) out[k] = pv;
+
+  keys.forEach(metric => {
+    let value;
+
+    // First try exact metric name
+    if (feat[metric] !== undefined) {
+      value = feat[metric];
+    }
+    // Then try side-specific metric
+    else if (side) {
+      const suffix = side.toLowerCase() === "left" ? "L" : "R";
+      value = feat[`${metric}${suffix}`];
+    }
+
+    const pv = prettyNum(metric, value);
+
+    if (pv !== undefined && pv !== null) {
+      out[metric] = pv;
+    }
   });
   return out;
 }
