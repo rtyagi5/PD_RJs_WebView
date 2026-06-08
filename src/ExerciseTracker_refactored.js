@@ -732,6 +732,8 @@ export default function ExerciseTrackerRefactored({
 function pickExerciseMetrics(exerciseType, feat, side) {
   const keys = METRIC_MAP[exerciseType] || [];
   const out = {};
+  console.log(`[pickExerciseMetrics] exerciseType=${exerciseType} side=${side} keys=${keys.join(',')}`);
+  console.log(`[pickExerciseMetrics] feat keys: ${Object.keys(feat).join(',')}`);
 
   keys.forEach(metric => {
     let value;
