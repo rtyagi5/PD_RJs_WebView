@@ -41,7 +41,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist   # Change to ./build for CRA
+          path: ./build   # Change to ./build for CRA
 
   deploy:
     environment:
