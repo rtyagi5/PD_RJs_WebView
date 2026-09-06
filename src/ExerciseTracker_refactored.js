@@ -20,6 +20,7 @@ import {
 } from './CoachingOverlay';
 import { IDEAL_BODY_RATIO } from './PoseQuality';
 import { DTWPhaseMachine, computeUniversalFeatures } from './dtw';
+import { KeypointRecorder } from './KeypointRecorder';
 import { getReference } from './dtw/referenceRegistry';
 import { bootstrapAllReferences, fetchAndCacheReference } from './dtw/bootstrapReferences';
 import {
@@ -283,6 +284,10 @@ export default function ExerciseTrackerRefactored({
     return res.data;
   }
 
+  // Records the keypoint stream in parallel with the webm recorders. Gated on the
+  // same skeleton-recording consent, because it captures the same movement.
+  const keypointRecorderRef = useRef(null);
+
   const onComplete = useCallback(async () => {
     // Save patient baseline & session summary (DTW mode)
     const eng = engine;
@@ -307,6 +312,18 @@ export default function ExerciseTrackerRefactored({
       } : {}),
     };
     await sendUpdates(finalData, exerciseType, activityData, setDisplayMessage);
+
+    // liveRepCount is what makes the recording testable: the replay harness
+    // asserts its own count against what the live session actually reported.
+    const kpRec = keypointRecorderRef.current;
+    if (kpRec) {
+      try {
+        await kpRec.saveToDevServer({ liveRepCount: repCountRef.current });
+      } catch (e) {
+        console.warn('[KeypointRecorder] flush failed:', e);
+      }
+      keypointRecorderRef.current = null;
+    }
 
     setIsDetecting(false);
     setIsVideoRecording(false);
@@ -471,6 +488,20 @@ export default function ExerciseTrackerRefactored({
     }
     setEngine(eng);
 
+    // Sidecar recorder. Built here so it inherits the engine's resolved primary
+    // feature — the key the ROM gate actually acts on, which is the one a replay
+    // most needs. Recording only starts once the session does.
+    keypointRecorderRef.current = isSkeletonRecording
+      ? new KeypointRecorder({
+          exercise: exerciseType,
+          side,
+          patientId,
+          detector: (ref ? eng.spec : spec)?.detector || 'movenet',
+          featureKeys: (METRIC_MAP[exerciseType] || []).flatMap(m => resolveMetricKeys(m, side)),
+          primaryFeature: eng.primaryFeature || null,
+        })
+      : null;
+
     // Create/reset session state machine for coaching flow
     // DTWPhaseMachine exposes a .spec object for compatibility
     sessionSMRef.current = new SessionStateMachine(ref ? eng.spec : spec);
@@ -481,7 +512,7 @@ export default function ExerciseTrackerRefactored({
     console.log('[Engine] built:', spec?.name ?? exerciseType, ref ? '(DTW)' : '(spec)', 'phases:', phaseList);
     // `side` matters: it selects the primary feature, the side-aware DTW filtering,
     // and which universal keys are reported — the engine must be rebuilt when it changes.
-  }, [exerciseType, targetReps, side]);
+  }, [exerciseType, targetReps, side, isSkeletonRecording]);
 
   useEffect(() => {
     setIsDetecting?.(true);
@@ -695,6 +726,19 @@ export default function ExerciseTrackerRefactored({
         if (!engine || engine.spec?.name !== activeSpecName) {
           if (isDetecting) requestAnimationFrame(loop);
           return;
+        }
+
+        // Recorded immediately before step(), with the same post-smoothing
+        // features the engine is about to consume, so a replay sees exactly what
+        // live saw. Wrapped because a recorder fault must never break a session.
+        const kpRec = keypointRecorderRef.current;
+        if (kpRec) {
+          if (!kpRec.startedAtIso) {
+            kpRec.opts.videoW = vw;
+            kpRec.opts.videoH = vh;
+            kpRec.start();
+          }
+          kpRec.recordFrame(rawKps, feat);
         }
 
         const stepResult = engine.step({

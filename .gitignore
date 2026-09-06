@@ -21,3 +21,6 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Dev keypoint captures (WI-1) - local analysis artefacts, never committed
+captures/
