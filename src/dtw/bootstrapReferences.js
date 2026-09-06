@@ -10,6 +10,7 @@ import { registerReference } from './referenceRegistry.js';
 import { loadRefJsonFiles } from './references/index.js';
 import { getCachedReference, cacheReference } from './referenceStorage.js';
 import { getServiceUrl } from '../config.js';
+import { checkPhaseSeparation } from './referenceHealth.js';
 
 let _initialized = false;
 
@@ -56,6 +57,21 @@ export function bootstrapAllReferences() {
       );
       continue;
     }
+    // Shape validation cannot catch a MIS-SEGMENTED recording. The engine derives
+    // refStartValue and templateDirection from the phase labels, so a reference
+    // whose effort phase has swallowed the whole movement inverts the direction
+    // gate: the patient moves correctly and the engine rejects it, counting
+    // nothing while every log looks healthy. Keep the synthetic template instead.
+    const health = checkPhaseSeparation(ref);
+    if (!health.ok) {
+      console.warn(
+        `[Bootstrap] REJECTED video reference "${ref.name}" — ${health.reason} ` +
+        `Keeping the synthetic template. Re-record and re-export from ` +
+        `/reference-extractor with correct phase boundaries.`
+      );
+      continue;
+    }
+
     const result = registerReference(ref.name, { ...ref, source: 'video' });
     if (result.valid) {
       fileCount++;
