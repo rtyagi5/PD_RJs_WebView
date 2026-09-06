@@ -11,7 +11,7 @@ import { angle, distance, kp, present } from '../features.js';
  * Returns NaN for any feature whose required keypoints are missing/low-confidence.
  *
  * @param {Array} kps - Array of keypoint objects { name, x, y, score }
- * @returns {Object} feature vector with ~22 named features
+ * @returns {Object} feature vector with 30 named features (see UNIVERSAL_FEATURE_KEYS)
  */
 export function computeUniversalFeatures(kps) {
   // --- Lookup keypoints ---

@@ -25,23 +25,27 @@ function App() {
   }, []);
 
   const manageExerciseData = async () => {
-    // if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
-    //   const defaultReps = parseInt(process.env.REACT_APP_DEFAULT_REPS) || 5;
-    //   const defaultSide = (process.env.REACT_APP_DEFAULT_SIDE || 'left').toLowerCase();
-    //   const defaultExercise = process.env.REACT_APP_DEFAULT_EXERCISE || 'SideArmRaise';
-    //   const defaultVideo = process.env.REACT_APP_ALLOW_VIDEO_RECORDING === 'true';
-    //   const defaultSkeleton = process.env.REACT_APP_ALLOW_SKELETON_RECORDING === 'true';
+    // Local development: skip the JWT/backend round-trip entirely and start the
+    // configured exercise straight away. Gated on REACT_APP_DEVELOPMENT_MODE, which
+    // is not set in production builds, so this is inert once deployed.
+    // Needed to test each exercise against its recorded reference without a token.
+    if (process.env.REACT_APP_DEVELOPMENT_MODE === 'true') {
+      const defaultReps = parseInt(process.env.REACT_APP_DEFAULT_REPS) || 5;
+      const defaultSide = (process.env.REACT_APP_DEFAULT_SIDE || 'left').toLowerCase();
+      const defaultExercise = process.env.REACT_APP_DEFAULT_EXERCISE || 'SideArmRaise';
+      const defaultVideo = process.env.REACT_APP_ALLOW_VIDEO_RECORDING === 'true';
+      const defaultSkeleton = process.env.REACT_APP_ALLOW_SKELETON_RECORDING === 'true';
 
-    //   console.log(`[Dev] exercise=${defaultExercise} reps=${defaultReps} side=${defaultSide}`);
+      console.log(`[Dev] exercise=${defaultExercise} reps=${defaultReps} side=${defaultSide}`);
 
-    //   setTargetReps(defaultReps);
-    //   setSide(defaultSide);
-    //   setExerciseType(defaultExercise);
-    //   setIsDetecting(true);
-    //   setIsVideoRecording(defaultVideo);
-    //   setIsSkeletonRecording(defaultSkeleton);
-    //   return;
-    // }
+      setTargetReps(defaultReps);
+      setSide(defaultSide);
+      setExerciseType(defaultExercise);
+      setIsDetecting(true);
+      setIsVideoRecording(defaultVideo);
+      setIsSkeletonRecording(defaultSkeleton);
+      return;
+    }
 
     try {
       const token = query.get("token");

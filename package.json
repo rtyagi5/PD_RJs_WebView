@@ -32,11 +32,21 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "test": "react-scripts test",
+    "test:ci": "react-scripts test --watchAll=false",
+    "lint": "eslint src --ext .js,.jsx --max-warnings=0",
     "predeploy": "yarn build",
     "deploy": "gh-pages -d build"
   },
   "eslintConfig": {
     "extends": "react-app"
+  },
+  "jestComment": "src/specs/*.spec.js are EXERCISE CONFIGS, not tests. CRA's default testMatch treats every *.spec.js as a test suite, which made `yarn test` fail on all 16 of them. Only *.test.js files are tests here.",
+  "jest": {
+    "testMatch": [
+      "<rootDir>/src/**/__tests__/**/*.{js,jsx,ts,tsx}",
+      "<rootDir>/src/**/*.test.{js,jsx,ts,tsx}"
+    ]
   },
   "browserslist": {
     "production": [

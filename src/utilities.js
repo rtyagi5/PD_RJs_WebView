@@ -1,6 +1,6 @@
 import axios from "axios"
 import { getServiceUrl } from "./config";
-import { METRIC_MAP } from "./ExerciseTracker_refactored";
+import { METRIC_MAP, resolveMetricKeys } from "./metrics";
 const lineWidth = 2;  // Adjusted line width
 let messageCache = {}
 let updates = []
@@ -88,12 +88,22 @@ export const sendUpdates = async (data, exerciseType, activityData, setDisplayMe
     ...(data.sessionState != null && { sessionState: data.sessionState }),
     ...(data.coachingChecks != null && { coachingChecks: data.coachingChecks }),
     ...(data.countdownRemaining != null && { countdownRemaining: data.countdownRemaining }),
+    // Per-rep ROM summary: { rep, features: { <universalKey>: {min,max} } }.
+    // Emitted on the frame a rep is counted so the backend gets true per-rep
+    // angle history instead of whatever instant a feedback string happened to change.
+    ...(data.repSummary != null && { repSummary: data.repSummary }),
   };
 
+  // METRIC_MAP holds bilateral BASE names; the payload built by
+  // pickExerciseMetrics holds side-resolved universal keys (e.g. 'kneeAngleL').
+  // Expand each entry to every key it could resolve to and copy what's present.
   selectedConfig.forEach(param => {
-    if (data[param] !== undefined) {
-      filteredData[param] = data[param];
-    }
+    const candidates = new Set([param, ...resolveMetricKeys(param, 'left'), ...resolveMetricKeys(param, 'right')]);
+    candidates.forEach(key => {
+      if (data[key] !== undefined) {
+        filteredData[key] = data[key];
+      }
+    });
   });
 
   updates.push(filteredData);

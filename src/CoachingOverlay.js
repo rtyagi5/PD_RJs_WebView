@@ -4,7 +4,7 @@
 // Called from the detection loop — no React, just 2D canvas API.
 // ---------------------------------------------
 
-import { IDEAL_BODY_RATIO } from './PoseQuality';
+import { IDEAL_BODY_RATIO, CHECK_PRIORITY } from './PoseQuality';
 
 // ── Target Bounding Box ──────────────────────────────────────────────────────
 // Draws a dashed rectangle showing where the patient should stand.
@@ -55,9 +55,8 @@ export function drawCoachingMessages(ctx, frameW, frameH, checks) {
   let textColor = '#FFFFFF';
 
   if (failing.length > 0) {
-    const priorityOrder = ['visibility', 'distance', 'angle', 'lighting'];
     let primary = failing[0];
-    for (const name of priorityOrder) {
+    for (const name of CHECK_PRIORITY) {
       const found = failing.find(c => c.name === name);
       if (found) { primary = found; break; }
     }

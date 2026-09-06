@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(npx react-scripts *)",
-      "Bash(yarn build *)"
+      "Bash(yarn build *)",
+      "Bash(node -p \"require\\('./node_modules/@mediapipe/tasks-vision/package.json'\\).version\")",
+      "Bash(cd \"d:/Posedetection_ReactJS_WebView\" && cp node_modules/@mediapipe/tasks-vision/wasm/* public/mediapipe/wasm/ && ls -la public/mediapipe/wasm/ && echo \"--- size ---\" && du -sh public/mediapipe/wasm/)",
+      "Bash(python -)"
+    ],
+    "additionalDirectories": [
+      "D:\\Posedetection_ReactJS_WebView\\node_modules\\@mediapipe\\tasks-vision\\wasm"
     ]
   }
 }

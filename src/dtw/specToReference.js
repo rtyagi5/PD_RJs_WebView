@@ -98,6 +98,10 @@ export function generateReference(config) {
     highlightKeypoints: config.highlightKeypoints || null,
     minRomPct: config.minRomPct ?? null,
     primaryFeature: config.primaryFeature || null,
+    // Absolute clinical safety ceilings, side-generic (e.g. { shoulderAngle: { max: 95 } }).
+    // Resolved to L/R at runtime by DTWPhaseMachine and checked every frame, independently
+    // of the template — a template-relative check alone can never catch "too far" reliably.
+    clinicalCaps: config.clinicalCaps || null,
     startCue: config.startCue || null,
     framing: config.framing || null,
     timing: {
@@ -157,6 +161,10 @@ export const EXERCISE_CONFIGS = {
       both: 'Raise both arms out to the sides',
     },
     highlightKeypoints: ['shoulder', 'elbow', 'wrist'],
+    // Clinical ceiling: a lateral raise stops at shoulder height (~90°). Above ~95°
+    // the movement becomes scapular elevation, which is what the legacy spec warned
+    // about ("Raised too high - lower your arm" at shoulderAngle > 95).
+    clinicalCaps: { shoulderAngle: { max: 95 } },
     phases: [
       {
         id: 'lowered', weight: 1,
@@ -166,23 +174,26 @@ export const EXERCISE_CONFIGS = {
         },
       },
       {
+        // Target is 90° (arm horizontal), NOT 150°. The old 150° target made the
+        // template treat a correct 90° raise as under-shooting, and pushed the
+        // overshoot threshold to an unreachable 174°.
         id: 'transition_up', weight: 2,
         features: {
-          shoulderAngle: { from: 30, to: 150, easing: 'sine' },
+          shoulderAngle: { from: 30, to: 90, easing: 'sine' },
           elbowAngle: { from: 160, to: 155 },
         },
       },
       {
         id: 'raised', weight: 1,
         features: {
-          shoulderAngle: { from: 150, to: 150 },
+          shoulderAngle: { from: 90, to: 90 },
           elbowAngle: { from: 155, to: 155 },
         },
       },
       {
         id: 'transition_down', weight: 2,
         features: {
-          shoulderAngle: { from: 150, to: 30, easing: 'sine' },
+          shoulderAngle: { from: 90, to: 30, easing: 'sine' },
           elbowAngle: { from: 155, to: 160 },
         },
       },
@@ -218,6 +229,9 @@ export const EXERCISE_CONFIGS = {
     // single-spike false reps. 0.40 still allows a half-curl (~42° ROM) to count.
     minRomPct: 0.40,
     highlightKeypoints: ['shoulder', 'elbow', 'wrist'],
+    // Legacy spec treated elbowAngle <= 75 as a complete curl; below ~40° the
+    // forearm is jammed against the biceps with no useful load. TODO clinical review.
+    clinicalCaps: { elbowAngle: { min: 40 } },
     phases: [
       {
         id: 'lowered', weight: 1,
@@ -244,7 +258,7 @@ export const EXERCISE_CONFIGS = {
         { bodyPart: 'back', say: 'Keep your back straight' },
         { bodyPart: 'shoulder', say: "Don't shrug your shoulders" },
       ],
-      range: { tooLittle: 'Try to curl a bit higher' },
+      range: { tooLittle: 'Try to curl a bit higher', tooMuch: "That's high enough — don't jam your forearm" },
       tempo: { tooFast: 'Slow down, control the movement' },
     },
   },
@@ -265,6 +279,9 @@ export const EXERCISE_CONFIGS = {
     // Knee keypoint can jump when occluded by torso; require a clear squat (>20°)
     minRomPct: 0.40,
     highlightKeypoints: ['hip', 'knee', 'ankle'],
+    // A *mini* squat bottoms out around 120°. Past ~100° it is a full squat, which
+    // is beyond the prescription and hard on the knee. TODO clinical review.
+    clinicalCaps: { kneeAngle: { min: 100 } },
     phases: [
       {
         id: 'standing', weight: 1,
@@ -288,7 +305,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { standing: 'Bend your knees to squat', squatting: 'Good — stand back up' },
       form: [{ bodyPart: 'back', say: 'Keep your back straight' }, { bodyPart: 'knee', say: 'Keep knees over toes' }],
-      range: { tooLittle: 'Try to squat a bit deeper' },
+      range: { tooLittle: 'Try to squat a bit deeper', tooMuch: "That's deep enough — this is a mini squat" },
       tempo: { tooFast: 'Slow down' },
     },
   },
@@ -301,6 +318,9 @@ export const EXERCISE_CONFIGS = {
     framing: { view: 'front', instruction: 'Face the camera, chair and full body visible' },
     startCue: 'Stand up from the chair',
     highlightKeypoints: ['hip', 'knee', 'ankle'],
+    // Standing tall is ~165-175°. Beyond 180° the knee is hyperextended (locked back),
+    // a common compensation in stroke patients. TODO clinical review.
+    clinicalCaps: { kneeAngle: { max: 180 } },
     phases: [
       {
         id: 'seated', weight: 1,
@@ -324,7 +344,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { seated: 'Stand up', standing: 'Good — sit back down slowly' },
       form: [{ bodyPart: 'back', say: 'Keep your back straight as you rise' }],
-      range: { tooLittle: 'Try to stand up fully' },
+      range: { tooLittle: 'Try to stand up fully', tooMuch: "Stand tall — don't lock your knees back" },
       tempo: { tooFast: 'Slow and controlled' },
     },
   },
@@ -341,6 +361,9 @@ export const EXERCISE_CONFIGS = {
       both: 'Straighten your leg out in front',
     },
     highlightKeypoints: ['hip', 'knee', 'ankle'],
+    // Carried over verbatim from the legacy spec: laqAngleExtended = 178, above which
+    // it warned "Don't hyperextend".
+    clinicalCaps: { kneeAngle: { max: 178 } },
     phases: [
       {
         id: 'flexed', weight: 1,
@@ -364,7 +387,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { flexed: 'Straighten your leg', extended: 'Good — bend slowly' },
       form: [{ bodyPart: 'back', say: 'Sit tall' }],
-      range: { tooLittle: 'Try to straighten more' },
+      range: { tooLittle: 'Try to straighten more', tooMuch: "Don't hyperextend — stop when your leg is straight" },
       tempo: { tooFast: 'Slow down' },
     },
   },
@@ -379,6 +402,9 @@ export const EXERCISE_CONFIGS = {
     framing: { view: 'front', instruction: 'Face the camera, both legs visible' },
     startCue: 'Lift your knees one at a time, alternating',
     highlightKeypoints: ['hip', 'knee', 'ankle'],
+    // Seated march target lift is kneeLiftNorm 0.25 / hipAngle 70°. Much beyond that the
+    // patient is hiking the hip or leaning back rather than marching. TODO clinical review.
+    clinicalCaps: { kneeLiftNorm: { max: 0.45 }, hipAngle: { min: 50 } },
     phases: [
       {
         id: 'resting', weight: 1,
@@ -402,7 +428,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { resting: 'Lift your knee', lifted: 'Good — lower slowly' },
       form: [{ bodyPart: 'trunk', say: 'Sit tall, no leaning' }],
-      range: { tooLittle: 'Try to lift a bit higher' },
+      range: { tooLittle: 'Try to lift a bit higher', tooMuch: "That's high enough — keep it controlled" },
       tempo: { tooFast: 'Slow and steady' },
     },
   },
@@ -416,6 +442,9 @@ export const EXERCISE_CONFIGS = {
     framing: { view: 'front', instruction: 'Face the camera, full body visible' },
     startCue: 'March in place, lifting knees alternately',
     highlightKeypoints: ['hip', 'knee', 'ankle'],
+    // Standing march target is kneeLiftNorm 0.3 / hipAngle 60°. Excessive lift raises
+    // the centre of mass and risks a balance loss while standing. TODO clinical review.
+    clinicalCaps: { kneeLiftNorm: { max: 0.50 }, hipAngle: { min: 45 } },
     phases: [
       {
         id: 'resting', weight: 1,
@@ -439,7 +468,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { resting: 'March — lift your knee', lifted: 'Good — lower your foot' },
       form: [{ bodyPart: 'trunk', say: 'Stand tall' }],
-      range: { tooLittle: 'Lift your knee higher' },
+      range: { tooLittle: 'Lift your knee higher', tooMuch: "That's high enough — stay balanced" },
       tempo: { tooFast: 'Slow and controlled' },
     },
   },
@@ -461,6 +490,9 @@ export const EXERCISE_CONFIGS = {
       both: 'Step forward into a lunge — use the same leg for every rep',
     },
     highlightKeypoints: ['hip', 'knee', 'ankle'],
+    // A *mini* lunge bottoms at 110°. Past 90° the front knee travels beyond the toes,
+    // which the spec's own form cue warns against. TODO clinical review.
+    clinicalCaps: { kneeAngle: { min: 90 } },
     phases: [
       {
         id: 'standing', weight: 1,
@@ -484,7 +516,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { standing: 'Step forward and bend', lunged: 'Good — push back up' },
       form: [{ bodyPart: 'back', say: 'Keep your back upright' }, { bodyPart: 'knee', say: 'Knee over ankle, not past toes' }],
-      range: { tooLittle: 'Bend a little deeper' },
+      range: { tooLittle: 'Bend a little deeper', tooMuch: "That's deep enough — keep your knee over your ankle" },
       tempo: { tooFast: 'Slow and controlled' },
     },
   },
@@ -504,6 +536,9 @@ export const EXERCISE_CONFIGS = {
     // past the ROM gate. Lift-chop cycles are ~1-2s so this doesn't block real reps.
     timing: { refractoryMs: 500 },
     highlightKeypoints: ['shoulder', 'elbow', 'wrist'],
+    // Top of the chop is handsHeightNorm 0.9 (hands above head). Reaching much past
+    // that means over-extending the shoulder at end range. TODO clinical review.
+    clinicalCaps: { handsHeightNorm: { max: 1.3 } },
     phases: [
       {
         id: 'low', weight: 1,
@@ -527,7 +562,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { low: 'Lift hands up and across', high: 'Good — chop back down' },
       form: [{ bodyPart: 'back', say: 'Keep core engaged' }],
-      range: { tooLittle: 'Reach a bit higher' },
+      range: { tooLittle: 'Reach a bit higher', tooMuch: "That's high enough — don't over-reach" },
       tempo: { tooFast: 'Slow and controlled' },
     },
   },
@@ -551,6 +586,9 @@ export const EXERCISE_CONFIGS = {
     // block-and-reset behavior in DTWPhaseMachine, the down-motion's "rep" is absorbed.
     timing: { refractoryMs: 2500 },
     highlightKeypoints: ['hip', 'knee', 'ankle'],
+    // Step-up knee bends to ~120°. Below ~95° the step is too tall for a rehab
+    // step-up and loads the knee heavily. TODO clinical review.
+    clinicalCaps: { kneeAngle: { min: 95 }, kneeLiftNorm: { max: 0.40 } },
     phases: [
       {
         id: 'ground', weight: 1,
@@ -574,7 +612,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { ground: 'Step up onto the step', up: 'Good — step back down' },
       form: [{ bodyPart: 'back', say: 'Stay upright' }, { bodyPart: 'knee', say: 'Control the descent' }],
-      range: { tooLittle: 'Push all the way up' },
+      range: { tooLittle: 'Push all the way up', tooMuch: "That's enough — control the step" },
       tempo: { tooFast: 'Slow and steady' },
     },
   },
@@ -587,6 +625,9 @@ export const EXERCISE_CONFIGS = {
     framing: { view: 'side', instruction: 'Stand sideways to the camera, facing the wall' },
     startCue: 'Lower your chest toward the wall, then push back',
     highlightKeypoints: ['shoulder', 'elbow', 'wrist'],
+    // Wall push-up bottoms at ~90° elbow flexion. Going deeper puts the shoulder
+    // into an unsupported end-range position against the wall. TODO clinical review.
+    clinicalCaps: { elbowAngle: { min: 75 } },
     phases: [
       {
         id: 'extended', weight: 1,
@@ -610,7 +651,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { extended: 'Bend your elbows toward the wall', flexed: 'Push back out' },
       form: [{ bodyPart: 'back', say: 'Keep body straight — no sagging' }],
-      range: { tooLittle: 'Try bending a bit more' },
+      range: { tooLittle: 'Try bending a bit more', tooMuch: "That's deep enough — don't strain your shoulders" },
       tempo: { tooFast: 'Slow and controlled' },
     },
   },
@@ -631,6 +672,9 @@ export const EXERCISE_CONFIGS = {
     // 400ms dwell requires sustained phase positioning, filtering transient glitches.
     timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
+    // Seated calf raise tops out at footPitchNorm 0.12. Well past that the patient is
+    // pushing through the forefoot hard enough to lift off the chair. TODO clinical review.
+    clinicalCaps: { footPitchNorm: { max: 0.22 } },
     // footPitchNorm = (toe.y - heel.y) / shankLen directly measures heel elevation.
     // For a seated calf raise, the foot pivots around the toe — the ankle joint barely
     // flexes (so ankleAngle features were producing only 5-15° of real change despite
@@ -661,7 +705,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { lowered: 'Push up onto your toes', raised: 'Good — lower your heels slowly' },
       form: [{ bodyPart: 'back', say: 'Sit tall' }],
-      range: { tooLittle: 'Try to push a bit higher' },
+      range: { tooLittle: 'Try to push a bit higher', tooMuch: "That's high enough — lower with control" },
       tempo: { tooFast: 'Slow and controlled' },
     },
   },
@@ -679,6 +723,9 @@ export const EXERCISE_CONFIGS = {
     // of body posture and stance, and produces opposite signs vs dorsiflexion/body-shift.
     minRomPct: 0.65,
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
+    // Standing calf raise tops out at footPitchNorm 0.12. Rising higher onto the toes
+    // than that is a balance risk while standing. TODO clinical review.
+    clinicalCaps: { footPitchNorm: { max: 0.22 } },
     phases: [
       {
         id: 'lowered', weight: 1,
@@ -702,7 +749,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { lowered: 'Rise up onto your toes', raised: 'Good — lower slowly' },
       form: [{ bodyPart: 'back', say: 'Stand tall' }, { bodyPart: 'knee', say: 'Keep knees straight' }],
-      range: { tooLittle: 'Push a bit higher on your toes' },
+      range: { tooLittle: 'Push a bit higher on your toes', tooMuch: "That's high enough — keep your balance" },
       tempo: { tooFast: 'Slow and controlled' },
     },
   },
@@ -728,6 +775,10 @@ export const EXERCISE_CONFIGS = {
     minRomPct: 0.80,
     timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
+    // Dorsiflexion drives footPitchNorm NEGATIVE (toes up), so the ceiling is a `min`.
+    // Target is -0.05; past -0.12 the patient is lifting the whole leg rather than
+    // dorsiflexing the ankle. TODO clinical review.
+    clinicalCaps: { footPitchNorm: { min: -0.12 } },
     phases: [
       {
         id: 'lowered', weight: 1,
@@ -751,7 +802,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { lowered: 'Lift your toes up', raised: 'Nice — lower slowly' },
       form: [{ bodyPart: 'trunk', say: 'Sit tall' }],
-      range: { tooLittle: 'Try to pull your toes up more' },
+      range: { tooLittle: 'Try to pull your toes up more', tooMuch: "That's far enough — keep your heel down" },
       tempo: { tooFast: 'Slow and controlled' },
     },
   },
@@ -774,6 +825,8 @@ export const EXERCISE_CONFIGS = {
     minRomPct: 0.80,
     timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
+    // Negative-going like the seated variant; target -0.04. TODO clinical review.
+    clinicalCaps: { footPitchNorm: { min: -0.11 } },
     phases: [
       {
         id: 'lowered', weight: 1,
@@ -797,7 +850,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { lowered: 'Lift your toes up', raised: 'Nice — lower slowly' },
       form: [{ bodyPart: 'trunk', say: 'Stand tall' }],
-      range: { tooLittle: 'Pull your toes up more' },
+      range: { tooLittle: 'Pull your toes up more', tooMuch: "That's far enough — keep your heel down" },
       tempo: { tooFast: 'Slow and controlled' },
     },
   },
@@ -810,6 +863,9 @@ export const EXERCISE_CONFIGS = {
     framing: { view: 'front', instruction: 'Face the camera, full body visible' },
     startCue: 'Stand tall — straight back, knees straight, hold the position',
     highlightKeypoints: ['shoulder', 'hip', 'knee', 'ankle'],
+    // Holding "tall" is ~175°. Pushing past 182° means locking the knees back into
+    // hyperextension, a common way to cheat a standing hold. TODO clinical review.
+    clinicalCaps: { kneeAngle: { max: 182 } },
     phases: [
       {
         id: 'not_straight', weight: 1,
@@ -834,7 +890,7 @@ export const EXERCISE_CONFIGS = {
     feedback: {
       phase: { not_straight: 'Stand up tall and straight', straight: 'Great — hold this position' },
       form: [{ bodyPart: 'back', say: 'Push your shoulders back' }, { bodyPart: 'knee', say: 'Straighten your knees' }],
-      range: {},
+      range: { tooMuch: "Ease off — don't lock your knees" },
       tempo: {},
     },
   },

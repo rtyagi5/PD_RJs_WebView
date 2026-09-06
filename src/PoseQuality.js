@@ -14,6 +14,11 @@ export const DISTANCE_TOL_FAR   = 0.30;  // ratio < ideal - this → "too far"  
 export const MIN_CONFIDENCE     = 0.3;   // per-keypoint visibility threshold
 export const LIGHTING_THRESHOLD = 0.25;  // avg score below this → poor lighting
 
+// Which failing check the patient is told about first. Single source of truth:
+// both the spoken/among-message selection (SessionStateMachine) and the on-canvas
+// coaching text (CoachingOverlay) use this, so they can never disagree.
+export const CHECK_PRIORITY = ['visibility', 'distance', 'angle', 'lighting'];
+
 // Default keypoints every exercise needs visible
 const DEFAULT_REQUIRED_KPS = [
   'left_shoulder', 'right_shoulder',

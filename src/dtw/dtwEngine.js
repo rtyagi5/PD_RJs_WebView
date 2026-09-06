@@ -160,6 +160,23 @@ export class OnlineSubsequenceDTW {
       }
     }
 
+    // Tie-breaking matters for held positions. A hold phase repeats the SAME feature
+    // values across many template frames, and the adjacent transition phases start/end
+    // on those same values — so a patient holding the pose ties exactly against a band
+    // of frames spanning [end of transition_in .. hold .. start of transition_out].
+    // Taking the first minimum (the loop above) always lands on the transition frame,
+    // so the hold phase is never reported and time-mode never accumulates.
+    // Resolve exact ties to the MIDDLE of the tied band, which sits inside the hold.
+    // Unique minima (the normal case during movement) are unaffected.
+    const tieBand = [];
+    const tieEps = Math.max(1e-9, Math.abs(nnDist) * 1e-6);
+    for (let j = 0; j < this.T; j++) {
+      if (Math.abs(distances[j] - nnDist) <= tieEps) tieBand.push(j);
+    }
+    if (tieBand.length > 1) {
+      nnIdx = tieBand[Math.floor(tieBand.length / 2)];
+    }
+
     this.bestTemplateIdx = nnIdx;
     this.bestCost = nnDist;
 

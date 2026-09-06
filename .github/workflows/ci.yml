@@ -1,0 +1,33 @@
+name: CI
+
+# The deploy workflow only runs on main, so feature branches previously got no
+# signal at all. This gives every push and PR a test run.
+on:
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Run Tests
+        run: yarn test:ci
+
+      - name: Build Application
+        run: CI=false yarn build

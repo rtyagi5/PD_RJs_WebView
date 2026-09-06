@@ -9,6 +9,7 @@ import { createPoseDetector } from '../detectors';
 import { extractFeaturesFromVideo, detectRepBoundaries, buildTemplateFromReps, getTopFeatures } from './videoFeatureExtractor';
 import { computeFeatureRanges, validateReference } from './referenceSchema';
 import { registerReference } from './referenceRegistry';
+import { EXERCISE_CONFIGS } from './specToReference';
 import { getServiceUrl } from '../config';
 import { clearCachedReference } from './referenceStorage';
 
@@ -395,8 +396,18 @@ export default function ReferenceExtractor() {
       return s + (endTime - startTime);
     }, 0) / reps.length;
 
+    // Hard gate: the runtime resolves references by the exact EXERCISE_CONFIGS key.
+    // Exporting under anything else produces a file that loads but is never found.
+    if (!EXERCISE_CONFIGS[exerciseName]) {
+      setStatusMsg(
+        `"${exerciseName || '(none)'}" is not a known exercise id. ` +
+        `Pick one from the Exercise dropdown — the app looks references up by that exact key.`
+      );
+      return;
+    }
+
     const reference = {
-      name: exerciseName || 'Unnamed',
+      name: exerciseName,
       side: exerciseSide,
       mode: exerciseMode,
       detector: detectorType,
@@ -592,10 +603,33 @@ export default function ReferenceExtractor() {
             <div style={S.card}>
               <div style={S.cardTitle}>Settings</div>
 
-              <label style={S.label}>Exercise Name</label>
-              <input style={S.input} value={exerciseName}
-                onChange={e => setExerciseName(e.target.value)}
-                placeholder="e.g. BicepCurls" />
+              {/* MUST be a canonical exercise id. The app looks references up by
+                  the exact EXERCISE_CONFIGS key, so a free-text name (the previous
+                  behaviour) produced references that silently never loaded — e.g.
+                  "Left Side Arm Raise" never matched the lookup key "SideArmRaise". */}
+              <label style={S.label}>Exercise</label>
+              <select style={{ ...S.select, width: '100%' }} value={exerciseName}
+                onChange={e => {
+                  const name = e.target.value;
+                  setExerciseName(name);
+                  // Pre-fill detector/side from the exercise's own config so the
+                  // recording matches how the app will run it.
+                  const cfg = EXERCISE_CONFIGS[name];
+                  if (cfg) {
+                    if (cfg.detector) setDetectorType(cfg.detector);
+                    if (cfg.mode) setExerciseMode(cfg.mode);
+                  }
+                }}>
+                <option value="">— Select exercise —</option>
+                {Object.keys(EXERCISE_CONFIGS).map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+              {exerciseName && EXERCISE_CONFIGS[exerciseName]?.framing?.instruction && (
+                <div style={{ fontSize: 12, opacity: 0.75, marginTop: 4 }}>
+                  Framing: {EXERCISE_CONFIGS[exerciseName].framing.instruction}
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: 8 }}>
                 <div style={{ flex: 1 }}>

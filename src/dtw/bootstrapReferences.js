@@ -28,7 +28,7 @@ export function bootstrapAllReferences() {
   let syntheticCount = 0;
 
   for (const [name, ref] of Object.entries(refs)) {
-    const result = registerReference(name, ref);
+    const result = registerReference(name, { ...ref, source: 'synthetic' });
     if (result.valid) {
       syntheticCount++;
     } else {
@@ -45,7 +45,18 @@ export function bootstrapAllReferences() {
       console.warn('[Bootstrap] Skipping .ref.json without "name" field');
       continue;
     }
-    const result = registerReference(ref.name, ref);
+    // A .ref.json only takes effect if its `name` is the exact key the app looks up
+    // (an EXERCISE_CONFIGS key). Anything else registers under a key nothing requests,
+    // so the synthetic template keeps running while the file appears to have loaded.
+    if (!refs[ref.name]) {
+      console.warn(
+        `[Bootstrap] "${ref.name}" is not a known exercise id — this reference will ` +
+        `NEVER be used. Re-export it from /reference-extractor with a canonical name ` +
+        `(one of: ${Object.keys(refs).join(', ')}).`
+      );
+      continue;
+    }
+    const result = registerReference(ref.name, { ...ref, source: 'video' });
     if (result.valid) {
       fileCount++;
       console.log(`[Bootstrap] Loaded video reference: "${ref.name}" (overrides synthetic)`);
@@ -95,7 +106,7 @@ export async function fetchAndCacheReference(exerciseName, activityData) {
     const res = await fetch(`${REFERENCE_SERVICE}/${encodeURIComponent(exerciseName)}`);
     if (!res.ok) return; // 404 → no video ref published yet; synthetic ref stays active
     const { ref, version } = await res.json();
-    const result = registerReference(exerciseName, ref);
+    const result = registerReference(exerciseName, { ...ref, source: 'api' });
     if (result.valid) {
       cacheReference(exerciseName, ref, version);
       console.log(`[Bootstrap] Fetched + cached video reference for "${exerciseName}" (v${version})`);

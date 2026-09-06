@@ -6,7 +6,8 @@
 // during a calibration window (~first 2 reps or N seconds).
 // Subsequent sessions: loads stored baseline, uses it for:
 //   1. Feature normalization (DTW compares against patient's range, not gold standard)
-//   2. "Good rep" tolerance (within 5% of personal baseline = good)
+//   2. "Good rep" tolerance (see TOLERANCE below — a rep must reach that
+//      fraction of the patient's own baseline ROM to count as completed)
 //   3. Attempts vs completed reps (partial movement = attempt, full = completed)
 //   4. Progress tracking (ROM improvement over sessions)
 // ---------------------------------------------
@@ -23,7 +24,8 @@ export class PatientBaseline {
    * @param {Object} [opts]
    * @param {Object} [opts.referenceRanges] - Gold standard feature ranges (safety envelope)
    * @param {number} [opts.calibrationReps] - Reps before locking baseline
-   * @param {number} [opts.tolerance] - Fraction tolerance for good rep (default 0.05)
+   * @param {number} [opts.tolerance] - ROM shortfall allowed for a rep to still count
+   *        as completed (default TOLERANCE = 0.30, i.e. reach >= 70% of baseline ROM)
    */
   constructor(exerciseName, patientId, opts = {}) {
     this.exerciseName = exerciseName;
@@ -95,6 +97,11 @@ export class PatientBaseline {
       }
       // During calibration, all reps count as completed
       this.reps.completed++;
+      // Reset the per-rep buffer here too. Without this the buffer keeps growing
+      // across every calibration rep, and the FIRST rep classified after the
+      // baseline locks inherits the full calibration min/max — so it always scored
+      // 100% ROM and was graded "completed" no matter how short it actually was.
+      this._resetRepBuffer();
       return { completed: true, quality, romPct: 1.0, details: { calibrating: true } };
     }
 

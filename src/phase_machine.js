@@ -94,23 +94,6 @@ export class PhaseMachine {
   
           // Rep logic only for reps-mode
           if (this.mode !== 'time' && prev === rep.from && this.phase === rep.to && now >= this.refractoryUntil) {
-            // if (this.repMode === 'pair' && this.selectActiveSide) {
-            //   // New: count 1 ONLY when we complete both sides (A then B)
-            //   const sideNow = this.selectActiveSide(features); // 'left' | 'right' | null
-            //   if (sideNow) {
-            //     if (this.pairAwait == null) {
-            //       // first half of the pair
-            //       this.pairAwait = sideNow;
-            //     } else if (sideNow !== this.pairAwait) {
-            //       // completed a pair
-            //       this.repCount += 1;
-            //       repDelta = 1;
-            //       this.pairAwait = null; // ready for next pair
-            //     }
-            //     this.lastSide = sideNow;
-            //   }
-            //   this.refractoryUntil = now + (refractoryMs || 250);
-            // } else {
                 if (this.repMode === 'pair' && this.selectActiveSide) {
                     const sideNow = this.selectActiveSide(features);
                     if (!sideNow) {

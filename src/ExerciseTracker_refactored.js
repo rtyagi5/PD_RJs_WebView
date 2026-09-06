@@ -22,6 +22,13 @@ import { IDEAL_BODY_RATIO } from './PoseQuality';
 import { DTWPhaseMachine, computeUniversalFeatures } from './dtw';
 import { getReference } from './dtw/referenceRegistry';
 import { bootstrapAllReferences, fetchAndCacheReference } from './dtw/bootstrapReferences';
+import {
+  METRIC_MAP, resolveMetricKeys, pickExerciseMetrics, pretty
+} from './metrics';
+import { notifyHostOfError } from './ErrorBoundary';
+
+// Re-exported for backwards compatibility with existing importers.
+export { METRIC_MAP, resolveMetricKeys };
 
 // Auto-register all 16 synthetic DTW references on first load
 bootstrapAllReferences();
@@ -38,49 +45,6 @@ function getQueryNumber(...names) {
   }
   return undefined;
 }
-
-// Format values for HUD/logs (string)
-function pretty(key, val) {
-  if (!Number.isFinite(val)) return '—';
-  const k = String(key || '').toLowerCase();
-  // For normalized/ratio-ish metrics or small magnitudes, show 2 decimals
-  if (k.includes('norm') || k.includes('ratio') || Math.abs(val) < 2) {
-    return val.toFixed(2);
-  }
-  return String(Math.round(val));
-}
-
-// Format values for sync payload (number)
-function prettyNum(key, val) {
-  if (!Number.isFinite(val)) return undefined;
-  const k = String(key || '').toLowerCase();
-  if (k.includes('norm') || k.includes('ratio') || Math.abs(val) < 2) {
-    return Number(val.toFixed(2));
-  }
-  return Math.round(val);
-}
-
-
-
-// Which metrics to sync / show for each exercise
-export const METRIC_MAP = {
-  SideArmRaise: ['armAngle', 'shoulderAngle'],
-  MiniSquats: ['kneeAngleMin', 'kneeAngleMax'],
-  SitToStand: ['kneeAngleMax', 'hipToKneeNormMax'],
-  LongArcQuad: ['kneeAngle', 'hipToAnkleNorm'],
-  StandingStraightUp: ['trunkAngleMin', 'kneeAngleMax'],
-  SeatedMarch: ['kneeLiftNormMax', 'hipFlexAngleMin'],
-  StandingMarch: ['kneeLiftNormMax', 'hipFlexAngleMin'],
-  MiniLunges: ['kneeAngleMin', 'kneeAngleMax'],
-  BicepCurls: ['elbowAngleMin'],
-  LiftsAndChops: ['handsHeightNorm'],
-  StepUps: ['ankleLiftNormLead', 'kneeAngleLead'],
-  WallPushUp: ['elbowOffsetMax', 'trunkAngleMin'],
-  CalfRaisesSeated: ['ankleAngleActive', 'degLowerMin', 'degLowerMax', 'degRaiseDynamic', 'startAngle', 'activeSide'],
-  CalfRaisesStanding: ['activeToeAngle', 'degRaiseDynamic', 'activeSide'],
-  SeatedDorsiflexion: ['footPitchDelta', 'pitchUp', 'pitchDown', 'trunkAngleMin'],
-  StandingDorsiflexion: ['footPitchDelta', 'pitchUp', 'pitchDown', 'trunkAngleMin'],
-};
 
 function alphaFor(key) {
   const k = String(key || '').toLowerCase();
@@ -250,7 +214,7 @@ export default function ExerciseTrackerRefactored({
   ]);
 
   const maybeSendUpdates = useCallback(
-    async (exerciseData) => {
+    async (exerciseData, { force = false } = {}) => {
       const finalData = {
         fps: fpsRef.current,
         completionStatusRef: false,
@@ -258,7 +222,10 @@ export default function ExerciseTrackerRefactored({
         feedback: feedbackRef.current,
         ...exerciseData,
       };
-      if (feedbackRef.current !== lastFeedbackSentRef.current) {
+      // Normally throttled to frames where the feedback text changed. `force` is used
+      // when a rep is counted so the per-rep ROM summary always reaches the host,
+      // regardless of whether the coaching string happened to change on that frame.
+      if (force || feedbackRef.current !== lastFeedbackSentRef.current) {
         lastFeedbackSentRef.current = feedbackRef.current;
         await sendUpdates(finalData, exerciseType, activityData, setDisplayMessage);
       }
@@ -302,7 +269,15 @@ export default function ExerciseTrackerRefactored({
         }
 
       } catch (err) {
+        // Previously console-only: the patient just saw "Initializing..." forever.
         console.error('[Tracker] detector init failed:', err);
+        if (!canceled) {
+          setDisplayMessage?.(
+            'Could not start pose detection on this device. Please close and reopen the exercise, ' +
+            'or try a different browser.'
+          );
+          notifyHostOfError('Pose detector failed to load.', err?.message);
+        }
       }
     })();
 
@@ -312,7 +287,9 @@ export default function ExerciseTrackerRefactored({
       try { detectorRef.current?.dispose?.(); } catch { }
       detectorRef.current = null;
     };
-  }, [exerciseType]); // re-evaluate when exercise (and thus spec) changes
+    // setDisplayMessage is a setState function (stable identity), so including it
+    // does not cause the detector to be rebuilt.
+  }, [exerciseType, setDisplayMessage]); // re-evaluate when exercise (and thus spec) changes
 
 
 
@@ -353,8 +330,18 @@ export default function ExerciseTrackerRefactored({
     const patientId = activityData?.patient?.id || activityData?.userId || activityData?.activity || null;
     let eng;
     if (ref) {
-      eng = new DTWPhaseMachine(ref, { targetReps, targetSeconds, patientId, side });
-      console.log('[Engine] DTW mode for', exerciseType, patientId ? `(patient: ${patientId})` : '(no patient)');
+      // Feed the engine the exact universal keys this exercise reports, so each
+      // counted rep can carry a per-rep min/max ROM summary to the host app.
+      const summaryFeatures = (METRIC_MAP[exerciseType] || [])
+        .flatMap(m => resolveMetricKeys(m, side));
+      eng = new DTWPhaseMachine(ref, { targetReps, targetSeconds, patientId, side, summaryFeatures });
+      // Which template is actually driving rep counting matters a lot when validating
+      // a newly recorded reference — 'synthetic' means the recording is NOT in use.
+      const src = ref.source || 'synthetic';
+      console.log(
+        `[Engine] DTW mode for ${exerciseType} — reference source: ${src.toUpperCase()}`,
+        patientId ? `(patient: ${patientId})` : '(no patient)'
+      );
     } else {
       console.warn(
         `[Engine] No DTW reference for "${exerciseType}" — falling back to legacy PhaseMachine. ` +
@@ -373,7 +360,9 @@ export default function ExerciseTrackerRefactored({
       ? (ref ? eng.spec : spec).phases.map(p => p.id ?? p).join(', ')
       : '(no phases)';
     console.log('[Engine] built:', spec?.name ?? exerciseType, ref ? '(DTW)' : '(spec)', 'phases:', phaseList);
-  }, [exerciseType, targetReps]);
+    // `side` matters: it selects the primary feature, the side-aware DTW filtering,
+    // and which universal keys are reported — the engine must be rebuilt when it changes.
+  }, [exerciseType, targetReps, side]);
 
   useEffect(() => {
     setIsDetecting?.(true);
@@ -611,7 +600,12 @@ export default function ExerciseTrackerRefactored({
           hudValue = `${secs}s / ${targetSecs}s`;
           setDisplayMessage?.(`${spec?.name || exerciseType}: phase=${phase || '—'} hold ${hudValue}`);
         } else {
-          const metricKey = spec?.primaryMetric || METRIC_MAP[exerciseType]?.[0] || null;
+          // Resolve the HUD metric the same way the sync payload does, so the
+          // on-screen value and the synced field always refer to the same key.
+          const baseMetric = spec?.primaryMetric || METRIC_MAP[exerciseType]?.[0] || null;
+          const metricKey = baseMetric
+            ? (resolveMetricKeys(baseMetric, side).find(k => Number.isFinite(feat[k])) || baseMetric)
+            : null;
           const rawVal = metricKey && Number.isFinite(feat[metricKey]) ? feat[metricKey] : NaN;
           hudLabel = metricKey || 'metric';
           hudValue = pretty(metricKey, rawVal);
@@ -650,9 +644,15 @@ export default function ExerciseTrackerRefactored({
             totalReps: stepResult.totalReps,
             isCalibrating: stepResult.isCalibrating,
           } : {}),
+          ...(stepResult.repSummary ? { repSummary: stepResult.repSummary } : {}),
         };
         lastExerciseDataRef.current = exerciseData;
-        maybeSendUpdates({ ...exerciseData, sessionState: 'active' }).catch(() => {});
+        // Force the send on the frame a rep counts so the per-rep ROM summary is
+        // never dropped by the feedback-change throttle.
+        maybeSendUpdates(
+          { ...exerciseData, sessionState: 'active' },
+          { force: repDelta > 0 }
+        ).catch(() => {});
 
         // finish?
         if (done) {
@@ -684,7 +684,18 @@ export default function ExerciseTrackerRefactored({
       <Webcam
         ref={webcamRef}
         onUserMedia={() => console.log('[Tracker] webcam stream OK')}
-        onUserMediaError={(e) => console.error('[Tracker] webcam error', e)}
+        onUserMediaError={(e) => {
+          console.error('[Tracker] webcam error', e);
+          // Distinguish "you denied us" from "there is no camera" — the two need
+          // completely different actions from the patient.
+          const denied = e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError';
+          setDisplayMessage?.(
+            denied
+              ? 'Camera access is blocked. Please allow camera permission for this app, then reopen the exercise.'
+              : 'No camera is available. Please check that your camera is connected and not in use by another app.'
+          );
+          notifyHostOfError(denied ? 'Camera permission denied.' : 'Camera unavailable.', e?.name);
+        }}
         playsInline
         controls={false}
         style={{ position: 'absolute', top: 0, left: 0, zIndex: 9, width: '100%', height: '100vh', objectFit: 'fill', transform: 'scaleX(-1)' }}
@@ -716,43 +727,6 @@ export default function ExerciseTrackerRefactored({
       />
     </div>
   );
-}
-
-// Map which metrics to sync per exercise
-// function pickExerciseMetrics(exerciseType, feat) {
-//   const keys = METRIC_MAP[exerciseType] || [];
-//   const out = {};
-//   keys.forEach(k => {
-//     const v = feat[k];
-//     const pv = prettyNum(k, v);
-//     if (pv !== undefined) out[k] = pv;
-//   });
-//   return out;
-// }
-function pickExerciseMetrics(exerciseType, feat, side) {
-  const keys = METRIC_MAP[exerciseType] || [];
-  const out = {};
-
-  keys.forEach(metric => {
-    let value;
-
-    // First try exact metric name
-    if (feat[metric] !== undefined) {
-      value = feat[metric];
-    }
-    // Then try side-specific metric
-    else if (side) {
-      const suffix = side.toLowerCase() === "left" ? "L" : "R";
-      value = feat[`${metric}${suffix}`];
-    }
-
-    const pv = prettyNum(metric, value);
-
-    if (pv !== undefined && pv !== null) {
-      out[metric] = pv;
-    }
-  });
-  return out;
 }
 
 // Compute features with the **active spec** (passed in)

@@ -63,21 +63,5 @@ export function angle(p1, p2, p3) {
     return { shoulderAngle, armAngle, kneeAngle };
     }
 
-    export function makeEMA(alpha = 0.35) {
-        let v = null; const a = alpha;
-        return {
-          next(x) {
-            if (!Number.isFinite(x)) return v;
-            v = v == null ? x : a * x + (1 - a) * v;
-            return v;
-          },
-          nextWithDt(x, dt, targetDt = 33) {
-            if (!Number.isFinite(x)) return v;
-            const aa = 1 - Math.pow(1 - a, Math.max(dt, 1) / targetDt);
-            v = v == null ? x : aa * x + (1 - aa) * v;
-            return v;
-          },
-          reset() { v = null; }
-        };
-      }
-      
+    // NOTE: a `makeEMA()` factory used to live here duplicating the EMA class above
+    // with identical semantics. It had no callers and was removed — use `new EMA(alpha)`.

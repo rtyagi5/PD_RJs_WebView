@@ -32,6 +32,12 @@ jobs:
       - name: Install Dependencies
         run: yarn install
 
+      # Gate the deploy on the test suite. Previously the workflow only built, so
+      # engine regressions (rep counting, safety feedback, the WebView payload)
+      # could ship unnoticed.
+      - name: Run Tests
+        run: yarn test:ci
+
       - name: Build Application
         run: CI=false yarn build
 

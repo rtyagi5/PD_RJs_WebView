@@ -1,0 +1,818 @@
+<title>Pipeline Signal Chain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+
+<style>
+  /* ---- Tokens: complete light palette on bare :root ---- */
+  :root {
+    --ground:      #F7FAFB;
+    --panel:       #FFFFFF;
+    --panel-edge:  #D6E2E6;
+    --ink:         #101A1E;
+    --ink-soft:    #46595F;
+    --ink-faint:   #6E828A;
+
+    /* Semantic key, taken from the app's own skeleton colours (utilities.js) */
+    --flow:        #1791A5;   /* aqua  — ordinary data movement */
+    --live:        #4B9E2F;   /* green — the live path */
+    --guard:       #B96E00;   /* amber — filters, gates, rejections */
+    --dead:        #84969C;   /* grey  — unreachable code */
+
+    --flow-wash:   #E4F4F7;
+    --live-wash:   #E9F5E4;
+    --guard-wash:  #FBF0DE;
+    --dead-wash:   #EDF1F2;
+
+    --shadow: 0 1px 2px rgba(16,26,30,.06), 0 8px 24px rgba(16,26,30,.05);
+  }
+
+  /* System dark (no stamp) — guarded so an explicit light choice still wins */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:     #0B1014;
+      --panel:      #121A1F;
+      --panel-edge: #24343B;
+      --ink:        #E8F1F2;
+      --ink-soft:   #A8BCC3;
+      --ink-faint:  #7A8F97;
+
+      --flow:       #38C6D9;
+      --live:       #66FF00;
+      --guard:      #FFB020;
+      --dead:       #5A6B72;
+
+      --flow-wash:  #102A31;
+      --live-wash:  #17250D;
+      --guard-wash: #2C2110;
+      --dead-wash:  #182126;
+
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+
+  /* Explicit dark choice wins in the other direction */
+  :root[data-theme="dark"] {
+    --ground:     #0B1014;
+    --panel:      #121A1F;
+    --panel-edge: #24343B;
+    --ink:        #E8F1F2;
+    --ink-soft:   #A8BCC3;
+    --ink-faint:  #7A8F97;
+
+    --flow:       #38C6D9;
+    --live:       #66FF00;
+    --guard:      #FFB020;
+    --dead:       #5A6B72;
+
+    --flow-wash:  #102A31;
+    --live-wash:  #17250D;
+    --guard-wash: #2C2110;
+    --dead-wash:  #182126;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+  }
+
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace; }
+
+  /* ---- Masthead ---- */
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--flow);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(34px, 5vw, 52px);
+    line-height: 1.08;
+    letter-spacing: -.02em;
+    font-weight: 600;
+    margin: 0 0 18px;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 19px;
+    color: var(--ink-soft);
+    max-width: 64ch;
+    margin: 0;
+  }
+
+  /* ---- Key ---- */
+  .key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 26px;
+    margin: 34px 0 0;
+    padding: 16px 20px;
+    border: 1px solid var(--panel-edge);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  .key-item { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: var(--ink-soft); }
+  .swatch { width: 22px; height: 3px; border-radius: 2px; flex: none; }
+  .key-note {
+    flex-basis: 100%;
+    font-size: 13px;
+    color: var(--ink-faint);
+    margin: 2px 0 0;
+  }
+
+  /* ---- Sections ---- */
+  section { margin-top: 68px; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; }
+  .sec-num {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--flow);
+    letter-spacing: .06em;
+    flex: none;
+  }
+  h2 {
+    font-size: clamp(22px, 2.6vw, 28px);
+    font-weight: 600;
+    letter-spacing: -.012em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .lede {
+    color: var(--ink-soft);
+    max-width: 68ch;
+    margin: 0 0 26px;
+    font-size: 16.5px;
+  }
+
+  figure {
+    margin: 0;
+    padding: 24px 20px 18px;
+    border: 1px solid var(--panel-edge);
+    border-radius: 12px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+  }
+  .scroll { overflow-x: auto; }
+  svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  figcaption {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--panel-edge);
+    font-size: 14px;
+    color: var(--ink-faint);
+    max-width: 78ch;
+  }
+
+  /* ---- Notes ---- */
+  .note {
+    margin-top: 20px;
+    padding: 16px 18px;
+    border-left: 3px solid var(--guard);
+    background: var(--guard-wash);
+    border-radius: 0 8px 8px 0;
+    font-size: 15px;
+    color: var(--ink-soft);
+  }
+  .note strong { color: var(--ink); font-weight: 600; }
+  .note code { font-size: .92em; }
+
+  /* ---- Stage table ---- */
+  table { width: 100%; border-collapse: collapse; margin-top: 26px; font-size: 14.5px; }
+  caption {
+    text-align: left;
+    font-size: 13px;
+    color: var(--ink-faint);
+    padding-bottom: 10px;
+  }
+  th {
+    text-align: left;
+    font-size: 11.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    padding: 0 12px 8px 0;
+    border-bottom: 1px solid var(--panel-edge);
+  }
+  td {
+    padding: 9px 12px 9px 0;
+    border-bottom: 1px solid var(--panel-edge);
+    vertical-align: top;
+    color: var(--ink-soft);
+  }
+  td:first-child { color: var(--ink); white-space: nowrap; }
+  td code { color: var(--ink); font-size: 13px; }
+
+  footer {
+    margin-top: 76px;
+    padding-top: 22px;
+    border-top: 1px solid var(--panel-edge);
+    font-size: 13.5px;
+    color: var(--ink-faint);
+  }
+
+  a { color: var(--flow); }
+  :focus-visible { outline: 2px solid var(--flow); outline-offset: 3px; border-radius: 3px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">Rehab Ranger — WebView pose engine</p>
+  <h1>How one camera frame becomes a counted rep</h1>
+  <p class="standfirst">
+    Every stage below names the file and function that owns it. Read top to bottom and you
+    have followed a single frame from the lens to the message that reaches the host app.
+  </p>
+
+  <div class="key" role="note" aria-label="Colour key">
+    <span class="key-item"><span class="swatch" style="background:var(--flow)"></span> Data moving</span>
+    <span class="key-item"><span class="swatch" style="background:var(--live)"></span> The live path</span>
+    <span class="key-item"><span class="swatch" style="background:var(--guard)"></span> A gate that can reject</span>
+    <span class="key-item"><span class="swatch" style="background:var(--dead)"></span> Unreachable code</span>
+    <p class="key-note">
+      These are the app's own colours: <code>utilities.js</code> paints untracked joints aqua,
+      good-quality tracked joints green, and poor-quality ones amber. The diagrams are keyed
+      the same way the product keys a body.
+    </p>
+  </div>
+
+  <!-- ============================================ 1 -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <h2>What crosses the boundary</h2>
+    </div>
+    <p class="lede">
+      The engine is a web page inside someone else's app. Only three things cross in or out:
+      a token on the way in, a stream of small messages on the way out, and one upload at the end.
+      No pixel and no joint coordinate ever leaves the device.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 940 340" role="img" aria-label="The WebView receives a JWT from the host app, runs all inference locally, and sends only small status messages out plus one summary upload at completion.">
+          <defs>
+            <marker id="a-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--flow)"/>
+            </marker>
+            <marker id="a-live" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--live)"/>
+            </marker>
+          </defs>
+
+          <!-- Host app -->
+          <rect x="16" y="112" width="176" height="104" rx="9" fill="var(--flow-wash)" stroke="var(--flow)" stroke-width="1.5"/>
+          <text x="104" y="150" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)">Host app</text>
+          <text x="104" y="170" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">mobile or web</text>
+          <text x="104" y="190" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">PT platform</text>
+
+          <!-- Device boundary -->
+          <rect x="250" y="34" width="430" height="272" rx="12" fill="none" stroke="var(--live)" stroke-width="1.5" stroke-dasharray="7 5"/>
+          <text x="465" y="26" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--live)" letter-spacing="1.4">ON THE DEVICE — NOTHING LEAVES</text>
+
+          <rect x="278" y="62" width="374" height="60" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="465" y="86" text-anchor="middle" font-size="13.5" font-weight="600" fill="var(--ink)">Camera → pose model → features</text>
+          <text x="465" y="106" text-anchor="middle" font-size="11.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">detectors.js · universalFeatures.js</text>
+
+          <rect x="278" y="140" width="374" height="60" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="465" y="164" text-anchor="middle" font-size="13.5" font-weight="600" fill="var(--ink)">Rep counting &amp; feedback</text>
+          <text x="465" y="184" text-anchor="middle" font-size="11.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">DTWPhaseMachine.step()</text>
+
+          <rect x="278" y="218" width="374" height="60" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="465" y="242" text-anchor="middle" font-size="13.5" font-weight="600" fill="var(--ink)">Patient baseline</text>
+          <text x="465" y="262" text-anchor="middle" font-size="11.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">localStorage · never synced</text>
+
+          <!-- Backend -->
+          <rect x="748" y="112" width="176" height="104" rx="9" fill="var(--flow-wash)" stroke="var(--flow)" stroke-width="1.5"/>
+          <text x="836" y="150" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)">Backend</text>
+          <text x="836" y="170" text-anchor="middle" font-size="11.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-soft)">{tenant}</text>
+          <text x="836" y="188" text-anchor="middle" font-size="11.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-soft)">.rehabranger.ai</text>
+
+          <!-- In: JWT -->
+          <line x1="192" y1="150" x2="272" y2="150" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#a-flow)"/>
+          <text x="232" y="142" text-anchor="middle" font-size="11" fill="var(--flow)">JWT in URL</text>
+          <text x="232" y="168" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">jwtDecode()</text>
+
+          <!-- Out: postMessage -->
+          <line x1="658" y1="178" x2="742" y2="178" stroke="var(--live)" stroke-width="1.8" marker-end="url(#a-live)"/>
+          <text x="700" y="170" text-anchor="middle" font-size="11" fill="var(--live)">postMessage</text>
+          <text x="700" y="196" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">sendUpdates()</text>
+
+          <!-- Out: completion POST -->
+          <path d="M652 262 L706 262 L706 216" fill="none" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#a-flow)"/>
+          <text x="716" y="288" text-anchor="middle" font-size="11" fill="var(--flow)">one POST at the end</text>
+
+          <!-- Back to host -->
+          <path d="M742 132 L716 132 L716 46 L104 46 L104 108" fill="none" stroke="var(--flow)" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#a-flow)"/>
+          <text x="410" y="40" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">assigned exercise · reps · side</text>
+        </svg>
+      </div>
+      <figcaption>
+        The dashed boundary is the claim worth checking: inference happens inside it, and no arrow
+        carrying image or joint data crosses out. What leaves is a small JSON object per meaningful
+        change, and one summary upload when the set finishes.
+      </figcaption>
+    </figure>
+
+    <table>
+      <caption>What the host receives, and who builds it</caption>
+      <tr><th>Message</th><th>Built by</th><th>When</th></tr>
+      <tr>
+        <td>Rep count &amp; cue</td>
+        <td><code>utilities.js → sendUpdates()</code></td>
+        <td>Only when the feedback text changes</td>
+      </tr>
+      <tr>
+        <td>Joint angles</td>
+        <td><code>metrics.js → pickExerciseMetrics()</code></td>
+        <td>Same frames, keyed by <code>METRIC_MAP</code></td>
+      </tr>
+      <tr>
+        <td><code>repSummary</code></td>
+        <td><code>DTWPhaseMachine → _buildRepSummary()</code></td>
+        <td>Forced send on every counted rep</td>
+      </tr>
+      <tr>
+        <td>Session upload</td>
+        <td><code>axios.post</code> to <code>exercise-service</code></td>
+        <td>Once, at completion</td>
+      </tr>
+    </table>
+  </section>
+
+  <!-- ============================================ 2 -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <h2>Before the first frame: where the template comes from</h2>
+    </div>
+    <p class="lede">
+      The engine matches the patient against a 60-frame reference. That reference has to exist
+      before the camera starts, so it is built at import time from a declarative config — not
+      recorded from anyone.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 940 360" role="img" aria-label="At import time a synthetic 60-frame template is generated from EXERCISE_CONFIGS and registered. Two override paths exist but only apply when the reference name exactly matches the exercise key.">
+          <defs>
+            <marker id="b-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--flow)"/>
+            </marker>
+            <marker id="b-guard" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--guard)"/>
+            </marker>
+          </defs>
+
+          <!-- Chain -->
+          <g font-size="12">
+            <rect x="16" y="40" width="168" height="70" rx="8" fill="var(--flow-wash)" stroke="var(--flow)" stroke-width="1.4"/>
+            <text x="100" y="66" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">EXERCISE_CONFIGS</text>
+            <text x="100" y="84" text-anchor="middle" font-size="11" fill="var(--ink-soft)">16 exercises, phases</text>
+            <text x="100" y="100" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">specToReference.js</text>
+
+            <rect x="228" y="40" width="168" height="70" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+            <text x="312" y="66" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Interpolate</text>
+            <text x="312" y="84" text-anchor="middle" font-size="11" fill="var(--ink-soft)">60 frames, sine ease</text>
+            <text x="312" y="100" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">generateReference()</text>
+
+            <rect x="440" y="40" width="168" height="70" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+            <text x="524" y="66" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Expand sides</text>
+            <text x="524" y="84" text-anchor="middle" font-size="11" fill="var(--ink-soft)">kneeAngle → L / R / Min</text>
+            <text x="524" y="100" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">mirrorFeatures()</text>
+
+            <rect x="652" y="40" width="168" height="70" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+            <text x="736" y="66" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">Measure ranges</text>
+            <text x="736" y="84" text-anchor="middle" font-size="11" fill="var(--ink-soft)">min / max per feature</text>
+            <text x="736" y="100" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">computeFeatureRanges()</text>
+          </g>
+
+          <line x1="184" y1="75" x2="222" y2="75" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#b-flow)"/>
+          <line x1="396" y1="75" x2="434" y2="75" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#b-flow)"/>
+          <line x1="608" y1="75" x2="646" y2="75" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#b-flow)"/>
+
+          <!-- Registry -->
+          <path d="M736 110 L736 152" fill="none" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#b-flow)"/>
+          <rect x="352" y="156" width="384" height="66" rx="8" fill="var(--live-wash)" stroke="var(--live)" stroke-width="1.6"/>
+          <text x="544" y="182" text-anchor="middle" font-size="13.5" font-weight="600" fill="var(--ink)">Reference registry — keyed by exercise name</text>
+          <text x="544" y="202" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">registerReference()  ·  bootstrapAllReferences()</text>
+
+          <!-- Overrides -->
+          <rect x="16" y="252" width="230" height="72" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2" stroke-dasharray="5 4"/>
+          <text x="131" y="278" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--ink)">Recorded .ref.json</text>
+          <text x="131" y="296" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">loadRefJsonFiles()</text>
+          <text x="131" y="313" text-anchor="middle" font-size="10.5" fill="var(--guard)">currently: 0 in use</text>
+
+          <rect x="286" y="252" width="230" height="72" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2" stroke-dasharray="5 4"/>
+          <text x="401" y="278" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--ink)">Published by backend</text>
+          <text x="401" y="296" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">fetchAndCacheReference()</text>
+          <text x="401" y="313" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">7-day cache</text>
+
+          <path d="M131 252 L131 220 L348 194" fill="none" stroke="var(--guard)" stroke-width="1.5" marker-end="url(#b-guard)"/>
+          <path d="M401 252 L401 226 L348 202" fill="none" stroke="var(--guard)" stroke-width="1.5" marker-end="url(#b-guard)"/>
+          <text x="212" y="240" font-size="10.5" fill="var(--guard)">overrides — only if the name matches exactly</text>
+
+          <!-- Consumer -->
+          <path d="M736 222 L736 262 L820 262" fill="none" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#b-flow)"/>
+          <text x="880" y="258" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink)">getReference()</text>
+          <text x="880" y="276" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">picks the engine</text>
+        </svg>
+      </div>
+      <figcaption>
+        The two override paths look active but are gated on an exact name match against the
+        config key. A file named <code>"Left Side Arm Raise"</code> registers under that string while
+        lookups ask for <code>"SideArmRaise"</code> — so it loads, logs success, and is never used.
+      </figcaption>
+    </figure>
+
+    <div class="note">
+      <strong>Worth saying out loud when you present this.</strong> All 16 exercises currently run on
+      the synthetic template. Their phase boundaries were authored by hand, not measured from
+      anyone performing the movement.
+    </div>
+  </section>
+
+  <!-- ============================================ 3 -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <h2>The frame loop</h2>
+    </div>
+    <p class="lede">
+      This runs 30–60 times a second. The one structural surprise: drawing and inference are
+      deliberately decoupled. The loop never waits for the pose model — it draws with the most
+      recent result that finished, so a slow phone loses accuracy, not smoothness.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 940 620" role="img" aria-label="The render loop runs continuously while pose inference runs fire-and-forget alongside it; features are smoothed, gated by the session state machine, and only in the active state does the rep engine run.">
+          <defs>
+            <marker id="c-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--flow)"/>
+            </marker>
+            <marker id="c-live" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--live)"/>
+            </marker>
+            <marker id="c-guard" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--guard)"/>
+            </marker>
+          </defs>
+
+          <!-- stage helper: number + box -->
+          <!-- 1 capture -->
+          <circle cx="40" cy="46" r="13" fill="var(--flow)"/>
+          <text x="40" y="51" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ground)">1</text>
+          <rect x="66" y="24" width="300" height="46" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="82" y="44" font-size="13" font-weight="600" fill="var(--ink)">Grab the current video frame</text>
+          <text x="82" y="61" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">&lt;Webcam&gt; → webcamRef.current.video</text>
+
+          <!-- inference sidecar -->
+          <rect x="560" y="24" width="340" height="92" rx="8" fill="var(--guard-wash)" stroke="var(--guard)" stroke-width="1.4"/>
+          <text x="578" y="46" font-size="13" font-weight="600" fill="var(--ink)">Pose model — runs alongside, not inline</text>
+          <text x="578" y="65" font-size="11" fill="var(--ink-soft)">starts only if no inference is in flight</text>
+          <text x="578" y="83" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">detectors.js → estimatePoses()</text>
+          <text x="578" y="101" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">result parked in latestPosesRef</text>
+
+          <path d="M366 47 L554 47" fill="none" stroke="var(--guard)" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#c-guard)"/>
+          <text x="460" y="39" text-anchor="middle" font-size="10.5" fill="var(--guard)">fire and forget</text>
+          <path d="M730 116 L730 140 L216 140 L216 158" fill="none" stroke="var(--guard)" stroke-width="1.5" marker-end="url(#c-guard)"/>
+          <text x="470" y="134" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">latest finished pose — may be a frame or two old</text>
+
+          <!-- 2 features -->
+          <circle cx="40" cy="184" r="13" fill="var(--flow)"/>
+          <text x="40" y="189" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ground)">2</text>
+          <rect x="66" y="160" width="300" height="52" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="82" y="181" font-size="13" font-weight="600" fill="var(--ink)">Turn joints into 30 measurements</text>
+          <text x="82" y="198" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">computeUniversalFeatures()</text>
+
+          <rect x="404" y="160" width="496" height="52" rx="8" fill="var(--guard-wash)" stroke="var(--guard)" stroke-width="1.3"/>
+          <text x="420" y="181" font-size="12" font-weight="600" fill="var(--ink)">Divided by torso / shank / hip-ankle length → size and distance cancel out</text>
+          <text x="420" y="198" font-size="10.5" fill="var(--ink-soft)">a missing or low-confidence joint makes its feature NaN, never a wrong number</text>
+          <line x1="366" y1="186" x2="398" y2="186" stroke="var(--guard)" stroke-width="1.4" marker-end="url(#c-guard)"/>
+
+          <!-- 3 smoothing -->
+          <circle cx="40" cy="256" r="13" fill="var(--flow)"/>
+          <text x="40" y="261" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ground)">3</text>
+          <rect x="66" y="234" width="300" height="46" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="82" y="254" font-size="13" font-weight="600" fill="var(--ink)">Smooth the jitter out</text>
+          <text x="82" y="271" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">EMA.nextWithDt() — adapts to real frame rate</text>
+          <line x1="216" y1="212" x2="216" y2="230" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#c-flow)"/>
+
+          <!-- 4 gate -->
+          <circle cx="40" cy="328" r="13" fill="var(--flow)"/>
+          <text x="40" y="333" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ground)">4</text>
+          <rect x="66" y="302" width="300" height="52" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="82" y="323" font-size="13" font-weight="600" fill="var(--ink)">Is the patient ready?</text>
+          <text x="82" y="340" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">SessionStateMachine.step() · runAllChecks()</text>
+          <line x1="216" y1="280" x2="216" y2="298" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#c-flow)"/>
+
+          <rect x="404" y="302" width="496" height="52" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="420" y="323" font-size="12" font-weight="600" fill="var(--ink)">distance · camera angle · joints visible · lighting</text>
+          <text x="420" y="340" font-size="10.5" fill="var(--ink-soft)">first three must pass to start; lighting only advises</text>
+          <line x1="366" y1="328" x2="398" y2="328" stroke="var(--flow)" stroke-width="1.4" marker-end="url(#c-flow)"/>
+
+          <!-- state branch -->
+          <rect x="66" y="384" width="834" height="58" rx="8" fill="var(--flow-wash)" stroke="var(--flow)" stroke-width="1.3"/>
+          <text x="82" y="406" font-size="12" font-weight="600" fill="var(--ink)">The state decides what gets drawn</text>
+          <g font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">
+            <text x="82" y="426">loading → drawLoadingOverlay()   coaching → drawCoachingMessages() + drawTargetBox()   countdown → drawCountdown()   inactive → drawInactiveOverlay()</text>
+          </g>
+          <line x1="216" y1="354" x2="216" y2="380" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#c-flow)"/>
+
+          <!-- 5 engine -->
+          <circle cx="40" cy="492" r="13" fill="var(--live)"/>
+          <text x="40" y="497" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ground)">5</text>
+          <rect x="66" y="464" width="400" height="56" rx="8" fill="var(--live-wash)" stroke="var(--live)" stroke-width="1.8"/>
+          <text x="84" y="487" font-size="13.5" font-weight="600" fill="var(--ink)">Only when ACTIVE — count the rep</text>
+          <text x="84" y="506" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">DTWPhaseMachine.step()   → see diagram 04</text>
+          <path d="M216 442 L216 460" fill="none" stroke="var(--live)" stroke-width="1.8" marker-end="url(#c-live)"/>
+
+          <!-- 6 draw + 7 send -->
+          <circle cx="516" cy="492" r="13" fill="var(--flow)"/>
+          <text x="516" y="497" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ground)">6</text>
+          <rect x="542" y="464" width="164" height="56" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="558" y="487" font-size="12.5" font-weight="600" fill="var(--ink)">Paint skeleton</text>
+          <text x="558" y="506" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">drawCanvas()</text>
+
+          <circle cx="740" cy="492" r="13" fill="var(--flow)"/>
+          <text x="740" y="497" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ground)">7</text>
+          <rect x="766" y="464" width="134" height="56" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="782" y="487" font-size="12.5" font-weight="600" fill="var(--ink)">Tell the host</text>
+          <text x="782" y="506" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">sendUpdates()</text>
+
+          <line x1="466" y1="492" x2="504" y2="492" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#c-flow)"/>
+          <line x1="706" y1="492" x2="728" y2="492" stroke="var(--flow)" stroke-width="1.6" marker-end="url(#c-flow)"/>
+
+          <!-- loop back -->
+          <path d="M900 520 L918 520 L918 566 L28 566 L28 76 L28 46 L20 46" fill="none" stroke="var(--flow)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#c-flow)"/>
+          <text x="470" y="584" text-anchor="middle" font-size="11" fill="var(--ink-faint)">requestAnimationFrame — next frame, immediately</text>
+        </svg>
+      </div>
+      <figcaption>
+        Stages 1–4 run on every frame regardless of state. Stage 5 — the whole rep-counting engine —
+        runs only once the session reaches ACTIVE, which is why a patient who is badly framed
+        gets coaching instead of a mis-counted rep.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============================================ 4 -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <h2>Inside the rep counter</h2>
+    </div>
+    <p class="lede">
+      A rep is not "the angle passed a threshold". It is a small state machine with five separate
+      gates, each added in response to a real false count. This is where most of the engineering
+      judgement in the codebase lives.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 940 500" role="img" aria-label="The rep cycle moves from idle to sawStart to sawEffort and back, guarded by a velocity filter, a direction-aware range gate, a hold requirement, a return-to-start check and a refractory period.">
+          <defs>
+            <marker id="d-live" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--live)"/>
+            </marker>
+            <marker id="d-guard" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--guard)"/>
+            </marker>
+            <marker id="d-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--flow)"/>
+            </marker>
+          </defs>
+
+          <!-- pre-gate -->
+          <rect x="16" y="24" width="286" height="62" rx="8" fill="var(--guard-wash)" stroke="var(--guard)" stroke-width="1.4"/>
+          <text x="34" y="46" font-size="12.5" font-weight="600" fill="var(--ink)">Gate A — reject impossible jumps</text>
+          <text x="34" y="64" font-size="11" fill="var(--ink-soft)">a &gt;20° swing in one frame is noise, not a limb</text>
+          <text x="34" y="80" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">masked to NaN in step()</text>
+
+          <!-- DTW -->
+          <rect x="338" y="24" width="286" height="62" rx="8" fill="var(--flow-wash)" stroke="var(--flow)" stroke-width="1.4"/>
+          <text x="356" y="46" font-size="12.5" font-weight="600" fill="var(--ink)">Match against the template</text>
+          <text x="356" y="64" font-size="11" fill="var(--ink-soft)">which frame of the movement is this?</text>
+          <text x="356" y="80" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">OnlineSubsequenceDTW.step()</text>
+
+          <rect x="660" y="24" width="264" height="62" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="678" y="46" font-size="12.5" font-weight="600" fill="var(--ink)">Returns</text>
+          <text x="678" y="64" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">phase · quality · deviations</text>
+          <text x="678" y="80" font-size="10.5" fill="var(--ink-soft)">quality drives the skeleton colour</text>
+
+          <line x1="302" y1="55" x2="332" y2="55" stroke="var(--guard)" stroke-width="1.5" marker-end="url(#d-guard)"/>
+          <line x1="624" y1="55" x2="654" y2="55" stroke="var(--flow)" stroke-width="1.5" marker-end="url(#d-flow)"/>
+
+          <!-- states -->
+          <rect x="60" y="176" width="180" height="72" rx="10" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.6"/>
+          <text x="150" y="206" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)">idle</text>
+          <text x="150" y="226" text-anchor="middle" font-size="11" fill="var(--ink-soft)">nothing started yet</text>
+
+          <rect x="380" y="176" width="180" height="72" rx="10" fill="var(--panel)" stroke="var(--flow)" stroke-width="1.8"/>
+          <text x="470" y="206" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)">sawStart</text>
+          <text x="470" y="226" text-anchor="middle" font-size="11" fill="var(--ink-soft)">at rest, ready to move</text>
+
+          <rect x="700" y="176" width="180" height="72" rx="10" fill="var(--live-wash)" stroke="var(--live)" stroke-width="1.8"/>
+          <text x="790" y="206" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)">sawEffort</text>
+          <text x="790" y="226" text-anchor="middle" font-size="11" fill="var(--ink-soft)">has moved far enough</text>
+
+          <line x1="240" y1="212" x2="374" y2="212" stroke="var(--flow)" stroke-width="1.7" marker-end="url(#d-flow)"/>
+          <text x="307" y="203" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">at start pose</text>
+
+          <line x1="560" y1="212" x2="694" y2="212" stroke="var(--live)" stroke-width="1.9" marker-end="url(#d-live)"/>
+          <text x="627" y="203" text-anchor="middle" font-size="10.5" fill="var(--live)">Gates B + C</text>
+
+          <!-- Gate B -->
+          <rect x="330" y="286" width="286" height="76" rx="8" fill="var(--guard-wash)" stroke="var(--guard)" stroke-width="1.4"/>
+          <text x="348" y="308" font-size="12.5" font-weight="600" fill="var(--ink)">Gate B — far enough, right way</text>
+          <text x="348" y="326" font-size="11" fill="var(--ink-soft)">must travel a set share of the template range</text>
+          <text x="348" y="342" font-size="11" fill="var(--ink-soft)">and in the same direction the template moves</text>
+          <text x="348" y="357" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">minRomPct · templateDirection</text>
+          <path d="M473 282 L473 252" fill="none" stroke="var(--guard)" stroke-width="1.5" marker-end="url(#d-guard)"/>
+
+          <!-- Gate C -->
+          <rect x="654" y="286" width="270" height="76" rx="8" fill="var(--guard-wash)" stroke="var(--guard)" stroke-width="1.4"/>
+          <text x="672" y="308" font-size="12.5" font-weight="600" fill="var(--ink)">Gate C — sustained</text>
+          <text x="672" y="326" font-size="11" fill="var(--ink-soft)">movement must hold for 100 ms</text>
+          <text x="672" y="343" font-size="11" fill="var(--ink-soft)">so a single bad frame can't fake it</text>
+          <path d="M789 282 L789 252" fill="none" stroke="var(--guard)" stroke-width="1.5" marker-end="url(#d-guard)"/>
+
+          <!-- return path -->
+          <path d="M790 248 L790 264 L940 264" fill="none" stroke="var(--live)" stroke-width="0" />
+          <path d="M700 212 L660 212" fill="none" stroke="var(--live)" stroke-width="0"/>
+
+          <!-- count -->
+          <rect x="60" y="286" width="240" height="76" rx="8" fill="var(--guard-wash)" stroke="var(--guard)" stroke-width="1.4"/>
+          <text x="78" y="308" font-size="12.5" font-weight="600" fill="var(--ink)">Gate D — actually came back</text>
+          <text x="78" y="326" font-size="11" fill="var(--ink-soft)">limb must return near the start value</text>
+          <text x="78" y="342" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">_primaryFeatureNearStart()</text>
+
+          <path d="M700 224 L620 224 L620 250 L182 250 L182 282" fill="none" stroke="var(--live)" stroke-width="1.8" marker-end="url(#d-live)"/>
+          <text x="404" y="243" text-anchor="middle" font-size="10.5" fill="var(--live)">returning to rest</text>
+
+          <rect x="60" y="404" width="864" height="66" rx="8" fill="var(--live-wash)" stroke="var(--live)" stroke-width="1.8"/>
+          <text x="80" y="428" font-size="13.5" font-weight="600" fill="var(--ink)">Rep counted → cycle resets to sawStart</text>
+          <text x="80" y="448" font-size="11" fill="var(--ink-soft)">Gate E: a refractory timer blocks the next rep. If a rep would have counted during it, the cycle still resets — so a suppressed rep can't fire late.</text>
+          <text x="80" y="464" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">_alternatingSideOk() · _classifyRep() → PatientBaseline.onRepDetected() · _buildRepSummary()</text>
+          <path d="M182 362 L182 400" fill="none" stroke="var(--live)" stroke-width="1.8" marker-end="url(#d-live)"/>
+        </svg>
+      </div>
+      <figcaption>
+        Each amber gate exists because something was being counted that shouldn't have been.
+        Gate B's direction check, for instance, is what stops a calf raise registering as a
+        dorsiflexion — the two move the same measurement in opposite directions.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============================================ 5 -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">05</span>
+      <h2>Which cue the patient actually hears</h2>
+    </div>
+    <p class="lede">
+      Only one message can be on screen at a time, so <code>_pickFeedback()</code> is a ladder:
+      the first rung that matches wins and the rest never run. Where a cue sits on this ladder
+      decides whether it is ever heard.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 940 330" role="img" aria-label="Feedback priority ladder: a safety cap breach outranks the rep number, which outranks the alternating-leg warning, form cues, range cues and finally the default phase cue.">
+          <defs>
+            <marker id="e-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--flow)"/>
+            </marker>
+          </defs>
+
+          <g font-size="12">
+            <rect x="16" y="20" width="908" height="44" rx="7" fill="var(--guard-wash)" stroke="var(--guard)" stroke-width="1.8"/>
+            <text x="36" y="40" font-size="12.5" font-weight="700" fill="var(--ink)">1 · Safety limit passed</text>
+            <text x="240" y="40" font-size="12" fill="var(--ink-soft)">"That's high enough" — outranks everything, including the rep number</text>
+            <text x="36" y="56" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">_exceedsClinicalCap() → clinicalCaps · PatientBaseline.checkSafety()</text>
+
+            <rect x="16" y="76" width="908" height="40" rx="7" fill="var(--live-wash)" stroke="var(--live)" stroke-width="1.4"/>
+            <text x="36" y="94" font-size="12.5" font-weight="700" fill="var(--ink)">2 · The rep number</text>
+            <text x="240" y="94" font-size="12" fill="var(--ink-soft)">shown for 1.2 s after a rep counts, then steps aside</text>
+            <text x="36" y="110" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">REP_ANNOUNCE_MS</text>
+
+            <rect x="16" y="128" width="908" height="36" rx="7" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+            <text x="36" y="145" font-size="12.5" font-weight="600" fill="var(--ink)">3 · Wrong leg</text>
+            <text x="240" y="145" font-size="12" fill="var(--ink-soft)">"Switch legs" — alternating exercises only</text>
+            <text x="36" y="160" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">_alternatingSideOk()</text>
+
+            <rect x="16" y="176" width="908" height="36" rx="7" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+            <text x="36" y="193" font-size="12.5" font-weight="600" fill="var(--ink)">4 · Posture</text>
+            <text x="240" y="193" font-size="12" fill="var(--ink-soft)">"Keep your back straight" — only while still, never mid-movement</text>
+            <text x="36" y="208" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">feedback.form · BODY_PART_FEATURE_MAP</text>
+
+            <rect x="16" y="224" width="908" height="36" rx="7" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+            <text x="36" y="241" font-size="12.5" font-weight="600" fill="var(--ink)">5 · Range</text>
+            <text x="240" y="241" font-size="12" fill="var(--ink-soft)">"Try to reach a bit higher" — near the peak, matching poorly</text>
+            <text x="36" y="256" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">feedback.range.tooLittle</text>
+
+            <rect x="16" y="272" width="908" height="36" rx="7" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+            <text x="36" y="289" font-size="12.5" font-weight="600" fill="var(--ink)">6 · Where you are</text>
+            <text x="240" y="289" font-size="12" fill="var(--ink-soft)">"Curl your arm up" — the default when nothing above fired</text>
+            <text x="36" y="304" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">feedback.phase[currentPhase]</text>
+          </g>
+
+          <path d="M8 24 L8 304" fill="none" stroke="var(--flow)" stroke-width="1.4" marker-end="url(#e-flow)"/>
+        </svg>
+      </div>
+      <figcaption>
+        Priority is the whole design here. A safety warning sitting below the rep number would be
+        silent for most of every cycle — which is exactly the failure this ordering was written to fix.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ============================================ 6 -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">06</span>
+      <h2>Code that looks live but isn't</h2>
+    </div>
+    <p class="lede">
+      Roughly two thousand lines never execute. Anyone reading the repo cold will find them and
+      assume they matter — worth pointing at directly.
+    </p>
+
+    <figure>
+      <div class="scroll">
+        <svg viewBox="0 0 940 190" role="img" aria-label="Because every exercise has a registered DTW reference, the fallback branch to the older rule-based PhaseMachine and its sixteen spec files never executes.">
+          <defs>
+            <marker id="f-live" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--live)"/>
+            </marker>
+            <marker id="f-dead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--dead)"/>
+            </marker>
+          </defs>
+
+          <rect x="16" y="66" width="230" height="62" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.3"/>
+          <text x="131" y="92" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--ink)">getReference(exercise)</text>
+          <text x="131" y="110" text-anchor="middle" font-size="11" fill="var(--ink-soft)">is there a template?</text>
+
+          <!-- live branch -->
+          <path d="M246 84 L330 84" fill="none" stroke="var(--live)" stroke-width="1.9" marker-end="url(#f-live)"/>
+          <text x="288" y="76" text-anchor="middle" font-size="10.5" fill="var(--live)">always yes</text>
+          <rect x="336" y="52" width="270" height="62" rx="8" fill="var(--live-wash)" stroke="var(--live)" stroke-width="1.8"/>
+          <text x="471" y="78" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">DTWPhaseMachine</text>
+          <text x="471" y="97" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">all 16 exercises land here</text>
+
+          <!-- dead branch -->
+          <path d="M131 128 L131 158 L330 158" fill="none" stroke="var(--dead)" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#f-dead)"/>
+          <text x="230" y="150" text-anchor="middle" font-size="10.5" fill="var(--dead)">never taken</text>
+          <line x1="222" y1="146" x2="242" y2="170" stroke="var(--dead)" stroke-width="1.6"/>
+          <line x1="242" y1="146" x2="222" y2="170" stroke="var(--dead)" stroke-width="1.6"/>
+
+          <rect x="336" y="132" width="270" height="52" rx="8" fill="var(--dead-wash)" stroke="var(--dead)" stroke-width="1.3" stroke-dasharray="6 5"/>
+          <text x="471" y="153" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--dead)">PhaseMachine + 16 spec files</text>
+          <text x="471" y="171" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--dead)">phase_machine.js · src/specs/*.spec.js</text>
+
+          <rect x="648" y="52" width="276" height="132" rx="8" fill="var(--panel)" stroke="var(--panel-edge)" stroke-width="1.2"/>
+          <text x="668" y="76" font-size="12" font-weight="600" fill="var(--ink)">Also inert</text>
+          <text x="668" y="98" font-size="11" fill="var(--ink-soft)">• the recorded reference file</text>
+          <text x="668" y="118" font-size="11" fill="var(--ink-soft)">• service worker (never registered)</text>
+          <text x="668" y="138" font-size="11" fill="var(--ink-soft)">• tempo cues (declared, never shown)</text>
+          <text x="668" y="158" font-size="11" fill="var(--ink-soft)">• debug flags inside the dead specs</text>
+        </svg>
+      </div>
+      <figcaption>
+        The fallback is not wrong, just unreachable: a template is registered for every exercise at
+        startup, so the condition that would select the older engine is never false.
+      </figcaption>
+    </figure>
+  </section>
+
+  <footer>
+    Every file and function named here was checked against the source. For verbatim engine code,
+    see <code>ARCHITECTURE_DUMP.md</code> in the repository root.
+  </footer>
+
+</div>

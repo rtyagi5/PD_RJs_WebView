@@ -3,10 +3,31 @@ import * as posedetection from '@tensorflow-models/pose-detection';
 import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import * as tf from '@tensorflow/tfjs';
 
+/**
+ * Select the fastest TF.js backend the device actually supports.
+ * WebGL is required for usable frame rates, but some in-app WebViews and older
+ * devices don't expose it — previously that threw and left the patient staring at
+ * a frozen "Initializing…" screen. Falling back to CPU is slow but functional.
+ */
+async function selectBackend() {
+  for (const backend of ['webgl', 'cpu']) {
+    try {
+      if (await tf.setBackend(backend)) {
+        await tf.ready();
+        if (backend !== 'webgl') {
+          console.warn(`[TF] WebGL unavailable — running on "${backend}". Expect reduced frame rate.`);
+        }
+        return backend;
+      }
+    } catch (err) {
+      console.warn(`[TF] backend "${backend}" failed to initialise:`, err?.message || err);
+    }
+  }
+  throw new Error('No usable TensorFlow.js backend (tried webgl, cpu)');
+}
+
 export async function createMoveNet() {
-    // ensure webgl for performance
-    await tf.setBackend('webgl');
-    await tf.ready();
+    await selectBackend();
     console.log('[TF] backend:', tf.getBackend(), '| webgl version:', tf.ENV.get('WEBGL_VERSION'));
   const det = await posedetection.createDetector(
     posedetection.SupportedModels.MoveNet,
@@ -29,9 +50,22 @@ export async function createMoveNet() {
 }
 
 export async function createMediaPipePose() {
-    const wasmBase = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm";
-    const vision = await FilesetResolver.forVisionTasks(wasmBase);
-  
+    // Load the WASM runtime from our own origin (public/mediapipe/wasm, copied from
+    // the installed @mediapipe/tasks-vision package). Previously this came from a
+    // jsdelivr CDN pinned to 0.10.0 while the package was 0.10.22 — a version skew
+    // plus the only network dependency in an otherwise fully offline pipeline.
+    // The CDN remains as a fallback for the case where the assets are missing.
+    const localWasm = `${process.env.PUBLIC_URL || ''}/mediapipe/wasm`;
+    let vision;
+    try {
+      vision = await FilesetResolver.forVisionTasks(localWasm);
+    } catch (err) {
+      console.warn('[MediaPipe] Local WASM unavailable, falling back to CDN:', err?.message || err);
+      vision = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm'
+      );
+    }
+
     const model = `${process.env.PUBLIC_URL || ''}/mediapipe/pose_landmarker_full.task`;
     const landmarker = await PoseLandmarker.createFromOptions(vision, {
       baseOptions: { modelAssetPath: model },

@@ -9,7 +9,7 @@
 // Pure logic — no React, no DOM. Call step() every frame.
 // ---------------------------------------------
 
-import { runAllChecks } from './PoseQuality';
+import { runAllChecks, CHECK_PRIORITY } from './PoseQuality';
 
 // ── States ───────────────────────────────────────────────────────────────────
 export const SESSION_STATES = Object.freeze({
@@ -238,9 +238,7 @@ export class SessionStateMachine {
 
   /** Pick the highest-priority failing check message. */
   _primaryCoachingMessage(checks) {
-    // Priority: visibility → distance → angle → lighting
-    const order = ['visibility', 'distance', 'angle', 'lighting'];
-    for (const name of order) {
+    for (const name of CHECK_PRIORITY) {
       const c = checks.find(ch => ch.name === name);
       if (c && c.status !== 'good' && c.message) return c.message;
     }

@@ -8,6 +8,11 @@ import { computeFeatureRanges, extractPhaseOrder } from './referenceSchema.js';
 import { BODY_PART_FEATURE_MAP } from './universalFeatures.js';
 import { PatientBaseline } from './PatientBaseline.js';
 
+// How long the bare rep number suppresses all other feedback after a rep counts.
+// Was 3000ms, which is longer than a typical rep cycle — corrective cues could
+// almost never reach the patient. Safety/overshoot warnings pre-empt this entirely.
+const REP_ANNOUNCE_MS = 1200;
+
 // Resolve a startCue against the active side. Accepts either a plain string (returned
 // as-is) or an object keyed by side ('left' | 'right' | 'alternating' | 'both').
 // Resolution order: exact side match → 'both' → first available variant.
@@ -25,12 +30,15 @@ function resolveStartCue(cue, side) {
 export class DTWPhaseMachine {
   /**
    * @param {Object} reference - Reference JSON object (see referenceSchema.js)
-   * @param {Object} opts - { targetReps, targetSeconds }
+   * @param {Object} opts - { targetReps, targetSeconds, patientId, side, summaryFeatures }
+   * @param {string[]} opts.summaryFeatures - universal feature keys to capture
+   *        per-rep min/max for (drives the `repSummary` payload sent to the host app)
    */
-  constructor(reference, { targetReps = 10, targetSeconds, patientId, side } = {}) {
+  constructor(reference, { targetReps = 10, targetSeconds, patientId, side, summaryFeatures = [] } = {}) {
     this.reference = reference;
     this.targetReps = targetReps;
     this.patientId = patientId || null;
+    this.summaryFeatures = summaryFeatures;
 
     // Mode
     this.mode = reference.mode === 'time' ? 'time' : 'reps';
@@ -87,7 +95,7 @@ export class DTWPhaseMachine {
     this.lastFeedback = '';
     this.refractoryUntil = 0;
     this.lastPhaseEnterAt = 0;
-    this._repAnnouncedUntil = 0; // suppress other feedback for 1.5s after a rep counts
+    this._repAnnouncedUntil = 0; // suppress lower-priority feedback for REP_ANNOUNCE_MS after a rep counts
 
     // Time-mode timers
     this.holdStartMs = null;
@@ -127,11 +135,39 @@ export class DTWPhaseMachine {
         }
       }
     }
+    // Resolve side-generic clinical caps (e.g. { shoulderAngle: { max: 95 } }) into the
+    // concrete universal keys to watch. For a single-side session only that side is
+    // checked; bilateral/alternating sessions watch both sides plus the aggregate the
+    // template actually uses, so a cap still applies when the primary feature is a Min/Max.
+    this.clinicalCaps = [];
+    const capSource = reference.clinicalCaps || null;
+    if (capSource) {
+      const AGG_SUFFIX = { Min: 'Min', Max: 'Max', Avg: 'Avg' };
+      for (const [base, limits] of Object.entries(capSource)) {
+        const keys = [];
+        if (this.side === 'left') keys.push(`${base}L`);
+        else if (this.side === 'right') keys.push(`${base}R`);
+        else keys.push(`${base}L`, `${base}R`);
+        // Include whichever aggregate form exists in this reference's ranges.
+        for (const suf of Object.keys(AGG_SUFFIX)) {
+          if (this.featureRanges[`${base}${suf}`]) keys.push(`${base}${suf}`);
+        }
+        for (const key of keys) {
+          this.clinicalCaps.push({
+            key,
+            min: Number.isFinite(limits?.min) ? limits.min : null,
+            max: Number.isFinite(limits?.max) ? limits.max : null,
+          });
+        }
+      }
+    }
+
     this.primaryFeature = bestKey;
     this.primaryFeatureRange = bestRange;
     this.minRomForRep = (reference.minRomPct ?? 0.25) * bestRange; // % of template range = meaningful movement
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
+    this.cycleSummary = {}; // { <featureKey>: { min, max } } for the in-flight rep
     console.log(`[DTW] Primary feature: ${bestKey} range=${bestRange.toFixed(1)} minROM=${this.minRomForRep.toFixed(1)} side=${this.side}`);
 
     // Effort-adjacent phases: include transition phases leading to the effort phase
@@ -218,6 +254,7 @@ export class DTWPhaseMachine {
     this._prevPrimaryValue = null;
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
+    this.cycleSummary = {}; // { <featureKey>: { min, max } } for the in-flight rep
     this.lastActiveSide = null;
     this.activeSideDuringCycle = null;
     this._repAnnouncedUntil = 0;
@@ -261,6 +298,7 @@ export class DTWPhaseMachine {
     const result = this.dtw.step(features);
     let repDelta = 0;
     let repClassification = null;
+    let repSummary = null;
 
     // Diagnostic: throttled DTW state logging (every 60 frames)
     if (!this._diagFC) this._diagFC = 0;
@@ -288,6 +326,7 @@ export class DTWPhaseMachine {
         this.cycleState = 'sawStart';
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
+        this.cycleSummary = {};
         this.activeSideDuringCycle = null;
       }
     } else if (newPhase !== this.phase) {
@@ -304,6 +343,22 @@ export class DTWPhaseMachine {
       if (Number.isFinite(pVal)) {
         this.cycleFeatureMin = Math.min(this.cycleFeatureMin, pVal);
         this.cycleFeatureMax = Math.max(this.cycleFeatureMax, pVal);
+      }
+    }
+
+    // Track min/max of every reported metric during the cycle, so a counted rep
+    // can ship a true per-rep ROM summary to the host app / backend.
+    if (this.cycleState !== 'idle') {
+      for (const key of this.summaryFeatures) {
+        const v = features[key];
+        if (!Number.isFinite(v)) continue;
+        const cur = this.cycleSummary[key];
+        if (cur) {
+          cur.min = Math.min(cur.min, v);
+          cur.max = Math.max(cur.max, v);
+        } else {
+          this.cycleSummary[key] = { min: v, max: v };
+        }
       }
     }
     const actualRom = this.cycleFeatureMax - this.cycleFeatureMin;
@@ -333,6 +388,7 @@ export class DTWPhaseMachine {
         this.cycleState = 'sawStart';
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
+        this.cycleSummary = {};
         this.activeSideDuringCycle = null;
       }
       if (this.cycleState === 'sawStart') {
@@ -388,11 +444,15 @@ export class DTWPhaseMachine {
           console.log(`[DTW] Rep ${this.repCount} | classification=${repClassification.completed ? 'completed' : 'attempt'} romPct=${((repClassification.romPct ?? 0) * 100).toFixed(0)}% details=`, repClassification.details);
         }
         console.log(`[DTW] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
-        if (repDelta > 0) this._repAnnouncedUntil = now + 3000;
+        if (repDelta > 0) {
+          repSummary = this._buildRepSummary();
+          this._repAnnouncedUntil = now + REP_ANNOUNCE_MS;
+        }
         this.refractoryUntil = now + this.refractoryMs;
         this.cycleState = 'sawStart'; // ready for next cycle (already at start)
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
+        this.cycleSummary = {};
         this.activeSideDuringCycle = null;
         this._movedAwayAt = null;
       } else if (repGateReady && now < this.refractoryUntil) {
@@ -403,6 +463,7 @@ export class DTWPhaseMachine {
         this.cycleState = 'sawStart';
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
+        this.cycleSummary = {};
         this.activeSideDuringCycle = null;
         this._movedAwayAt = null;
       }
@@ -422,11 +483,19 @@ export class DTWPhaseMachine {
           console.log(`[DTW-backup] Rep ${this.repCount} | classification=${repClassification.completed ? 'completed' : 'attempt'} romPct=${((repClassification.romPct ?? 0) * 100).toFixed(0)}% details=`, repClassification.details);
         }
         console.log(`[DTW-backup] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
-        if (repDelta > 0) this._repAnnouncedUntil = now + 3000;
+        if (repDelta > 0) {
+          repSummary = this._buildRepSummary();
+          this._repAnnouncedUntil = now + REP_ANNOUNCE_MS;
+        }
         this.refractoryUntil = now + this.refractoryMs;
-        this.cycleState = 'idle';
+        // Match the primary rep path: the limb is back at the start position, so the
+        // next cycle begins at 'sawStart'. Previously this path reset to 'idle', which
+        // meant a rep counted via the backup route required an extra start-phase
+        // detection before the next rep could register.
+        this.cycleState = 'sawStart';
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
+        this.cycleSummary = {};
         this.activeSideDuringCycle = null;
         this._movedAwayAt = null;
       }
@@ -455,8 +524,8 @@ export class DTWPhaseMachine {
       this.repCount = Math.floor(timeHeldMs / 1000); // legacy HUD
     }
 
-    // Feedback (priority: form > range > tempo > phase)
-    const fb = this._pickFeedback(result, features);
+    // Feedback (priority: safety cap > rep announce > form > range > tempo > phase)
+    const fb = this._pickFeedback(result, features, now);
     this.lastFeedback = fb;
 
     // Done?
@@ -478,12 +547,30 @@ export class DTWPhaseMachine {
       deviations: result.deviations,
       // Patient baseline data
       repClassification,
+      // Per-rep ROM summary — non-null only on the frame a rep is counted
+      repSummary,
       isCalibrating: this.patientBaseline?.isCalibrating ?? false,
       completedReps: this.patientBaseline?.reps?.completed ?? this.repCount,
       attemptedReps: this.patientBaseline?.reps?.attempts ?? 0,
       totalReps: this.patientBaseline?.reps?.total ?? this.repCount,
       activeSide: this.activeSideDuringCycle,   // null when idle; 'left'/'right' during rep
     };
+  }
+
+  /**
+   * Snapshot the in-flight cycle's min/max per tracked metric for the rep that
+   * just counted. Values are rounded the same way the live payload rounds them.
+   * @returns {Object|null} { rep, features: { <key>: { min, max } } }
+   */
+  _buildRepSummary() {
+    const round = (v) => (Math.abs(v) < 2 ? Number(v.toFixed(2)) : Math.round(v));
+    const out = {};
+    for (const [key, { min, max }] of Object.entries(this.cycleSummary)) {
+      if (!Number.isFinite(min) || !Number.isFinite(max)) continue;
+      out[key] = { min: round(min), max: round(max) };
+    }
+    if (!Object.keys(out).length) return null;
+    return { rep: this.repCount, features: out };
   }
 
   /**
@@ -510,12 +597,53 @@ export class DTWPhaseMachine {
     return this.activeSideDuringCycle !== this.lastActiveSide;
   }
 
-  _pickFeedback(dtwResult, features) {
+  /**
+   * Absolute safety check, independent of the DTW template.
+   *
+   * Two sources, either of which flags a violation:
+   *  1. `clinicalCaps` from the exercise config — fixed, clinician-reviewable limits.
+   *  2. PatientBaseline.checkSafety — the gold-standard envelope, once calibrated.
+   *
+   * Template-relative overshoot (_detectOvershoot) can't be relied on for this: it
+   * triggers at `range.max + 20% of range`, which for a wide sweep lands well beyond
+   * anything physically reachable.
+   *
+   * @returns {boolean} true if any watched feature is outside its safe limit
+   */
+  _exceedsClinicalCap(features) {
+    for (const cap of this.clinicalCaps) {
+      const v = features[cap.key];
+      if (!Number.isFinite(v)) continue;
+      if (cap.max !== null && v > cap.max) return true;
+      if (cap.min !== null && v < cap.min) return true;
+    }
+    // Patient-specific envelope (only meaningful once the baseline has locked).
+    if (this.patientBaseline && !this.patientBaseline.isCalibrating) {
+      for (const cap of this.clinicalCaps) {
+        const v = features[cap.key];
+        if (!Number.isFinite(v)) continue;
+        const verdict = this.patientBaseline.checkSafety(cap.key, v);
+        if (verdict && verdict.safe === false) return true;
+      }
+    }
+    return false;
+  }
+
+  _pickFeedback(dtwResult, features, now = performance.now()) {
     const fb = this.feedback;
     const deviations = dtwResult.deviations;
 
-    // 0a. Rep just counted: announce the number for 1.5 s (highest priority)
-    if (performance.now() < this._repAnnouncedUntil) {
+    // 0. Safety ceiling — HIGHEST priority, above the rep announcement. A patient
+    // moving past a clinical limit needs to hear it immediately; suppressing it
+    // behind the rep number is how "don't raise above 90°" went silent.
+    if (this._exceedsClinicalCap(features) && fb.range?.tooMuch) {
+      return fb.range.tooMuch;
+    }
+
+    // 0a. Rep just counted: announce the number for REP_ANNOUNCE_MS.
+    // Uses the caller-supplied clock (same one that set _repAnnouncedUntil) rather
+    // than wall time, so the window is consistent and deterministic under test.
+    if (now < this._repAnnouncedUntil) {
       return String(this.repCount);
     }
 
