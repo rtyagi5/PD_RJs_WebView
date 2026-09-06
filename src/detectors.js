@@ -2,6 +2,25 @@
 import * as posedetection from '@tensorflow-models/pose-detection';
 import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import * as tf from '@tensorflow/tfjs';
+// Registers the WebGPU backend so selectBackend() can try it. WebGPU dispatches
+// work without the long synchronous stall WebGL's estimatePoses() incurs on
+// mobile - measured at ~58ms per call on an Adreno 710, which capped the whole
+// detection loop at ~17fps. Falls through to WebGL where WebGPU is unavailable.
+import '@tensorflow/tfjs-backend-webgpu';
+
+// Chrome/WebView removed GPUAdapter.requestAdapterInfo() in favour of the
+// synchronous `adapter.info` property, but tfjs-backend-webgpu 4.20 still calls
+// the removed method. That throws during backend init, so WebGPU silently falls
+// back to WebGL even on devices that fully support it - confirmed on WebView 150
+// with an Adreno 710, where requestAdapter() succeeds but init still failed.
+// Shim the old method onto the prototype so the backend can construct.
+const GPUAdapterCtor =
+  typeof window !== 'undefined' ? window.GPUAdapter : undefined;
+if (GPUAdapterCtor && !GPUAdapterCtor.prototype.requestAdapterInfo) {
+  GPUAdapterCtor.prototype.requestAdapterInfo = function requestAdapterInfo() {
+    return Promise.resolve(this.info || {});
+  };
+}
 
 /**
  * Select the fastest TF.js backend the device actually supports.
@@ -10,12 +29,75 @@ import * as tf from '@tensorflow/tfjs';
  * a frozen "Initializing…" screen. Falling back to CPU is slow but functional.
  */
 async function selectBackend() {
-  for (const backend of ['webgl', 'cpu']) {
+  // Why WebGPU was rejected. navigator.gpu can exist while requestAdapter()
+  // still returns null (blocklisted driver, or WebView not granting an
+  // adapter), which surfaces only as "Initialization of backend webgpu failed".
+  try {
+    if (typeof navigator !== 'undefined' && navigator.gpu) {
+      const adapter = await navigator.gpu.requestAdapter();
+      console.log(`[TF-env] requestAdapter -> ${adapter ? 'OK' : 'null'}`);
+      if (adapter) {
+        const info = adapter.info || (adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : null);
+        console.log(`[TF-env] adapter vendor=${info?.vendor} arch=${info?.architecture} desc=${info?.description}`);
+      }
+    } else {
+      console.log('[TF-env] navigator.gpu absent');
+    }
+  } catch (e) {
+    console.warn('[TF-env] requestAdapter threw:', e && e.message);
+  }
+
+  // TF.js defaults this to 1 on mobile, forcing a gl.flush() after ~1ms of
+  // estimated GPU work. That can stall the pipeline on tiled mobile GPUs.
+  // -1 disables the auto-flush and lets the driver batch.
+  try {
+    tf.env().set('WEBGL_FLUSH_THRESHOLD', -1);
+    console.log('[TF-env] WEBGL_FLUSH_THRESHOLD -> -1 (auto-flush disabled)');
+  } catch (e) {
+    console.warn('[TF-env] could not set flush threshold', e && e.message);
+  }
+
+  // tf.setBackend() swallows the real exception and only logs
+  // "Initialization of backend webgpu failed". Invoke the registered factory
+  // directly so the actual failure reason is visible.
+  try {
+    const factory = tf.findBackendFactory ? tf.findBackendFactory('webgpu') : null;
+    if (factory) {
+      const made = await factory();
+      console.log(`[TF-env] webgpu factory -> ${made ? 'constructed OK' : 'returned falsy'}`);
+      if (made && made.dispose) { try { made.dispose(); } catch (e) {} }
+    } else {
+      console.log('[TF-env] no webgpu factory registered');
+    }
+  } catch (e) {
+    console.error(`[TF-env] webgpu factory threw: ${e && e.message} | ${String(e && e.stack).slice(0, 300)}`);
+  }
+
+  for (const backend of ['webgpu', 'webgl', 'cpu']) {
     try {
       if (await tf.setBackend(backend)) {
         await tf.ready();
-        if (backend !== 'webgl') {
-          console.warn(`[TF] WebGL unavailable — running on "${backend}". Expect reduced frame rate.`);
+        // One-off environment dump. The ~58ms synchronous cost of
+        // estimatePoses() on mobile is most likely the GPU->CPU keypoint
+        // readback; whether that blocks depends on these flags, so read the
+        // real values off the device rather than assuming defaults.
+        try {
+          const flags = [
+            'WEBGL_VERSION', 'WEBGL_FENCE_API_ENABLED', 'WEBGL_FLUSH_THRESHOLD',
+            'WEBGL_PACK', 'WEBGL_CPU_FORWARD', 'WEBGL_RENDER_FLOAT32_ENABLED',
+            'WEBGL_DOWNLOAD_FLOAT_ENABLED', 'WEBGL_BUFFER_SUPPORTED',
+            'WEBGL_USE_SHAPES_UNIFORMS', 'CHECK_COMPUTATION_FOR_ERRORS',
+          ];
+          const dump = flags.map((f) => {
+            try { return `${f}=${tf.env().get(f)}`; } catch (e) { return `${f}=?`; }
+          }).join(' ');
+          console.log(`[TF-env] ${dump}`);
+          console.log(`[TF-env] navigator.gpu=${!!(typeof navigator !== 'undefined' && navigator.gpu)} cores=${typeof navigator !== 'undefined' ? navigator.hardwareConcurrency : '?'}`);
+        } catch (e) {
+          console.warn('[TF-env] dump failed', e && e.message);
+        }
+        if (backend === 'cpu') {
+          console.warn(`[TF] No GPU backend — running on "${backend}". Expect reduced frame rate.`);
         }
         return backend;
       }
@@ -23,7 +105,7 @@ async function selectBackend() {
       console.warn(`[TF] backend "${backend}" failed to initialise:`, err?.message || err);
     }
   }
-  throw new Error('No usable TensorFlow.js backend (tried webgl, cpu)');
+  throw new Error('No usable TensorFlow.js backend (tried webgpu, webgl, cpu)');
 }
 
 export async function createMoveNet() {

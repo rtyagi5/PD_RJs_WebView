@@ -46,6 +46,111 @@ function getQueryNumber(...names) {
   return undefined;
 }
 
+// How many inferences may be in flight at once.
+//
+// Measured at 2 on an Adreno 710: poseLatency 76 -> 125ms, inferSync 10 -> 36ms,
+// loop 45 -> 22fps, for only 13 -> 17 poses/sec. Concurrent inferences contend
+// for the same GPU and submitting into a saturated queue blocks the caller, so
+// overlapping them costs far more than the extra update rate is worth. Keep 1.
+const MAX_INFERENCES_IN_FLIGHT = 1;
+
+// Draw-time skeleton extrapolation.
+//
+// Measured on an Adreno 710 / WebGPU: end-to-end pose latency is ~76ms (max
+// ~182ms), so the drawn skeleton trails the live video by that much. Inference
+// speed does not fix this - WebGPU cut main-thread blocking from 68ms to 10ms
+// and the latency barely moved, because the cost is GPU work and readback.
+//
+// So instead of drawing where the body WAS, project each joint forward along
+// its measured velocity to where it should be now.
+//
+// DRAWING ONLY. These positions are predicted, not observed, and must never
+// reach feature extraction, the phase machines or rep counting.
+const SKELETON_EXTRAPOLATION = true;
+
+// Project only a fraction of the measured lag. Limbs decelerate at the top of a
+// rep, where linear projection overshoots most, and overshoot reads worse than
+// lag. Undercorrecting is the safer error.
+const EXTRAPOLATION_DAMPING = 0.8;
+
+// Hard ceiling regardless of measured latency, so a stalled inference cannot
+// fling the skeleton off the body.
+const MAX_EXTRAPOLATION_MS = 120;
+
+// Velocity from samples this far apart describes unknown motion in between.
+const MAX_VELOCITY_BASIS_MS = 400;
+
+// ...and from samples this close together it is mostly detector noise.
+const MIN_VELOCITY_BASIS_MS = 20;
+
+// Never move a joint more than this in one projection. Bounds the visible error
+// when a keypoint jumps between frames.
+const MAX_KP_SHIFT_PX = 70;
+
+// Only project joints we are confident about. At the 0.3 detection threshold a
+// keypoint wanders frame to frame, and "velocity" computed from that is noise -
+// which showed up as a jittery torso and legs while the well-tracked arm
+// tracked correctly. Below this a joint is drawn where it was measured.
+const EXTRAPOLATION_MIN_SCORE = 0.5;
+
+// Smoothing on the velocity estimate itself. Raw frame-to-frame velocity is
+// noisy enough that projecting it produced visible jitter; averaging across
+// updates keeps the direction while damping the shake.
+const VELOCITY_EMA = 0.45;
+
+/**
+ * @param {{t:number,poses:Array}|null} prev    previous inference
+ * @param {{t:number,poses:Array}|null} latest  most recent inference
+ * @param {number} now                          current frame time
+ * @param {{v:Array}} velStore                  mutable smoothed-velocity cache
+ * @returns {Array} poses shaped exactly like the detector's output
+ */
+function extrapolatePoses(prev, latest, now, velStore) {
+  const latestKps = latest?.poses?.[0]?.keypoints;
+  const prevKps = prev?.poses?.[0]?.keypoints;
+  if (!latestKps) return latest?.poses ?? [];
+  if (!prevKps || prevKps.length !== latestKps.length) return latest.poses;
+
+  const basis = latest.t - prev.t;
+  if (basis < MIN_VELOCITY_BASIS_MS || basis > MAX_VELOCITY_BASIS_MS) {
+    return latest.poses;
+  }
+
+  const ahead = Math.min(
+    Math.max(now - latest.t, 0) * EXTRAPOLATION_DAMPING,
+    MAX_EXTRAPOLATION_MS
+  );
+  if (ahead <= 0) return latest.poses;
+
+  if (!velStore.v || velStore.v.length !== latestKps.length) {
+    velStore.v = latestKps.map(() => ({ vx: 0, vy: 0 }));
+  }
+
+  const projected = latestKps.map((kp, i) => {
+    const p0 = prevKps[i];
+    const vel = velStore.v[i];
+    const tracked =
+      p0 &&
+      (kp.score ?? 0) >= EXTRAPOLATION_MIN_SCORE &&
+      (p0.score ?? 0) >= EXTRAPOLATION_MIN_SCORE;
+
+    if (!tracked) {
+      vel.vx = 0;
+      vel.vy = 0;
+      return kp;
+    }
+
+    vel.vx = vel.vx * (1 - VELOCITY_EMA) + ((kp.x - p0.x) / basis) * VELOCITY_EMA;
+    vel.vy = vel.vy * (1 - VELOCITY_EMA) + ((kp.y - p0.y) / basis) * VELOCITY_EMA;
+
+    const dx = Math.max(-MAX_KP_SHIFT_PX, Math.min(MAX_KP_SHIFT_PX, vel.vx * ahead));
+    const dy = Math.max(-MAX_KP_SHIFT_PX, Math.min(MAX_KP_SHIFT_PX, vel.vy * ahead));
+    return { ...kp, x: kp.x + dx, y: kp.y + dy };
+  });
+
+  return [{ ...latest.poses[0], keypoints: projected }, ...latest.poses.slice(1)];
+}
+
 function alphaFor(key) {
   const k = String(key || '').toLowerCase();
   if (k.includes('norm')) return 0.4;       // heavier smoothing for normalized distances
@@ -123,7 +228,12 @@ export default function ExerciseTrackerRefactored({
   const detectionStartTimeRef = useRef(null);
   const lastFrameTimeRef = useRef(performance.now());
   const latestPosesRef = useRef([]);
-  const inferenceRunningRef = useRef(false);
+  const inferenceRunningRef = useRef(0);
+  // Last two completed inferences, timestamped, used only to extrapolate the
+  // DRAWN skeleton. The exercise engine keeps consuming raw poses.
+  const posePrevRef = useRef(null);
+  const velStoreRef = useRef({ v: null });
+  const poseLatestRef = useRef(null);
   const previousRemainingTimeRef = useRef(null);
   const fpsRef = useRef(0);
   const lastExerciseDataRef = useRef({});
@@ -383,6 +493,15 @@ export default function ExerciseTrackerRefactored({
     // FPS measurement (match original tracker behavior)
     let frameCount = 0;
     let lastFpsUpdate = performance.now();
+    // Per-iteration cost breakdown. fps below measures this RAF loop, not the
+    // inference rate, so when it sits far under display refresh the stall is
+    // somewhere in here.
+    const probe = { inferSync: 0, rest: 0, total: 0, n: 0 };
+    // End-to-end pose latency: capture -> result available for drawing. This is
+    // what the eye actually sees, and it is NOT inferSync. inferSync only counts
+    // main-thread blocking; WebGPU returns from that quickly and finishes the
+    // real work asynchronously, so the drawn pose can be far older than it.
+    const lat = { sum: 0, n: 0, max: 0, gapSum: 0, gapN: 0, lastDone: 0 };
 
     // Non-blocking inference: fire-and-forget so RAF runs at 60fps while
     // inference runs alongside at device-max rate. On mobile this prevents
@@ -399,16 +518,51 @@ export default function ExerciseTrackerRefactored({
         return;
       }
 
+      const tLoop0 = performance.now();
+
       // Kick off inference if none is in flight (fire-and-forget).
       // Canvas draws using the most recent completed result.
-      if (!inferenceRunningRef.current) {
-        inferenceRunningRef.current = true;
+      // Allow more than one inference in flight. poseRate was pinned to
+      // 1/poseLatency because a new frame could not start until the previous
+      // finished - 13 fresh poses/sec against a 45fps draw loop. The GPU work is
+      // async, so overlapping them raises the update rate without raising the
+      // per-pose latency. Results can land out of order, so stale ones are
+      // dropped on arrival.
+      if (inferenceRunningRef.current < MAX_INFERENCES_IN_FLIGHT) {
+        inferenceRunningRef.current += 1;
+        // Timestamp when the FRAME IS READ, not when inference resolves. The
+        // pose describes the video as it looked now; by the time the promise
+        // settles that is already ~60ms in the past, and the draw happens a
+        // further frame later. Measuring from completion under-corrects by
+        // about half the true age.
+        const capturedAt = performance.now();
         det.estimatePoses(video).then(p => {
+          const doneAt = performance.now();
+          lat.sum += doneAt - capturedAt;
+          lat.n += 1;
+          if (doneAt - capturedAt > lat.max) lat.max = doneAt - capturedAt;
+          if (lat.lastDone) { lat.gapSum += doneAt - lat.lastDone; lat.gapN += 1; }
+          lat.lastDone = doneAt;
+          inferenceRunningRef.current -= 1;
+          // Out-of-order guard: with several in flight an older frame can resolve
+          // after a newer one. Never let the skeleton jump backwards in time.
+          if (poseLatestRef.current && capturedAt <= poseLatestRef.current.t) return;
           latestPosesRef.current = p;
-          inferenceRunningRef.current = false;
-        }).catch(() => { inferenceRunningRef.current = false; });
+          posePrevRef.current = poseLatestRef.current;
+          poseLatestRef.current = { t: capturedAt, poses: p };
+        }).catch(() => { inferenceRunningRef.current -= 1; });
       }
+      // estimatePoses() is only partly async: the video->GPU texture upload and
+      // kernel dispatch happen synchronously before it returns a promise.
+      const tLoop1 = performance.now();
       const poses = latestPosesRef.current;
+      // Inference costs ~60ms on mid-range Android, so `poses` is always at
+      // least one inference stale and the skeleton visibly trails the video.
+      // Project keypoints forward along their measured velocity for drawing
+      // only - the engine below still uses the raw, unextrapolated `poses`.
+      const drawPoses = SKELETON_EXTRAPOLATION
+        ? extrapolatePoses(posePrevRef.current, poseLatestRef.current, tLoop1, velStoreRef.current)
+        : poses;
 
       // Ensure canvas matches the actual video size
       const vw = video.videoWidth;
@@ -492,7 +646,7 @@ export default function ExerciseTrackerRefactored({
       // ─── COACHING ────────────────────────────────────────────────
       else if (sessionState === 'coaching') {
         // Draw order: skeleton → box → text (so overlays appear on top)
-        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+        drawCanvas(drawPoses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
         const color = coachingColor(sessionResult.coachingChecks);
         const idealRatio = spec?.framing?.idealBodyRatio ?? IDEAL_BODY_RATIO;
         drawTargetBox(ctx, vw, vh, idealRatio, color);
@@ -504,7 +658,7 @@ export default function ExerciseTrackerRefactored({
       // ─── COUNTDOWN ───────────────────────────────────────────────
       else if (sessionState === 'countdown') {
         // Draw order: skeleton → box → countdown (so overlays appear on top)
-        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+        drawCanvas(drawPoses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
         const idealRatio = spec?.framing?.idealBodyRatio ?? IDEAL_BODY_RATIO;
         drawTargetBox(ctx, vw, vh, idealRatio, '#00E676');
         drawCountdown(ctx, vw, vh, sessionResult.countdownRemaining);
@@ -514,7 +668,7 @@ export default function ExerciseTrackerRefactored({
 
       // ─── INACTIVE ────────────────────────────────────────────────
       else if (sessionState === 'inactive') {
-        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+        drawCanvas(drawPoses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
         drawInactiveOverlay(ctx, vw, vh);
         feedbackRef.current = sessionResult.message;
         try { maybeSendUpdates({ sessionState: 'inactive' }); } catch { }
@@ -523,7 +677,7 @@ export default function ExerciseTrackerRefactored({
       // ─── ACTIVE (exercise running) ──────────────────────────────
       else {
         // Draw skeleton + feed frames to recorders (only during ACTIVE)
-        drawCanvas(poses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
+        drawCanvas(drawPoses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
         videoRecorderRef.current?.updateFrame?.(poses, vw, vh);
         skeletonRecorderRef.current?.updateFrame?.(poses, vw, vh);
 
@@ -662,6 +816,25 @@ export default function ExerciseTrackerRefactored({
         }
       }
 
+      const tLoopEnd = performance.now();
+      probe.inferSync += tLoop1 - tLoop0;
+      probe.rest += tLoopEnd - tLoop1;
+      probe.total += tLoopEnd - tLoop0;
+      probe.n += 1;
+      if (probe.n >= 60) {
+        console.log(
+          `[Perf] loop=${(probe.total / probe.n).toFixed(1)}ms ` +
+          `inferSync=${(probe.inferSync / probe.n).toFixed(1)}ms ` +
+          `rest=${(probe.rest / probe.n).toFixed(1)}ms ` +
+          `fps=${fpsRef.current} | ` +
+          `poseLatency=${lat.n ? (lat.sum / lat.n).toFixed(1) : '?'}ms ` +
+          `max=${lat.max.toFixed(0)}ms ` +
+          `poseRate=${lat.gapN ? (1000 / (lat.gapSum / lat.gapN)).toFixed(1) : '?'}/s`
+        );
+        probe.inferSync = 0; probe.rest = 0; probe.total = 0; probe.n = 0;
+        lat.sum = 0; lat.n = 0; lat.max = 0; lat.gapSum = 0; lat.gapN = 0;
+      }
+
       // FPS measurement (update roughly every 100ms)
       frameCount++;
       const now = performance.now();
@@ -683,7 +856,16 @@ export default function ExerciseTrackerRefactored({
     <div>
       <Webcam
         ref={webcamRef}
-        onUserMedia={() => console.log('[Tracker] webcam stream OK')}
+        onUserMedia={(stream) => {
+          // Report what the browser actually negotiated. The requested size is
+          // only a hint, and on phones the camera often returns something much
+          // larger, which throttles the whole detection loop.
+          const track = stream?.getVideoTracks?.()?.[0];
+          const s = track?.getSettings?.() || {};
+          console.log(
+            `[Tracker] webcam stream OK - ${s.width}x${s.height} @ ${s.frameRate}fps`
+          );
+        }}
         onUserMediaError={(e) => {
           console.error('[Tracker] webcam error', e);
           // Distinguish "you denied us" from "there is no camera" — the two need
