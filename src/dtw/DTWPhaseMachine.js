@@ -7,6 +7,7 @@ import { OnlineSubsequenceDTW } from './dtwEngine.js';
 import { computeFeatureRanges, extractPhaseOrder } from './referenceSchema.js';
 import { BODY_PART_FEATURE_MAP } from './universalFeatures.js';
 import { PatientBaseline } from './PatientBaseline.js';
+import { resolveRomGate } from './romGate.js';
 
 // How long the bare rep number suppresses all other feedback after a rep counts.
 // Was 3000ms, which is longer than a typical rep cycle — corrective cues could
@@ -164,7 +165,25 @@ export class DTWPhaseMachine {
 
     this.primaryFeature = bestKey;
     this.primaryFeatureRange = bestRange;
-    this.minRomForRep = (reference.minRomPct ?? 0.25) * bestRange; // % of template range = meaningful movement
+    this.minRomPct = reference.minRomPct ?? 0.25;
+
+    // Two thresholds that used to be one value. They answer different questions
+    // and must scale differently:
+    //
+    //   minRomForRep       "did they move far enough for this to be effort?"
+    //                      -> scales with the PATIENT, so limited ROM still counts.
+    //   nearStartTolerance "are they back close enough to the start to close the rep?"
+    //                      -> stays on the TEMPLATE, because it is measured against
+    //                         refStartValue, which is a template-derived posture.
+    //
+    // Collapsing them (the original code) means shrinking the effort gate for a
+    // limited-ROM patient also narrows their return window, so the rep opens more
+    // easily and then never closes. The docstring on _primaryFeatureNearStart
+    // already described this tolerance as a fraction of the REFERENCE range, so
+    // this split restores the documented intent rather than changing it.
+    this.templateRomGate = this.minRomPct * bestRange;
+    this.nearStartTolerance = this.templateRomGate;
+    this.minRomForRep = this.templateRomGate; // refined below once a baseline exists
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
     this.cycleSummary = {}; // { <featureKey>: { min, max } } for the in-flight rep
@@ -188,6 +207,11 @@ export class DTWPhaseMachine {
         referenceRanges: this.featureRanges,
       });
     }
+
+    // A returning patient's baseline is loaded synchronously in the PatientBaseline
+    // constructor, so this can already resolve to 'baseline' on the very first frame.
+    this._baselineWasLocked = !!this.patientBaseline?.isLocked;
+    this._refreshRomGate('init');
 
     // Reference start value for the primary feature — used as a guard to prevent
     // counting a rep when the DTW mislabels the return phase while the limb is
@@ -232,6 +256,11 @@ export class DTWPhaseMachine {
       `detector=${this.spec.detector} primary=${this.primaryFeature} ` +
       `refStartValue=${fmt(this.refStartValue)} ` +
       `minRomForRep=${fmt(this.minRomForRep)} ` +
+      `rom-source=${this.romGate?.source ?? 'template'} ` +
+      `rom-template=${fmt(this.romGate?.templateValue)} ` +
+      `rom-baseline=${fmt(this.romGate?.baselineValue)} ` +
+      `rom-clamp=${this.romGate?.clamped ?? 'none'} ` +
+      `nearStartTol=${fmt(this.nearStartTolerance)} ` +
       `effortPhases=${[...this.effortPhases].join(',')} ` +
       `repCycle=${this.repCycle.start}->${this.repCycle.effort}->${this.repCycle.return || this.repCycle.start} ` +
       `targetReps=${this.targetReps ?? '—'} targetMs=${this.targetMs ?? '—'} ` +
@@ -292,6 +321,13 @@ export class DTWPhaseMachine {
     // Feed frame to patient baseline tracker
     if (this.patientBaseline) {
       this.patientBaseline.updateFrame(features);
+      // PatientBaseline locks mid-session (>=2 reps and >=60 frames). The gate must
+      // move at that moment; leaving it at the construction-time value means the
+      // calibration we just captured is never actually used.
+      if (this.patientBaseline.isLocked && !this._baselineWasLocked) {
+        this._baselineWasLocked = true;
+        this._refreshRomGate('baseline-locked');
+      }
     }
 
     // Run DTW matching
@@ -577,13 +613,42 @@ export class DTWPhaseMachine {
    * Guard: primary feature must be near the reference's start position before a rep counts.
    * Prevents false counts when DTW quality is low and the phase label says "lowered/start"
    * while the limb is actually still mid-range (e.g. shoulderAngle=67° labelled "lowered").
-   * Tolerance = minRomForRep (25-35% of reference range).
+   * Tolerance = nearStartTolerance (25-35% of the REFERENCE range). Deliberately
+   * NOT minRomForRep: that gate scales down with the patient's own baseline, and
+   * reusing it here would narrow the return window for exactly the limited-ROM
+   * patients the baseline gate exists to help — the rep would open and never close.
    */
   _primaryFeatureNearStart(features) {
     if (!this.primaryFeature || this.refStartValue == null) return true;
     const pVal = features[this.primaryFeature];
     if (!Number.isFinite(pVal)) return true; // can't verify — give benefit of doubt
-    return Math.abs(pVal - this.refStartValue) <= this.minRomForRep;
+    return Math.abs(pVal - this.refStartValue) <= this.nearStartTolerance;
+  }
+
+  /**
+   * Re-resolve the rep ROM gate from the best source currently available.
+   * Called at construction and again the moment the patient baseline locks.
+   * @param {string} reason - for the log line; threshold changes must never be silent.
+   */
+  _refreshRomGate(reason) {
+    const prev = this.minRomForRep;
+    this.romGate = resolveRomGate({
+      primaryFeature: this.primaryFeature,
+      minRomPct: this.minRomPct,
+      templateRange: this.primaryFeatureRange,
+      patientBaseline: this.patientBaseline,
+      protocolBaseline: null, // WI-4 supplies this; resolver already prefers it.
+    });
+    this.minRomForRep = this.romGate.value;
+
+    if (reason !== 'init' && prev !== this.minRomForRep) {
+      const f = (n) => (n == null ? 'null' : (Math.abs(n) >= 10 ? n.toFixed(1) : n.toFixed(3)));
+      console.log(
+        `[DTW] ROM gate ${f(prev)} -> ${f(this.minRomForRep)} (${reason}) ` +
+        `source=${this.romGate.source} template=${f(this.romGate.templateValue)} ` +
+        `baseline=${f(this.romGate.baselineValue)} clamp=${this.romGate.clamped ?? 'none'}`
+      );
+    }
   }
 
   /**

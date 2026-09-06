@@ -293,3 +293,155 @@ describe('time mode', () => {
     expect(out[out.length - 1].timeHeldMs).toBeGreaterThan(0);
   });
 });
+
+// ─── WI-2: baseline-driven ROM gate ──────────────────────────────────────────
+// The gate used to be a fixed fraction of the TEMPLATE range, which asks every
+// patient to move as far as an idealised template does. These tests pin the new
+// behaviour and, just as importantly, pin the two thresholds apart.
+
+/** Pre-seed a locked baseline in storage; PatientBaseline loads it in its constructor. */
+function seedBaseline(patientId, exerciseName, ranges) {
+  const baseline = {};
+  for (const [k, range] of Object.entries(ranges)) {
+    baseline[k] = { min: 0, max: range, range, mean: range / 2 };
+  }
+  localStorage.setItem(
+    `dtw_baseline_${patientId}_${exerciseName}`,
+    JSON.stringify({ baseline, sessionHistory: [] })
+  );
+}
+
+describe('baseline-driven ROM gate', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('keeps template behaviour when there is no patient (regression)', () => {
+    const eng = makeArmRaiseEngine();
+    expect(eng.romGate.source).toBe('template');
+    expect(eng.minRomForRep).toBeCloseTo(15, 0);
+  });
+
+  it('runs normally when patientId is null - no baseline, no throw', () => {
+    // Dev mode used to land here silently, which made the whole feature inert.
+    const eng = makeArmRaiseEngine({ patientId: null });
+    expect(eng.patientBaseline).toBeNull();
+    expect(() => drive(eng, armRaiseRep(), { feature: 'shoulderAngleL' })).not.toThrow();
+    expect(eng.repCount).toBe(1);
+  });
+
+  it('lowers the gate for a patient whose range is smaller than the template', () => {
+    seedBaseline('p1', 'SideArmRaise', { shoulderAngleL: 40 });
+    const eng = makeArmRaiseEngine({ patientId: 'p1' });
+    expect(eng.romGate.source).toBe('baseline');
+    expect(eng.minRomForRep).toBeCloseTo(10, 6); // 0.25 x 40, vs the template 15
+  });
+
+  it('counts a reduced-ROM rep that the template gate rejects', () => {
+    // THE core fix. A 12-degree excursion: under the template gate (15) this is
+    // silently uncounted; against the patient's own 40-degree range it is a rep.
+    const reducedRep = [
+      ...hold(30, 8), ...ramp(30, 42, 12), ...hold(42, 10), ...ramp(42, 30, 12), ...hold(30, 8),
+    ];
+
+    const template = makeArmRaiseEngine();
+    drive(template, reducedRep, { feature: 'shoulderAngleL' });
+    expect(template.repCount).toBe(0);
+
+    seedBaseline('p1', 'SideArmRaise', { shoulderAngleL: 40 });
+    const withBaseline = makeArmRaiseEngine({ patientId: 'p1' });
+    drive(withBaseline, reducedRep, { feature: 'shoulderAngleL' });
+    expect(withBaseline.repCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('clamps to the template gate when the patient range is larger', () => {
+    seedBaseline('p1', 'SideArmRaise', { shoulderAngleL: 200 });
+    const eng = makeArmRaiseEngine({ patientId: 'p1' });
+    expect(eng.romGate.clamped).toBe('ceiling');
+    expect(eng.minRomForRep).toBeCloseTo(15, 6);
+  });
+
+  it('clamps a degenerate baseline to the floor and counts no reps on a still body', () => {
+    seedBaseline('p1', 'SideArmRaise', { shoulderAngleL: 0.2 });
+    const eng = makeArmRaiseEngine({ patientId: 'p1' });
+    expect(eng.romGate.clamped).toBe('floor');
+    // Sensor-noise-scale wobble must not register as reps.
+    const noise = Array.from({ length: 120 }, (_, i) => 30 + Math.sin(i / 3) * 0.4);
+    drive(eng, noise, { feature: 'shoulderAngleL' });
+    expect(eng.repCount).toBe(0);
+  });
+
+  it('recomputes the gate at the moment the baseline locks mid-session', () => {
+    const eng = makeArmRaiseEngine({ patientId: 'p-fresh' });
+    expect(eng.romGate.source).toBe('template'); // nothing stored yet
+    const before = eng.minRomForRep;
+
+    // Two reps plus >=60 frames is the lock condition. Calibrate on a REDUCED
+    // amplitude (30->70): full-range reps would capture exactly the template's
+    // own range and the gate would correctly not move, proving nothing.
+    const smallRep = [
+      ...hold(30, 8), ...ramp(30, 70, 12), ...hold(70, 8), ...ramp(70, 30, 12), ...hold(30, 8),
+    ];
+    drive(eng, [...smallRep, ...smallRep], { feature: 'shoulderAngleL' });
+    expect(eng.patientBaseline.isLocked).toBe(true);
+    expect(eng.romGate.source).toBe('baseline');
+    expect(eng.minRomForRep).toBeCloseTo(10, 6); // 0.25 x the captured 40, down from 15
+    expect(eng.minRomForRep).toBeLessThan(before);
+  });
+
+  it('falls back to the template gate when storage throws', () => {
+    const spy = jest.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError: private browsing');
+    });
+    const eng = makeArmRaiseEngine({ patientId: 'p1' });
+    expect(eng.romGate.source).toBe('template');
+    expect(eng.minRomForRep).toBeCloseTo(15, 0);
+    // and the session is flagged so the UI does not claim baseline-relative progress
+    expect(eng.patientBaseline.storageFailed()).toBe(true);
+    spy.mockRestore();
+  });
+
+  it('does not narrow the return-to-start window when the effort gate shrinks', () => {
+    // Hazard the spec missed: both thresholds were the same field. Shrinking the
+    // effort gate for a limited-ROM patient also tightened their return window,
+    // so the rep would open more easily and then never close.
+    seedBaseline('p1', 'SideArmRaise', { shoulderAngleL: 40 });
+    const eng = makeArmRaiseEngine({ patientId: 'p1' });
+    expect(eng.minRomForRep).toBeCloseTo(10, 6);      // scaled to the patient
+    expect(eng.nearStartTolerance).toBeCloseTo(15, 6); // still on the template
+
+    // Returns to 42, i.e. 12 away from the 30-degree start: inside the template
+    // tolerance (15) but outside the shrunken gate (10). Must still count.
+    const rep = [...hold(30, 8), ...ramp(30, 90, 12), ...hold(90, 10), ...ramp(90, 42, 12), ...hold(42, 8)];
+    drive(eng, rep, { feature: 'shoulderAngleL' });
+    expect(eng.repCount).toBe(1);
+  });
+
+  it('SeatedDorsiflexion: real limited ROM is uncountable on the template, countable on a baseline', () => {
+    // The exercise the spec calls out. minRomPct is 0.80 against a template that
+    // sweeps ~0.17, demanding ~0.14 of footPitchNorm, while real limited
+    // dorsiflexion produces 0.05-0.15.
+    const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+    const probe = new DTWPhaseMachine(ref, { targetReps: 5, side: 'left' });
+    const feature = probe.primaryFeature;
+    const start = probe.refStartValue;
+    const dir = probe.templateDirection || -1;
+
+    const amp = 0.06; // deliberately limited dorsiflexion
+    expect(probe.minRomForRep).toBeGreaterThan(amp); // the template gate is out of reach
+
+    const peak = start + dir * amp;
+    const seq = [
+      ...hold(start, 8), ...ramp(start, peak, 12), ...hold(peak, 10),
+      ...ramp(peak, start, 12), ...hold(start, 8),
+    ];
+
+    drive(probe, seq, { feature });
+    expect(probe.repCount).toBe(0);
+
+    seedBaseline('p-dorsi', 'SeatedDorsiflexion', { [feature]: amp });
+    const withBaseline = new DTWPhaseMachine(ref, { targetReps: 5, side: 'left', patientId: 'p-dorsi' });
+    expect(withBaseline.romGate.source).toBe('baseline');
+    expect(withBaseline.minRomForRep).toBeLessThan(amp);
+    drive(withBaseline, seq, { feature });
+    expect(withBaseline.repCount).toBeGreaterThanOrEqual(1);
+  });
+});

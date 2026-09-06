@@ -83,9 +83,12 @@ function App() {
   }
 
   const handleStartExercise = () => {
-    setIsDetecting(true); // Start detection
-    setIsSkeletonRecording(true);   // new line
-    setIsVideoRecording(true);   // new line
+    // This path forced both recorders on unconditionally, overriding the env flags
+    // AND the per-patient consent flags from the activity API. Recording consent
+    // cannot be honoured while any entry point can switch it back on by itself.
+    setIsDetecting(true);
+    setIsSkeletonRecording(process.env.REACT_APP_ALLOW_SKELETON_RECORDING === 'true');
+    setIsVideoRecording(process.env.REACT_APP_ALLOW_VIDEO_RECORDING === 'true');
   };
 
   return (

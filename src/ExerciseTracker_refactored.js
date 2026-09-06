@@ -437,7 +437,16 @@ export default function ExerciseTrackerRefactored({
 
     // Choose engine: DTWPhaseMachine (if reference exists) or PhaseMachine (hand-coded spec)
     const ref = getReference(exerciseType);
-    const patientId = activityData?.patient?.id || activityData?.userId || activityData?.activity || null;
+    // Dev mode never populates activityData (App.js short-circuits the JWT round-trip),
+    // so patientId was null, so PatientBaseline was never constructed, so the entire
+    // baseline-driven ROM gate was silently inert on exactly the loop we test with.
+    // A stable per-exercise id keeps calibration persistent across dev reloads.
+    // Inert in production: REACT_APP_DEVELOPMENT_MODE is not 'true' there.
+    const devPatientId = process.env.REACT_APP_DEVELOPMENT_MODE === 'true'
+      ? `dev-${exerciseType}`
+      : null;
+    const patientId = activityData?.patient?.id || activityData?.userId
+      || activityData?.activity || devPatientId;
     let eng;
     if (ref) {
       // Feed the engine the exact universal keys this exercise reports, so each

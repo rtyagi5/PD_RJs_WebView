@@ -12,10 +12,11 @@
 //   4. Progress tracking (ROM improvement over sessions)
 // ---------------------------------------------
 
+import { defaultBaselineStore, StoreStatus, isStorageFailure } from './BaselineStore';
+
 const CALIBRATION_REPS = 2;         // reps to capture before locking baseline
 const CALIBRATION_MIN_FRAMES = 60;  // minimum frames before allowing lock
 const TOLERANCE = 0.30;             // 30% tolerance — mobile keypoint noise needs more headroom
-const STORAGE_PREFIX = 'dtw_baseline_';
 
 export class PatientBaseline {
   /**
@@ -33,6 +34,12 @@ export class PatientBaseline {
     this.referenceRanges = opts.referenceRanges || null;
     this.calibrationReps = opts.calibrationReps ?? CALIBRATION_REPS;
     this.tolerance = opts.tolerance ?? TOLERANCE;
+    this.store = opts.store || defaultBaselineStore;
+
+    // Outcome of the last storage read/write. Callers use storageFailed() to tell
+    // "this patient is new" apart from "we could not read what they had", which
+    // look identical if you only check whether this.baseline is null.
+    this.storageStatus = null;
 
     // Baseline state
     this.isCalibrating = true;
@@ -248,7 +255,6 @@ export class PatientBaseline {
    * Save current session and baseline to localStorage.
    */
   saveToStorage() {
-    const key = this._storageKey();
     const data = {
       baseline: this.baseline,
       sessionHistory: [
@@ -257,11 +263,20 @@ export class PatientBaseline {
       ],
       savedAt: new Date().toISOString(),
     };
-    try {
-      localStorage.setItem(key, JSON.stringify(data));
-    } catch (e) {
-      console.warn('[PatientBaseline] localStorage save failed:', e);
-    }
+    const res = this.store.saveSync(this.patientId, this.exerciseName, data);
+    this.storageStatus = res.status;
+    return res;
+  }
+
+  /**
+   * True when storage could not be trusted on the last read or write — as opposed
+   * to simply being empty. A session in this state must not present
+   * baseline-relative progress, because there may be a stored baseline we failed
+   * to read and are now silently ignoring.
+   * @returns {boolean}
+   */
+  storageFailed() {
+    return isStorageFailure(this.storageStatus);
   }
 
   /**
@@ -369,16 +384,31 @@ export class PatientBaseline {
   }
 
   _storageKey() {
-    return `${STORAGE_PREFIX}${this.patientId}_${this.exerciseName}`;
+    return this.store.key(this.patientId, this.exerciseName);
   }
 
   _loadFromStorage() {
-    const key = this._storageKey();
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return;
-      const data = JSON.parse(raw);
+    const res = this.store.loadSync(this.patientId, this.exerciseName);
+    this.storageStatus = res.status;
 
+    if (res.status !== StoreStatus.OK) {
+      if (isStorageFailure(res.status)) {
+        // Loud on purpose. Previously this path was indistinguishable from a
+        // first-time patient, so a broken store silently re-baselined someone
+        // against a different starting point and every later progress number
+        // was measured from the wrong zero.
+        console.warn(
+          `[PatientBaseline] Could not read stored baseline for "${this.exerciseName}" ` +
+          `(${res.status}). This session is UNCALIBRATED — do not report ` +
+          `baseline-relative progress for it.`
+        );
+      }
+      return;
+    }
+
+    const data = res.data || {};
+
+    try {
       if (data.baseline && typeof data.baseline === 'object' && Object.keys(data.baseline).length > 0) {
         this.baseline = data.baseline;
         this.isCalibrating = false;
@@ -391,7 +421,9 @@ export class PatientBaseline {
         this.sessionHistory = data.sessionHistory;
       }
     } catch (e) {
-      console.warn('[PatientBaseline] localStorage load failed:', e);
+      // Shape errors in otherwise-parseable stored data.
+      console.warn('[PatientBaseline] stored baseline had unexpected shape:', e);
+      this.storageStatus = StoreStatus.CORRUPT;
     }
   }
 }
