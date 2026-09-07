@@ -28,6 +28,14 @@ function resolveStartCue(cue, side) {
   return null;
 }
 
+/**
+ * Strip the side / aggregate suffix from a universal feature key so it can be
+ * compared against a family name: footPitchNormL -> footPitchNorm.
+ */
+function stripSideSuffix(key) {
+  return String(key).replace(/(L|R|Min|Max|Avg)$/, '');
+}
+
 export class DTWPhaseMachine {
   /**
    * @param {Object} reference - Reference JSON object (see referenceSchema.js)
@@ -120,7 +128,20 @@ export class DTWPhaseMachine {
       bestKey = reference.primaryFeature;
       bestRange = this.featureRanges[reference.primaryFeature].range || 0;
     } else {
+      // `primaryFeatureBase` narrows the auto-picker to one feature FAMILY while
+      // leaving its side/aggregate resolution intact — which an exact
+      // `primaryFeature` pin cannot do, since it would have to name a concrete
+      // side key up front.
+      //
+      // Without it the picker compares raw ranges across incompatible units: a
+      // 20-degree ankle angle beats a 0.17 footPitchNorm ratio on magnitude
+      // alone. So the moment a recorded reference carries both families, every
+      // foot exercise would silently switch primary feature — including the calf
+      // raises, where an ankle angle is documented as the wrong instrument
+      // because the foot pivots about the toe.
+      const base = reference.primaryFeatureBase || null;
       for (const [key, stats] of Object.entries(this.featureRanges)) {
+        if (base && stripSideSuffix(key) !== base) continue;
         if (this.isAlternating) {
           // Alternating: primary feature must be an aggregate (Min/Max/Avg) so it
           // captures whichever leg is active rather than one specific side.

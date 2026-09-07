@@ -1,6 +1,8 @@
 import {
-  checkDistance, checkCameraAngle, checkCameraRoll, checkVisibility, checkLighting, runAllChecks,
+  checkDistance, checkCameraAngle, checkCameraRoll, checkVisibility, checkLighting,
+  checkFootTracking, runAllChecks, CHECK_PRIORITY,
 } from './PoseQuality';
+import { drawTargetBox } from './CoachingOverlay';
 
 const W = 640;
 const H = 480;
@@ -235,5 +237,147 @@ describe('roll gates the session', () => {
     // Missing keypoints are the visibility check's job to reject, not this one.
     const res = checkCameraRoll([{ name: 'nose', x: 1, y: 1, score: 0.9 }], 'side');
     expect(res.status).toBe('unknown');
+  });
+});
+
+// ─── Foot tracking ───────────────────────────────────────────────────────────
+// The four foot exercises are measured entirely from heel and foot_index, and
+// nothing verified either was being tracked. checkVisibility could not do it:
+// it requires EVERY listed keypoint, which is unsatisfiable side-on where the
+// far foot is occluded, and it tests `score`, which the MediaPipe wrapper fills
+// in as a synthetic 1.0 whenever the model omits visibility. So a presence test
+// on foot keypoints passed even when the landmarks were nonsense.
+//
+// The geometric test is what carries the weight: MediaPipe routinely latches
+// onto a vertical chair leg and smears heel and foot_index along it, which
+// blows heel-toe span far past any real foot. Catching that during coaching
+// lets the patient move the chair before the set instead of discovering it as
+// false reps afterwards.
+
+const SHANK = 80;
+
+/** Body plus a complete foot on one side. `spanRatio` is heel-toe over shank. */
+function bodyWithFoot({ side = 'left', spanRatio = 0.65, ...rest } = {}) {
+  const kps = body(rest);
+  const ankle = kps.find(k => k.name === `${side}_ankle`);
+  const kneeY = ankle.y - SHANK;
+  return [
+    ...kps,
+    { name: `${side}_knee`, x: ankle.x, y: kneeY, score: 1.0 },
+    { name: `${side}_heel`, x: ankle.x, y: ankle.y, score: 1.0 },
+    { name: `${side}_foot_index`, x: ankle.x + SHANK * spanRatio, y: ankle.y, score: 1.0 },
+  ];
+}
+
+const FOOT_SPEC = { framing: { view: 'side', requireFoot: true, maxRollDeg: 8 } };
+
+describe('checkFootTracking', () => {
+  it('passes straight through for exercises that do not declare requireFoot', () => {
+    // The twelve MoveNet exercises have no heel or foot_index at all - COCO-17
+    // stops at the ankle - so this must be opt-in or it rejects all of them.
+    expect(checkFootTracking(body(), {}).status).toBe('good');
+    expect(checkFootTracking([], {}).status).toBe('good');
+  });
+
+  it('accepts one plausibly-tracked foot', () => {
+    const res = checkFootTracking(bodyWithFoot(), { requireFoot: true });
+    expect(res.status).toBe('good');
+    expect(res.side).toBe('left');
+    expect(res.spanRatio).toBeCloseTo(0.65, 2);
+  });
+
+  it('accepts a single foot side-on, where the far one is occluded', () => {
+    // The decisive case against using checkVisibility for this: requiring both
+    // heels can never be satisfied in the side view all four exercises use.
+    const oneFoot = bodyWithFoot({ side: 'left' });
+    expect(oneFoot.some(k => k.name === 'right_heel')).toBe(false);
+    expect(checkFootTracking(oneFoot, { requireFoot: true }).status).toBe('good');
+  });
+
+  it('rejects a foot smeared down a chair leg', () => {
+    // 1.4 x shank is not a foot. A real one is 60-70%.
+    const res = checkFootTracking(bodyWithFoot({ spanRatio: 1.4 }), { requireFoot: true });
+    expect(res.status).toBe('implausible');
+    expect(res.message).toMatch(/chair/i);
+  });
+
+  it('rejects when no complete foot is present', () => {
+    const res = checkFootTracking(body(), { requireFoot: true });
+    expect(res.status).toBe('no_foot');
+    expect(res.message).toMatch(/foot/i);
+  });
+
+  it('is not fooled by the synthetic confidence MediaPipe reports', () => {
+    // Every foot keypoint carries score 1.0 here, exactly as the live wrapper
+    // emits. A confidence-based check would call this good.
+    const latched = bodyWithFoot({ spanRatio: 1.4 });
+    expect(latched.filter(k => k.name.includes('foot') || k.name.includes('heel'))
+      .every(k => k.score === 1.0)).toBe(true);
+    expect(checkVisibility(latched).status).toBe('good');
+    expect(checkFootTracking(latched, { requireFoot: true }).status).toBe('implausible');
+  });
+
+  it('honours a per-exercise span ceiling', () => {
+    const foot = bodyWithFoot({ spanRatio: 0.85 });
+    expect(checkFootTracking(foot, { requireFoot: true }).status).toBe('good');
+    expect(checkFootTracking(foot, { requireFoot: true, footSpanMaxRatio: 0.7 }).status)
+      .toBe('implausible');
+  });
+
+  it('takes the good foot when one side is latched and the other is clean', () => {
+    const left = bodyWithFoot({ side: 'left', spanRatio: 0.65 });
+    const ankleR = left.find(k => k.name === 'right_ankle');
+    const both = [
+      ...left,
+      { name: 'right_knee', x: ankleR.x, y: ankleR.y - SHANK, score: 1.0 },
+      { name: 'right_heel', x: ankleR.x, y: ankleR.y, score: 1.0 },
+      { name: 'right_foot_index', x: ankleR.x, y: ankleR.y + SHANK * 1.4, score: 1.0 },
+    ];
+    expect(checkFootTracking(both, { requireFoot: true }).status).toBe('good');
+  });
+});
+
+describe('foot tracking gates the session', () => {
+  it('blocks a foot exercise when no foot is visible', () => {
+    const res = runAllChecks(body({ shoulderGap: 8 }), W, H, FOOT_SPEC);
+    expect(res.allGood).toBe(false);
+    expect(res.checks.find(c => c.name === 'foot').status).toBe('no_foot');
+  });
+
+  it('lets the same setup through once a foot is tracked', () => {
+    const res = runAllChecks(bodyWithFoot({ shoulderGap: 8 }), W, H, FOOT_SPEC);
+    expect(res.checks.find(c => c.name === 'foot').status).toBe('good');
+    expect(res.allGood).toBe(true);
+  });
+
+  it('does not gate the exercises that never declare it', () => {
+    // Regression guard: adding a P0 check must not quietly break the other 12.
+    const res = runAllChecks(body(), W, H, { framing: { view: 'front' } });
+    expect(res.checks.find(c => c.name === 'foot').status).toBe('good');
+    expect(res.allGood).toBe(true);
+  });
+
+  it('reports foot as its own check dimension and ranks it early', () => {
+    const res = runAllChecks(body(), W, H, FOOT_SPEC);
+    expect(res.checks.map(c => c.name)).toContain('foot');
+    expect(CHECK_PRIORITY.indexOf('foot')).toBeLessThan(CHECK_PRIORITY.indexOf('distance'));
+  });
+});
+
+describe('drawTargetBox agrees with checkDistance', () => {
+  it('scales the box with the ratio it is given', () => {
+    // The box used to be hardcoded at 0.60 of frame height whatever ratio was
+    // passed, so it coached seated patients (target 0.45) into a position the
+    // distance check then rejected.
+    const heights = [];
+    const ctx = {
+      save: () => {}, restore: () => {}, fillRect: () => {}, setLineDash: () => {},
+      beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, stroke: () => {},
+      strokeRect: (x, y, w, h) => heights.push(h),
+    };
+    drawTargetBox(ctx, W, H, 0.45, '#fff');
+    drawTargetBox(ctx, W, H, 0.60, '#fff');
+    expect(heights[0]).toBeCloseTo(H * 0.45, 5);
+    expect(heights[1]).toBeCloseTo(H * 0.60, 5);
   });
 });

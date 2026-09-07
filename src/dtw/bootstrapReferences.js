@@ -20,6 +20,48 @@ let _initialized = false;
  * Safe to call multiple times — only runs once.
  * @returns {number} Number of references registered
  */
+// Fields a recording must NOT be able to redefine. A .ref.json replaces the
+// synthetic reference wholesale, so without this any of these silently reverts
+// to whatever the extractor happened to write — including safety limits.
+//
+// The split is: a recording supplies the SHAPE of the movement (template,
+// featureRanges, phase labels, repCycle, coaching cues); EXERCISE_CONFIGS stays
+// the authority on policy (which feature counts reps, what the clinical caps
+// are, how the camera must be set up, which detector runs).
+//
+// `primaryFeatureBase` is the sharpest case. The auto-picker ranks features by
+// raw range, comparing degrees against dimensionless ratios, so a recorded
+// template carrying both an ankle angle and footPitchNorm would hand the foot
+// exercises a new primary feature purely on magnitude.
+export const CANONICAL_FIELDS = [
+  'primaryFeature', 'primaryFeatureBase',
+  'clinicalCaps', 'framing',
+  'minRomPct', 'timing',
+  'detector', 'mode', 'side',
+];
+
+/** Overlay the canonical policy fields from `canonical` onto a loaded reference. */
+export function applyCanonicalPolicy(ref, canonical) {
+  if (!canonical) return ref;
+  const merged = { ...ref };
+  const overridden = [];
+  for (const field of CANONICAL_FIELDS) {
+    if (canonical[field] === undefined) continue;
+    // Only report a real disagreement, not the absence of a field.
+    if (ref[field] !== undefined && JSON.stringify(ref[field]) !== JSON.stringify(canonical[field])) {
+      overridden.push(field);
+    }
+    merged[field] = canonical[field];
+  }
+  if (overridden.length) {
+    console.warn(
+      `[Bootstrap] "${ref.name}" — ignoring ${overridden.join(', ')} from the .ref.json; ` +
+      `these come from EXERCISE_CONFIGS, not from a recording.`
+    );
+  }
+  return merged;
+}
+
 export function bootstrapAllReferences() {
   if (_initialized) return 0;
   _initialized = true;
@@ -72,7 +114,10 @@ export function bootstrapAllReferences() {
       continue;
     }
 
-    const result = registerReference(ref.name, { ...ref, source: 'video' });
+    const result = registerReference(
+      ref.name,
+      { ...applyCanonicalPolicy(ref, refs[ref.name]), source: 'video' }
+    );
     if (result.valid) {
       fileCount++;
       console.log(`[Bootstrap] Loaded video reference: "${ref.name}" (overrides synthetic)`);

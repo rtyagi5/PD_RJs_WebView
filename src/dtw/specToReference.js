@@ -98,6 +98,7 @@ export function generateReference(config) {
     highlightKeypoints: config.highlightKeypoints || null,
     minRomPct: config.minRomPct ?? null,
     primaryFeature: config.primaryFeature || null,
+    primaryFeatureBase: config.primaryFeatureBase || null,
     // Absolute clinical safety ceilings, side-generic (e.g. { shoulderAngle: { max: 95 } }).
     // Resolved to L/R at runtime by DTWPhaseMachine and checked every frame, independently
     // of the template — a template-relative check alone can never catch "too far" reliably.
@@ -671,11 +672,28 @@ export const EXERCISE_CONFIGS = {
       // signal of 0.05-0.15. Even 8 is a practical compromise, not a safe margin —
       // an angle-based ankle feature would remove this sensitivity entirely.
       view: 'side', maxRollDeg: 8,
+      // The exercise is measured entirely from the foot, so verify one is
+      // actually being tracked before the set starts. checkVisibility cannot do
+      // this job: it wants every listed keypoint (the far foot is occluded
+      // side-on) and it trusts `score`, which MediaPipe reports as a synthetic
+      // 1.0. checkFootTracking asks for one complete foot and tests heel↔toe
+      // span against shank, which is what actually catches a chair-leg latch.
+      requireFoot: true,
+      // Seated: nose→ankle spans less of the frame than standing at the same
+      // distance, so the default 0.50 target would read as 'too far' and push
+      // the patient closer than the exercise needs.
+      idealBodyRatio: 0.45,
       instruction: 'Sit at the edge of the chair, active foot in front of you (NOT next to chair leg)',
     },
     startCue: 'Push up onto your toes, then lower your heels',
     // 0.65 + dwell tightens the gate. Real calf raise sweeps ankleAngleToe ~20°,
     // so 13° threshold (was 10°) still allows partial reps but rejects more chair-leg noise.
+    // Pinned to the family the template already counts on. A recorded reference
+    // will carry ankleAngleToe as well, and its ~20 degrees would beat this
+    // 0.17 ratio on raw magnitude in the auto-picker. For a calf raise the foot
+    // pivots about the TOE, so the ankle angle barely moves (5-15 degrees of real
+    // change against a 50-degree template) — see the comment below. Keep it here.
+    primaryFeatureBase: 'footPitchNorm',
     minRomPct: 0.65,
     // 400ms dwell requires sustained phase positioning, filtering transient glitches.
     timing: { dwellMs: 400 },
@@ -730,6 +748,13 @@ export const EXERCISE_CONFIGS = {
       // signal of 0.05-0.15. Even 8 is a practical compromise, not a safe margin —
       // an angle-based ankle feature would remove this sensitivity entirely.
       view: 'side', maxRollDeg: 8,
+      // The exercise is measured entirely from the foot, so verify one is
+      // actually being tracked before the set starts. checkVisibility cannot do
+      // this job: it wants every listed keypoint (the far foot is occluded
+      // side-on) and it trusts `score`, which MediaPipe reports as a synthetic
+      // 1.0. checkFootTracking asks for one complete foot and tests heel↔toe
+      // span against shank, which is what actually catches a chair-leg latch.
+      requireFoot: true,
       instruction: 'Stand sideways to the camera, exercising foot toward the camera',
     },
     startCue: 'Rise up onto your toes, then lower your heels slowly',
@@ -737,6 +762,9 @@ export const EXERCISE_CONFIGS = {
     // standing geometry — actual values land in the 100-130 range, way outside the template.
     // footPitchNorm directly measures heel elevation (0 flat → +0.12 on toes), independent
     // of body posture and stance, and produces opposite signs vs dorsiflexion/body-shift.
+    // Same pin as the seated variant: the ankle angle is the wrong instrument for a
+    // calf raise, and without this a recorded reference would select it.
+    primaryFeatureBase: 'footPitchNorm',
     minRomPct: 0.65,
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
     // Standing calf raise tops out at footPitchNorm 0.12. Rising higher onto the toes
@@ -785,6 +813,17 @@ export const EXERCISE_CONFIGS = {
       // signal of 0.05-0.15. Even 8 is a practical compromise, not a safe margin —
       // an angle-based ankle feature would remove this sensitivity entirely.
       view: 'side', maxRollDeg: 8,
+      // The exercise is measured entirely from the foot, so verify one is
+      // actually being tracked before the set starts. checkVisibility cannot do
+      // this job: it wants every listed keypoint (the far foot is occluded
+      // side-on) and it trusts `score`, which MediaPipe reports as a synthetic
+      // 1.0. checkFootTracking asks for one complete foot and tests heel↔toe
+      // span against shank, which is what actually catches a chair-leg latch.
+      requireFoot: true,
+      // Seated: nose→ankle spans less of the frame than standing at the same
+      // distance, so the default 0.50 target would read as 'too far' and push
+      // the patient closer than the exercise needs.
+      idealBodyRatio: 0.45,
       instruction: 'Sit at the edge of the chair, active foot in front of you (NOT next to chair leg)',
     },
     startCue: {
@@ -796,6 +835,13 @@ export const EXERCISE_CONFIGS = {
     // feature in the system (only 2 keypoints, both prone to chair-leg / occlusion
     // confusion). Patient must dorsiflex ~80% of full range AND hold each phase
     // for 400ms — together these reject most spurious noise.
+    // Pinned so a recorded reference cannot switch this silently. Dorsiflexion is
+    // the one foot exercise where ankleAngleToe is a genuine candidate — toes up
+    // against a planted heel IS an ankle rotation, it uses knee+ankle+foot_index
+    // rather than the two least reliable landmarks, and it is roll-invariant by
+    // construction. The switch waits on measured values from a capture; the last
+    // attempt failed because the template numbers were guessed.
+    primaryFeatureBase: 'footPitchNorm',
     minRomPct: 0.80,
     timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
@@ -843,6 +889,13 @@ export const EXERCISE_CONFIGS = {
       // signal of 0.05-0.15. Even 8 is a practical compromise, not a safe margin —
       // an angle-based ankle feature would remove this sensitivity entirely.
       view: 'side', maxRollDeg: 8,
+      // The exercise is measured entirely from the foot, so verify one is
+      // actually being tracked before the set starts. checkVisibility cannot do
+      // this job: it wants every listed keypoint (the far foot is occluded
+      // side-on) and it trusts `score`, which MediaPipe reports as a synthetic
+      // 1.0. checkFootTracking asks for one complete foot and tests heel↔toe
+      // span against shank, which is what actually catches a chair-leg latch.
+      requireFoot: true,
       instruction: 'Stand sideways to the camera, exercising foot toward the camera, clear floor area',
     },
     startCue: {
@@ -854,6 +907,9 @@ export const EXERCISE_CONFIGS = {
     // to body-sway-induced auto-counting because micro-balance adjustments shift the
     // foot keypoints. Patient must dorsiflex ~80% of full range AND hold each phase
     // for 400ms — only sustained, deliberate motion counts.
+    // Same as the seated variant, and the same pending switch. The previous attempt
+    // used a template of 88->68 while real standing geometry lands at 100-130.
+    primaryFeatureBase: 'footPitchNorm',
     minRomPct: 0.80,
     timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],

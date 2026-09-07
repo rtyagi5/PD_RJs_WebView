@@ -13,9 +13,17 @@ import { IDEAL_BODY_RATIO, CHECK_PRIORITY } from './PoseQuality';
 export function drawTargetBox(ctx, frameW, frameH, idealBodyRatio, color) {
   const ratio = idealBodyRatio ?? IDEAL_BODY_RATIO;
 
-  // Box dimensions: width 50 % of frame, height from ratio
-  const boxH = frameH * 0.60;
-  const boxW = frameW * 0.60;
+  // The box has to mean the same thing the check enforces, or it coaches the
+  // patient into a position that then fails. checkDistance measures the
+  // nose→ankle span as a fraction of frame height, so that is the box height.
+  // It used to be hardcoded at 0.60 regardless of the ratio passed in, which
+  // made the argument decorative — and wrong for the seated exercises, which
+  // target 0.45.
+  const boxH = frameH * ratio;
+
+  // Width follows height so the box stays person-shaped at any ratio, clamped
+  // so it can never overflow a wide frame.
+  const boxW = Math.min(frameW * 0.60, boxH * 0.70);
 
   // Centered, slight vertical offset (body center ≈ 45 % from top)
   const boxX = (frameW - boxW) / 2;

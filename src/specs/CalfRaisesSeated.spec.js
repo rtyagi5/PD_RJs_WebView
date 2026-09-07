@@ -24,14 +24,20 @@ const CalfRaisesSeated = {
   dwellMs: 180,       // slightly quicker to register transitions
   refractoryMs: 600,  // avoid double-triggering on noise
 
-  // Coaching: seated exercises have a smaller body-to-frame ratio
+  // Coaching. NOTE: this block is the fallback for the non-DTW path only. Every
+  // exercise now resolves a DTW reference, and DTWPhaseMachine builds its spec
+  // from `reference.framing` — i.e. from EXERCISE_CONFIGS in
+  // dtw/specToReference.js — so that is the file to edit. Kept in sync here so
+  // the two cannot quietly disagree if the fallback is ever taken.
+  //
+  // It previously said view 'front' while the canonical config says 'side', and
+  // required BOTH heels, which is unsatisfiable side-on because the far foot is
+  // occluded. checkFootTracking asks for one complete foot instead.
   framing: {
-    view: 'front',
+    view: 'side',
+    maxRollDeg: 8,
     idealBodyRatio: 0.45,
-    requiredKeypoints: [
-      'left_shoulder', 'right_shoulder', 'left_hip', 'right_hip',
-      'left_ankle', 'right_ankle', 'left_heel', 'right_heel',
-    ],
+    requireFoot: true,
   },
 
   onStart: () => {

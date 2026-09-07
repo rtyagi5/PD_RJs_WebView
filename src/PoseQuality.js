@@ -14,11 +14,14 @@ export const DISTANCE_TOL_FAR   = 0.30;  // ratio < ideal - this → "too far"  
 export const MIN_CONFIDENCE     = 0.3;   // per-keypoint visibility threshold
 export const LIGHTING_THRESHOLD = 0.25;
 export const MAX_ROLL_DEG        = 12;   // camera tilt beyond this rejects the setup  // avg score below this → poor lighting
+// Heel↔toe span may not exceed this fraction of shank length. Mirrors the
+// footValid guard in dtw/universalFeatures.js so setup and runtime agree.
+export const FOOT_SPAN_MAX_RATIO = 0.9;
 
 // Which failing check the patient is told about first. Single source of truth:
 // both the spoken/among-message selection (SessionStateMachine) and the on-canvas
 // coaching text (CoachingOverlay) use this, so they can never disagree.
-export const CHECK_PRIORITY = ['visibility', 'distance', 'angle', 'lighting'];
+export const CHECK_PRIORITY = ['visibility', 'foot', 'distance', 'angle', 'lighting'];
 
 // Default keypoints every exercise needs visible
 const DEFAULT_REQUIRED_KPS = [
@@ -249,6 +252,86 @@ export function checkVisibility(keypoints, requiredKeypoints) {
   return { status: 'good', message: '', missing: [] };
 }
 
+// ── Check: Foot tracking ──────────────────────────────────────────
+// Only runs for exercises that declare `framing.requireFoot`. Opt-in because the
+// twelve MoveNet exercises have no heel/foot_index keypoints at all — COCO-17
+// stops at the ankle — so this would reject every one of them.
+//
+// Two things checkVisibility cannot do here:
+//
+//  1. It requires EVERY listed keypoint. All four foot exercises are side-on
+//     with one foot toward the camera, so the far foot is legitimately
+//     occluded. This asks for one COMPLETE foot instead, either side.
+//
+//  2. It leans on `score`, and MediaPipe's wrapper substitutes a synthetic 1.0
+//     when the model omits `visibility` (detectors.js), so a presence test on
+//     foot keypoints passes even when the landmarks are nonsense. This adds the
+//     geometric plausibility test instead: MediaPipe routinely latches onto a
+//     vertical chair leg and smears heel and foot_index along it, which blows
+//     the heel↔toe span far past any real foot. A real foot is 60-70% of shank.
+//
+// Catching that at setup lets the patient move the chair before the set starts,
+// rather than discovering it as false reps afterwards.
+//
+// Returns { status: 'good'|'no_foot'|'implausible', message, side, spanRatio }
+
+const FOOT_GROUPS = [
+  { side: 'left',  knee: 'left_knee',  ankle: 'left_ankle',  heel: 'left_heel',  toe: 'left_foot_index'  },
+  { side: 'right', knee: 'right_knee', ankle: 'right_ankle', heel: 'right_heel', toe: 'right_foot_index' },
+];
+
+export function checkFootTracking(keypoints, overrides = {}) {
+  if (!overrides.requireFoot) return { status: 'good', message: '', side: null, spanRatio: NaN };
+
+  const maxRatio = Number.isFinite(overrides.footSpanMaxRatio)
+    ? overrides.footSpanMaxRatio
+    : FOOT_SPAN_MAX_RATIO;
+
+  let sawCompleteFoot = false;
+  let worst = { side: null, spanRatio: NaN };
+
+  for (const g of FOOT_GROUPS) {
+    const knee  = kp(keypoints, g.knee);
+    const ankle = kp(keypoints, g.ankle);
+    const heel  = kp(keypoints, g.heel);
+    const toe   = kp(keypoints, g.toe);
+
+    const complete = [knee, ankle, heel, toe].every(k => present(k, MIN_CONFIDENCE));
+    if (!complete) continue;
+
+    const shank = Math.hypot(knee.x - ankle.x, knee.y - ankle.y);
+    const span  = Math.hypot(heel.x - toe.x, heel.y - toe.y);
+    if (!(shank > 0)) continue;
+
+    sawCompleteFoot = true;
+    const spanRatio = span / shank;
+
+    // One good foot is all the exercise needs.
+    if (spanRatio <= maxRatio) {
+      return { status: 'good', message: '', side: g.side, spanRatio };
+    }
+    if (!Number.isFinite(worst.spanRatio) || spanRatio > worst.spanRatio) {
+      worst = { side: g.side, spanRatio };
+    }
+  }
+
+  if (!sawCompleteFoot) {
+    return {
+      status: 'no_foot',
+      message: 'Make sure your whole foot is in view, from knee to toes',
+      side: null,
+      spanRatio: NaN,
+    };
+  }
+
+  return {
+    status: 'implausible',
+    message: 'Move your foot away from the chair legs so it can be tracked',
+    side: worst.side,
+    spanRatio: worst.spanRatio,
+  };
+}
+
 // ── Check: Lighting ──────────────────────────────────────────────────────────
 // Returns { status: 'good'|'poor', message, avgScore }
 
@@ -277,6 +360,7 @@ export function runAllChecks(keypoints, frameW, frameH, spec) {
   const angle      = checkCameraAngle(keypoints, frameW, frameH, view, framing.instruction);
   const roll       = checkCameraRoll(keypoints, view, framing);
   const visibility = checkVisibility(keypoints, framing.requiredKeypoints);
+  const foot       = checkFootTracking(keypoints, framing);
   const lighting   = checkLighting(keypoints);
 
   const checks = [
@@ -284,6 +368,7 @@ export function runAllChecks(keypoints, frameW, frameH, spec) {
     { name: 'angle',      ...angle },
     { name: 'roll',       ...roll },
     { name: 'visibility', ...visibility },
+    { name: 'foot',       ...foot },
     { name: 'lighting',   ...lighting },
   ];
 
@@ -294,7 +379,8 @@ export function runAllChecks(keypoints, frameW, frameH, spec) {
   const p0Good = distance.status === 'good'
     && angle.status === 'good'
     && roll.status !== 'rolled'
-    && visibility.status === 'good';
+    && visibility.status === 'good'
+    && foot.status === 'good';
 
   return { allGood: p0Good, checks };
 }

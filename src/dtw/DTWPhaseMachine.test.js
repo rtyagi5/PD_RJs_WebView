@@ -3,6 +3,7 @@
 // jitter defences that were added in response to live bugs.
 import { DTWPhaseMachine } from './DTWPhaseMachine';
 import { generateReference, EXERCISE_CONFIGS } from './specToReference';
+import { applyCanonicalPolicy, CANONICAL_FIELDS } from './bootstrapReferences';
 
 const FRAME_MS = 33; // ~30fps
 
@@ -527,5 +528,199 @@ describe('clinical cap flagging', () => {
     const out = drive(eng, overshootRep(), { feature: 'shoulderAngleL' });
     const tooMuch = EXERCISE_CONFIGS.SideArmRaise.feedback.range.tooMuch;
     expect(out.some(r => r.feedback === tooMuch)).toBe(true);
+  });
+});
+
+// ─── Primary-feature family pinning ──────────────────────────────────────────
+// The auto-picker ranks features by raw range, which compares degrees against
+// dimensionless ratios. A 20-degree ankle angle beats a 0.17 footPitchNorm on
+// magnitude alone, so the moment a recorded reference carries both families
+// every foot exercise would silently change which feature counts its reps -
+// including the calf raises, where the ankle angle is documented as the wrong
+// instrument because the foot pivots about the toe.
+//
+// primaryFeatureBase narrows the picker to one family while leaving its
+// side/aggregate resolution intact, which an exact primaryFeature pin cannot do
+// because it would have to name a concrete side key up front.
+
+/** Simulate a recorded reference by adding an angle family to the template. */
+function withAnkleAngles(ref, range = 20) {
+  return {
+    ...ref,
+    featureRanges: {
+      ...ref.featureRanges,
+      ankleAngleToeL: { min: 90, max: 90 + range, range },
+      ankleAngleToeR: { min: 90, max: 90 + range, range },
+    },
+  };
+}
+
+describe('primary feature family pinning', () => {
+  const dorsi = () => generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+
+  it('leaves the shipped foot exercises on footPitchNorm', () => {
+    const eng = new DTWPhaseMachine(dorsi(), { targetReps: 5, side: 'left' });
+    expect(eng.primaryFeature).toBe('footPitchNormL');
+  });
+
+  it('would be hijacked by an angle family without the pin', () => {
+    // The hazard, demonstrated. Strip the pin and the bigger raw range wins.
+    const ref = withAnkleAngles(dorsi());
+    const unpinned = { ...ref, primaryFeatureBase: null };
+    const eng = new DTWPhaseMachine(unpinned, { targetReps: 5, side: 'left' });
+    expect(eng.primaryFeature).toBe('ankleAngleToeL');
+  });
+
+  it('holds the family when a recorded reference adds an angle', () => {
+    const eng = new DTWPhaseMachine(withAnkleAngles(dorsi()), { targetReps: 5, side: 'left' });
+    expect(eng.primaryFeature).toBe('footPitchNormL');
+  });
+
+  it('still resolves the side within the pinned family', () => {
+    // What an exact primaryFeature pin could not do.
+    const eng = new DTWPhaseMachine(withAnkleAngles(dorsi()), { targetReps: 5, side: 'right' });
+    expect(eng.primaryFeature).toBe('footPitchNormR');
+  });
+
+  it('pins every foot exercise, not just the dorsiflexion pair', () => {
+    for (const name of ['CalfRaisesSeated', 'CalfRaisesStanding',
+      'SeatedDorsiflexion', 'StandingDorsiflexion']) {
+      const ref = withAnkleAngles(generateReference(EXERCISE_CONFIGS[name]));
+      const eng = new DTWPhaseMachine(ref, { targetReps: 5, side: 'left' });
+      expect(`${name}:${eng.primaryFeature}`).toBe(`${name}:footPitchNormL`);
+    }
+  });
+
+  it('leaves the angle exercises alone', () => {
+    // Regression guard: the pin is opt-in, so the twelve MoveNet exercises
+    // must keep auto-picking exactly as before.
+    expect(makeArmRaiseEngine().primaryFeature).toBe('shoulderAngleL');
+  });
+});
+
+// ─── Velocity jump filter ────────────────────────────────────────────────────
+// The filter masks primary-feature jumps above 20 units in one frame, to reject
+// tracking glitches. The threshold is ABSOLUTE, which means it does different
+// things to different feature families - and for the four foot exercises it
+// currently does nothing at all. These pin both halves of that, so switching
+// dorsiflexion to an angle feature cannot silently activate an untested filter
+// on the least reliable exercises in the system.
+
+describe('velocity jump filter', () => {
+  const stepOnce = (eng, feature, v, t) => eng.step({
+    t, now: t, features: { [feature]: v }, say: () => {}, setHighlight: () => {},
+  });
+
+  it('masks an impossible jump for an angle feature', () => {
+    const eng = makeArmRaiseEngine();
+    stepOnce(eng, 'shoulderAngleL', 30, 1000);
+    expect(eng._prevPrimaryValue).toBe(30);
+
+    // 30 degrees in one frame is roughly 900 deg/s. Not a shoulder.
+    stepOnce(eng, 'shoulderAngleL', 60, 1033);
+    expect(eng._prevPrimaryValue).toBe(30);
+  });
+
+  it('lets real movement through', () => {
+    const eng = makeArmRaiseEngine();
+    stepOnce(eng, 'shoulderAngleL', 30, 1000);
+    stepOnce(eng, 'shoulderAngleL', 45, 1033);
+    expect(eng._prevPrimaryValue).toBe(45);
+  });
+
+  it('cannot fire at all for footPitchNorm, whose whole range is 0.17', () => {
+    // Documents a real gap rather than asserting correctness: the four foot
+    // exercises have NO velocity gate today. A chair-leg latch that throws
+    // footPitchNorm from 0.12 to 5.0 - roughly thirty times the entire range
+    // of the movement - is passed straight through, because 4.88 < 20.
+    const eng = new DTWPhaseMachine(
+      generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion),
+      { targetReps: 5, side: 'left' }
+    );
+    expect(eng.primaryFeature).toBe('footPitchNormL');
+    stepOnce(eng, 'footPitchNormL', 0.12, 1000);
+    stepOnce(eng, 'footPitchNormL', 5.0, 1033);
+    expect(eng._prevPrimaryValue).toBe(5.0);
+  });
+
+  it('activates for a foot exercise the moment its primary is an angle', () => {
+    // The consequence of the pending dorsiflexion switch: the same filter that
+    // has never run on these exercises starts running. Pinned here so it is a
+    // decision rather than a surprise on the phone.
+    const ref = withAnkleAngles(generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion));
+    const eng = new DTWPhaseMachine(
+      { ...ref, primaryFeatureBase: 'ankleAngleToe' },
+      { targetReps: 5, side: 'left' }
+    );
+    expect(eng.primaryFeature).toBe('ankleAngleToeL');
+
+    stepOnce(eng, 'ankleAngleToeL', 95, 1000);
+    expect(eng._prevPrimaryValue).toBe(95);
+
+    // A chair-leg latch swings the ankle angle wildly; now it gets caught.
+    stepOnce(eng, 'ankleAngleToeL', 140, 1033);
+    expect(eng._prevPrimaryValue).toBe(95);
+
+    // And a real dorsiflexion at a plausible speed is not masked.
+    stepOnce(eng, 'ankleAngleToeL', 103, 1066);
+    expect(eng._prevPrimaryValue).toBe(103);
+  });
+});
+
+// ─── Canonical policy on recorded references ─────────────────────────────────
+// A .ref.json replaces the synthetic reference wholesale, so without an overlay
+// every policy field reverts to whatever the extractor happened to write -
+// including the clinical caps and the camera setup limits.
+
+describe('canonical policy overlay', () => {
+  const canonical = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+
+  it('keeps the feature pin a recording does not know about', () => {
+    const recorded = { name: 'SeatedDorsiflexion', template: [], featureRanges: {} };
+    expect(recorded.primaryFeatureBase).toBeUndefined();
+    expect(applyCanonicalPolicy(recorded, canonical).primaryFeatureBase).toBe('footPitchNorm');
+  });
+
+  it('refuses to let a recording redefine the clinical caps', () => {
+    const recorded = {
+      name: 'SeatedDorsiflexion',
+      clinicalCaps: { footPitchNorm: { min: -99 } },
+    };
+    expect(applyCanonicalPolicy(recorded, canonical).clinicalCaps)
+      .toEqual(canonical.clinicalCaps);
+  });
+
+  it('refuses to let a recording loosen the camera setup limits', () => {
+    const recorded = { name: 'SeatedDorsiflexion', framing: { view: 'front' } };
+    const merged = applyCanonicalPolicy(recorded, canonical);
+    expect(merged.framing.view).toBe('side');
+    expect(merged.framing.maxRollDeg).toBe(8);
+    expect(merged.framing.requireFoot).toBe(true);
+  });
+
+  it('leaves the movement shape to the recording', () => {
+    // The split: EXERCISE_CONFIGS owns policy, the recording owns shape.
+    const recorded = {
+      name: 'SeatedDorsiflexion',
+      template: [{ phase: 'lowered' }],
+      featureRanges: { footPitchNormL: { min: 0, max: 0.2, range: 0.2 } },
+      repCycle: { start: 'lowered', effort: 'dorsiflexed' },
+    };
+    const merged = applyCanonicalPolicy(recorded, canonical);
+    expect(merged.template).toBe(recorded.template);
+    expect(merged.featureRanges).toBe(recorded.featureRanges);
+    expect(merged.repCycle).toBe(recorded.repCycle);
+  });
+
+  it('passes a reference through untouched when there is no canonical entry', () => {
+    const recorded = { name: 'Whatever', clinicalCaps: { x: { max: 1 } } };
+    expect(applyCanonicalPolicy(recorded, undefined)).toBe(recorded);
+  });
+
+  it('covers every field the engine treats as policy', () => {
+    expect(CANONICAL_FIELDS).toEqual(expect.arrayContaining([
+      'primaryFeature', 'primaryFeatureBase', 'clinicalCaps', 'framing',
+      'minRomPct', 'timing', 'detector', 'mode', 'side',
+    ]));
   });
 });

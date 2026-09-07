@@ -18,6 +18,7 @@ features will not correspond to live ones.
 
 | Requirement | Why |
 | --- | --- |
+| **Resolution above ~1280 wide buys nothing** | The extractor caps processing at `PROCESSING_MAX_WIDTH` (`src/captureConfig.js`), so a 4K take is downscaled before pose detection. Recording higher is harmless, just pointless. See below for why the cap exists. |
 | **One unbroken take** | Cuts and zoom changes destroy phase shape. An edited library clip is unusable for this even if it looks fine. |
 | **Fixed camera, fixed distance** | Every feature is a 2D image-space measurement. A camera that moves changes the numbers without the body changing. |
 | **Camera level — not tilted sideways** | See below. This is the one setup error that silently fabricates signal rather than just adding noise. |
@@ -68,6 +69,68 @@ For a reference recording this matters more than for a patient session: a patien
 their own, so their idiosyncrasies wash out, but **a roll error in the reference is baked into the
 template as the correct shape and every patient is then compared against it.** Use a tripod or a
 stable prop, check the level with your camera app's grid, and do not touch it between reps.
+
+## Resolution, and why the extractor deliberately throws pixels away
+
+Neither detector sees your video. Both crop their own region of interest around the person and
+resize it before inference — MoveNet to **192x192**, MediaPipe/BlazePose to **256x256**. The subject
+therefore fills the model input regardless of how far away they stand, and the foot is a small fixed
+fraction of it either way. A `footPitchNorm` swing of 0.05-0.15 comes out as roughly a **3-10 pixel**
+vertical difference between heel and foot_index.
+
+That has a consequence for recording. A phone camera app records at 1080p or better; a live patient
+session captures at `PROCESSING_MAX_WIDTH`. Extracting at native resolution would build the template
+from landmark quality no live session can reproduce, making the template systematically unreachable —
+the same failure as a reference whose feature scale does not match the live one.
+
+So `videoFeatureExtractor` runs pose on a canvas capped at the same width live capture requests. You
+will see it say so:
+
+```
+[VideoExtractor] processing at 1280x720 (source 1920x1080) to match live capture
+```
+
+This equalises pixel *count*, not image *quality* — a rear camera recording is still sharper than a
+front-camera live frame, and nothing in the pipeline can close that gap. Record in good light so the
+difference stays small.
+
+## Foot exercises: the setup check is stricter now
+
+The four foot exercises declare `framing.requireFoot`, so `PoseQuality.checkFootTracking` must see
+**one complete foot** — knee, ankle, heel and foot_index on the same side — before the session
+starts. One is enough: side-on, the far foot is legitimately occluded.
+
+It also tests the geometry, because MediaPipe reports a synthetic confidence of `1.0` for these
+landmarks, which makes a presence check nearly meaningless. Heel-to-toe span must be at most 90% of
+shank length; a real foot is 60-70%. Past that, the model has almost certainly latched onto a
+vertical chair leg and smeared both keypoints along it. If you see
+
+> Move your foot away from the chair legs so it can be tracked
+
+move the chair, do not move the camera. This is the single most common way a foot recording is
+wasted, and it now fails during setup instead of silently producing false reps.
+
+## Also record a live capture, so the features can be measured
+
+A reference video tells you the shape of the movement. It does not tell you whether the engine can
+*see* it. For that, run the same exercise live through the dev server so `KeypointRecorder` writes a
+`.jsonl` of raw keypoints to `captures/`, then:
+
+```
+yarn test:ci --testPathPattern=analyzeCapture
+```
+
+It prints heel-to-toe span in pixels, the real on-device frame rate, and the signal-to-noise of
+`footPitchNorm`, `ankleAngleToe` and `ankleAngleHeel` computed from identical frames. That last
+comparison is the evidence for whether a foot exercise should change its primary feature — a
+question that has already been answered wrongly once from guessed numbers.
+
+Two things to know before you try:
+
+- Recording is off by default. Do **not** edit `.env`, which is committed — create `.env.local`
+  (gitignored, and higher precedence in CRA) containing `REACT_APP_ALLOW_SKELETON_RECORDING=true`.
+- The file is only flushed on the completion path, so **finish the set**. An aborted session leaves
+  nothing behind.
 
 ## The one that actually matters
 

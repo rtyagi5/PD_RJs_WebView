@@ -146,6 +146,16 @@ Three things make this the weakest group:
 - These are the four MediaPipe exercises, where `visibility` defaults to `1.0` when the model omits
   it (`detectors.js:194`), so the keypoints these caps depend on can carry unearned confidence.
 
+- **The measurement is only a few pixels wide.** Both detectors resize their own person-ROI before
+  inference (MoveNet to 192x192, BlazePose to 256x256), so the foot occupies a small fixed fraction
+  of the model input no matter how close the patient stands — moving nearer does not help, and
+  cropping to the foot is impossible because BlazePose localises the person from facial landmarks
+  before it can find anything else. A 0.05-0.15 `footPitchNorm` swing is therefore roughly a **3-10
+  pixel** vertical difference between the two least reliable landmarks in the model. `captureConfig`
+  now requests 1280 rather than accepting Chrome's 640x480 default, which stops that ROI being
+  upsampled, but it cannot change the model input size. `src/tools/analyzeCapture.js` measures the
+  resulting signal-to-noise directly from a capture; until it has been run on real footage, the
+  usable precision of these four features is unknown.
 - `footPitchNorm` is a vertical difference in image space, so it is sensitive to camera roll in a
   way the angle features are not. A camera rolled by θ injects roughly `0.65 x sin(θ)` — about 0.11
   at 10° — against a real signal of 0.05–0.15. `checkCameraRoll` now rejects setups beyond 8° for
@@ -155,11 +165,36 @@ Three things make this the weakest group:
 **These four should be calibrated from measured `footPitchNorm` distributions before review**, not
 argued from literature. That is exactly what the WI-1 captures are for.
 
-**And the roll sensitivity is independent evidence for the spec's WI-6 Experiment C**: an
-angle-based ankle feature (`anklePitchAngle`, the three-point angle knee→ankle→foot_index) would be
-invariant to camera roll by construction, removing this entire error class rather than policing it
-with a setup check. Worth deciding before these caps are calibrated, since calibrating
-`footPitchNorm` and then replacing it wastes the work.
+**On WI-6 Experiment C — the angle-based ankle feature already exists.** It is `ankleAngleToe`
+(`universalFeatures.js`, the three-point angle knee→ankle→foot_index), it is already computed,
+already `footValid`-gated, and already reported as a metric for all four exercises. Being a
+three-point angle it is invariant to camera roll by construction, and it draws on knee and ankle —
+two reliable landmarks — rather than on heel and foot_index alone.
+
+It was also **already tried and reverted**, for two different reasons recorded in
+`specToReference.js`:
+
+- *Calf raises*: "the foot pivots around the toe — the ankle joint barely flexes (so ankleAngle
+  features were producing only 5-15° of real change despite 50° template assumptions)". That is
+  physics, and recalibration cannot fix it.
+- *Standing*: "template (88→68) doesn't match real standing geometry — actual values land in the
+  100-130 range". That is a fabricated template, and a recorded reference fixes exactly it.
+
+Neither objection is recorded against a *dorsiflexion* config, and toes-up against a planted heel is
+a genuine ankle rotation, so dorsiflexion is where the switch is plausible. Note it would fix roll
+sensitivity but **not** the pixel-count problem above — angular precision is still set by
+foot_index's pixel error over a short arm.
+
+Do not decide this from argument. A `.jsonl` capture stores raw keypoints, so `analyzeCapture`
+recomputes `footPitchNorm`, `ankleAngleToe` and `ankleAngleHeel` from the *same* frames and compares
+their signal-to-noise directly. `ankleAngleHeel` has never been tried and is the natural candidate
+for a seated calf raise, where the heel is what actually swings about the toe. Settle it there, then
+calibrate — calibrating `footPitchNorm` and then replacing it wastes the work.
+
+Note also that the four foot exercises have **no working velocity filter**: `DTWPhaseMachine` masks
+primary-feature jumps above 20 units per frame, and `footPitchNorm`'s entire range is 0.17, so a
+chair-leg latch that throws it thirty times past the range passes straight through. Switching the
+primary feature to an angle activates that filter for the first time on these exercises.
 
 ---
 
