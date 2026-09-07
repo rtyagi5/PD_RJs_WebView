@@ -664,7 +664,15 @@ export const EXERCISE_CONFIGS = {
     // Critical: place the active foot in FRONT of the chair, not beside a chair leg.
     // MediaPipe routinely mistakes vertical chair legs for foot_index/heel keypoints,
     // which causes wild ankle-angle swings and false reps.
-    framing: { view: 'side', instruction: 'Sit at the edge of the chair, active foot in front of you (NOT next to chair leg)' },
+    framing: {
+      // Tighter roll limit than the 12-degree default. footPitchNorm is a vertical
+      // difference normalised by shank length, so camera roll injects roughly
+      // 0.65 x sin(theta) into it: ~0.09 at 8 degrees, against a real dorsiflexion
+      // signal of 0.05-0.15. Even 8 is a practical compromise, not a safe margin —
+      // an angle-based ankle feature would remove this sensitivity entirely.
+      view: 'side', maxRollDeg: 8,
+      instruction: 'Sit at the edge of the chair, active foot in front of you (NOT next to chair leg)',
+    },
     startCue: 'Push up onto your toes, then lower your heels',
     // 0.65 + dwell tightens the gate. Real calf raise sweeps ankleAngleToe ~20°,
     // so 13° threshold (was 10°) still allows partial reps but rejects more chair-leg noise.
@@ -715,7 +723,15 @@ export const EXERCISE_CONFIGS = {
     mode: 'rep',
     side: 'both',
     detector: 'mediapipe',
-    framing: { view: 'side', instruction: 'Stand sideways to the camera, exercising foot toward the camera' },
+    framing: {
+      // Tighter roll limit than the 12-degree default. footPitchNorm is a vertical
+      // difference normalised by shank length, so camera roll injects roughly
+      // 0.65 x sin(theta) into it: ~0.09 at 8 degrees, against a real dorsiflexion
+      // signal of 0.05-0.15. Even 8 is a practical compromise, not a safe margin —
+      // an angle-based ankle feature would remove this sensitivity entirely.
+      view: 'side', maxRollDeg: 8,
+      instruction: 'Stand sideways to the camera, exercising foot toward the camera',
+    },
     startCue: 'Rise up onto your toes, then lower your heels slowly',
     // Same fix as the seated variant: ankleAngleToe template (88→68) doesn't match real
     // standing geometry — actual values land in the 100-130 range, way outside the template.
@@ -762,7 +778,15 @@ export const EXERCISE_CONFIGS = {
     // Critical: place the active foot in FRONT of the chair, not beside a chair leg.
     // MediaPipe routinely mistakes vertical chair legs for foot_index keypoints, which
     // causes wild footPitchNorm swings and false reps.
-    framing: { view: 'side', instruction: 'Sit at the edge of the chair, active foot in front of you (NOT next to chair leg)' },
+    framing: {
+      // Tighter roll limit than the 12-degree default. footPitchNorm is a vertical
+      // difference normalised by shank length, so camera roll injects roughly
+      // 0.65 x sin(theta) into it: ~0.09 at 8 degrees, against a real dorsiflexion
+      // signal of 0.05-0.15. Even 8 is a practical compromise, not a safe margin —
+      // an angle-based ankle feature would remove this sensitivity entirely.
+      view: 'side', maxRollDeg: 8,
+      instruction: 'Sit at the edge of the chair, active foot in front of you (NOT next to chair leg)',
+    },
     startCue: {
       left: 'Pull your left toes up toward you, then lower',
       right: 'Pull your right toes up toward you, then lower',
@@ -812,7 +836,15 @@ export const EXERCISE_CONFIGS = {
     mode: 'rep',
     side: 'both',
     detector: 'mediapipe',
-    framing: { view: 'side', instruction: 'Stand sideways to the camera, exercising foot toward the camera, clear floor area' },
+    framing: {
+      // Tighter roll limit than the 12-degree default. footPitchNorm is a vertical
+      // difference normalised by shank length, so camera roll injects roughly
+      // 0.65 x sin(theta) into it: ~0.09 at 8 degrees, against a real dorsiflexion
+      // signal of 0.05-0.15. Even 8 is a practical compromise, not a safe margin —
+      // an angle-based ankle feature would remove this sensitivity entirely.
+      view: 'side', maxRollDeg: 8,
+      instruction: 'Stand sideways to the camera, exercising foot toward the camera, clear floor area',
+    },
     startCue: {
       left: 'Pull your left toes up, keeping heel down',
       right: 'Pull your right toes up, keeping heel down',

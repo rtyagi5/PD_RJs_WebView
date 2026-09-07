@@ -20,11 +20,54 @@ features will not correspond to live ones.
 | --- | --- |
 | **One unbroken take** | Cuts and zoom changes destroy phase shape. An edited library clip is unusable for this even if it looks fine. |
 | **Fixed camera, fixed distance** | Every feature is a 2D image-space measurement. A camera that moves changes the numbers without the body changing. |
+| **Camera level — not tilted sideways** | See below. This is the one setup error that silently fabricates signal rather than just adding noise. |
 | **Body roughly half the frame height** | `PoseQuality.IDEAL_BODY_RATIO` is 0.50, tolerances +0.20 / −0.30. |
 | **Plain background, even lighting** | For foot exercises especially: MediaPipe will latch onto a chair leg and smear the heel and toe along it. The `footValid` guard catches the worst of it by discarding the frame, but a clean background means fewer discarded frames. |
 | **Whole body in frame, including feet** | Even for upper-body exercises — `trunkAngle` and `hipAngle` are used as posture references. |
 | **5–8 reps** | The template is the average across reps, resampled to 60 frames. More reps average out jitter. |
 | **Deliberate tempo** | The velocity filter masks primary-feature jumps above 20 units per frame as artefacts. Fast reps on a low-fps capture can trip it. |
+
+## Levelling the camera
+
+Roll — the phone tilted sideways — affects the two classes of feature completely differently.
+
+**Angle features are immune.** `kneeAngle`, `shoulderAngle`, `elbowAngle`, `hipAngle` and
+`trunkAngle` are three-point angles, which are mathematically invariant to image rotation as well as
+to scale and position. Tilt the phone 20° and they do not move.
+
+**Normalized height features are not.** These take a raw vertical difference and normalise only the
+magnitude:
+
+```
+footPitchNorm = (foot_index.y - heel.y) / shank
+kneeLiftNorm  = max(0, hip.y - knee.y) / hipAnkleLen
+```
+
+Dividing by a limb length cancels distance, but the numerator assumes the image y-axis points along
+gravity. Since the heel-to-toe vector is roughly `0.65 x shank`, a camera rolled by θ injects about
+`0.65 x sin(θ)` into `footPitchNorm`:
+
+| Roll | Spurious `footPitchNorm` |
+| --- | --- |
+| 5° | 0.057 |
+| 10° | 0.113 |
+| 15° | 0.168 |
+
+Real dorsiflexion produces 0.05–0.15. **A 10° tilt fabricates a signal the size of the entire
+movement.** For the four foot exercises this is not a rounding error, it is the measurement.
+
+`PoseQuality.checkCameraRoll` now rejects a tilted setup in every view — measuring off the shoulder
+line facing the camera, and off the trunk axis side-on, where the shoulders foreshorten and the
+shoulder line is useless. The default limit is 12°, tightened to 8° for the four foot exercises.
+
+Note it cannot distinguish a rolled camera from a leaning patient — from one 2D view those are the
+same thing — which is why it says "Level your camera or straighten up" and rejects rather than
+silently de-rotating.
+
+For a reference recording this matters more than for a patient session: a patient's baseline is
+their own, so their idiosyncrasies wash out, but **a roll error in the reference is baked into the
+template as the correct shape and every patient is then compared against it.** Use a tripod or a
+stable prop, check the level with your camera app's grid, and do not touch it between reps.
 
 ## The one that actually matters
 

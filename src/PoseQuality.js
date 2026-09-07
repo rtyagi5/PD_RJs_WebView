@@ -12,7 +12,8 @@ export const IDEAL_BODY_RATIO   = 0.50;  // body height ≈ 50 % of frame height
 export const DISTANCE_TOL_CLOSE = 0.20;  // ratio > ideal + this → "too close"  (max: 0.70)
 export const DISTANCE_TOL_FAR   = 0.30;  // ratio < ideal - this → "too far"    (min: 0.20 — allows normal standing distance)
 export const MIN_CONFIDENCE     = 0.3;   // per-keypoint visibility threshold
-export const LIGHTING_THRESHOLD = 0.25;  // avg score below this → poor lighting
+export const LIGHTING_THRESHOLD = 0.25;
+export const MAX_ROLL_DEG        = 12;   // camera tilt beyond this rejects the setup  // avg score below this → poor lighting
 
 // Which failing check the patient is told about first. Single source of truth:
 // both the spoken/among-message selection (SessionStateMachine) and the on-canvas
@@ -77,6 +78,84 @@ export function checkDistance(keypoints, frameW, frameH, overrides = {}) {
 // per-exercise guidance like "Sit sideways with active leg toward camera".
 // Returns { status: 'good'|'off_center'|'tilted'|'too_high'|'too_low'|'not_side'|'not_diagonal', message }
 
+/**
+ * Reject a tilted camera.
+ *
+ * Why this is its own check: the angle features (kneeAngle, shoulderAngle, ...)
+ * are three-point angles, which are invariant to image rotation — a tilted phone
+ * does not move them. But several features take a raw vertical difference and
+ * only normalise the magnitude:
+ *
+ *     footPitchNorm = (foot_index.y - heel.y) / shank
+ *     kneeLiftNorm  = max(0, hip.y - knee.y) / hipAnkleLen
+ *
+ * Those assume the image y-axis is aligned with gravity. Since the heel-to-toe
+ * vector is roughly 0.65 x shank, a camera rolled by theta injects about
+ * 0.65 x sin(theta) into footPitchNorm: ~0.11 at 10 degrees, against a real
+ * dorsiflexion signal of 0.05-0.15. A tilted phone can therefore fabricate a
+ * whole movement out of nothing.
+ *
+ * We detect and reject rather than de-rotate: from a single 2D view a rolled
+ * camera and a leaning patient are indistinguishable, so silently "correcting"
+ * would rotate away real trunk lean. The message names both possibilities.
+ *
+ * @param {Array}  keypoints
+ * @param {string} view       'front' | 'side' | 'diagonal'
+ * @param {Object} [overrides] framing overrides; `maxRollDeg` tightens the limit
+ */
+export function checkCameraRoll(keypoints, view = 'front', overrides = {}) {
+  const limit = Number.isFinite(overrides.maxRollDeg) ? overrides.maxRollDeg : MAX_ROLL_DEG;
+
+  const lSh  = kp(keypoints, 'left_shoulder');
+  const rSh  = kp(keypoints, 'right_shoulder');
+  const lHip = kp(keypoints, 'left_hip');
+  const rHip = kp(keypoints, 'right_hip');
+  const hasSh  = present(lSh, MIN_CONFIDENCE) && present(rSh, MIN_CONFIDENCE);
+  const hasHip = present(lHip, MIN_CONFIDENCE) && present(rHip, MIN_CONFIDENCE);
+
+  let rollDeg = null;
+  let reference = null;
+
+  // Front-on: the shoulder line is the best horizontal reference, because the
+  // two shoulders are well separated and the angle is well conditioned.
+  if (view === 'front' && hasSh) {
+    const dx = Math.abs(lSh.x - rSh.x);
+    const dy = Math.abs(lSh.y - rSh.y);
+    if (dx > 1e-6) {
+      rollDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+      reference = 'shoulders';
+    }
+  }
+
+  // Side and diagonal: the shoulders foreshorten to almost no separation, so the
+  // shoulder line is degenerate and its angle is meaningless. Use the trunk
+  // axis, which is near vertical for a seated or standing patient. This is the
+  // case that was previously unchecked — and it covers all four foot exercises,
+  // which are exactly the ones that depend on the roll-sensitive features.
+  if (rollDeg === null && hasSh && hasHip) {
+    const shMid = midpoint(lSh, rSh);
+    const hipMid = midpoint(lHip, rHip);
+    const dx = Math.abs(shMid.x - hipMid.x);
+    const dy = Math.abs(shMid.y - hipMid.y);
+    if (dy > 1e-6) {
+      rollDeg = (Math.atan2(dx, dy) * 180) / Math.PI;
+      reference = 'trunk';
+    }
+  }
+
+  if (rollDeg === null) {
+    return { status: 'unknown', message: '', rollDeg: null, reference: null, limit };
+  }
+  if (rollDeg > limit) {
+    return {
+      status: 'rolled',
+      message: 'Level your camera or straighten up',
+      rollDeg, reference, limit,
+    };
+  }
+  return { status: 'good', message: '', rollDeg, reference, limit };
+}
+
 export function checkCameraAngle(keypoints, frameW, frameH, view = 'front', customInstruction) {
   const lSh  = kp(keypoints, 'left_shoulder');
   const rSh  = kp(keypoints, 'right_shoulder');
@@ -130,11 +209,10 @@ export function checkCameraAngle(keypoints, frameW, frameH, view = 'front', cust
     return { status: 'off_center_right', message: 'Slightly move to your right' };
   }
 
-  // Shoulder tilt: should be roughly horizontal
-  const dx = Math.abs(lSh.x - rSh.x);
-  const dy = Math.abs(lSh.y - rSh.y);
-  if (dx > 0 && (dy / dx) > 0.3) {
-    return { status: 'tilted', message: 'Level your camera or straighten up' };
+  // Shoulder tilt: delegated so roll has exactly one implementation.
+  const roll = checkCameraRoll(keypoints, 'front');
+  if (roll.status === 'rolled') {
+    return { status: 'tilted', message: roll.message };
   }
 
   // Vertical centering: hip midpoint in middle 60 % of frame
@@ -197,20 +275,25 @@ export function runAllChecks(keypoints, frameW, frameH, spec) {
 
   const distance   = checkDistance(keypoints, frameW, frameH, framing);
   const angle      = checkCameraAngle(keypoints, frameW, frameH, view, framing.instruction);
+  const roll       = checkCameraRoll(keypoints, view, framing);
   const visibility = checkVisibility(keypoints, framing.requiredKeypoints);
   const lighting   = checkLighting(keypoints);
 
   const checks = [
     { name: 'distance',   ...distance },
     { name: 'angle',      ...angle },
+    { name: 'roll',       ...roll },
     { name: 'visibility', ...visibility },
     { name: 'lighting',   ...lighting },
   ];
 
   // P0 checks (distance, angle, visibility) must all be 'good'.
   // Lighting (P2) is advisory — we still flag it but don't block.
+  // 'unknown' does not block: when the keypoints needed to judge roll are absent,
+  // the visibility check is the one that should stop the session, not this.
   const p0Good = distance.status === 'good'
     && angle.status === 'good'
+    && roll.status !== 'rolled'
     && visibility.status === 'good';
 
   return { allGood: p0Good, checks };

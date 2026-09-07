@@ -1,5 +1,5 @@
 import {
-  checkDistance, checkCameraAngle, checkVisibility, checkLighting, runAllChecks,
+  checkDistance, checkCameraAngle, checkCameraRoll, checkVisibility, checkLighting, runAllChecks,
 } from './PoseQuality';
 
 const W = 640;
@@ -141,5 +141,99 @@ describe('runAllChecks', () => {
 
   it('does not throw on an empty keypoint array', () => {
     expect(() => runAllChecks([], W, H, {})).not.toThrow();
+  });
+});
+
+// ─── Camera roll ─────────────────────────────────────────────────────────────
+// Angle features are three-point angles and so are invariant to image rotation.
+// The normalized HEIGHT features are not: they take a raw vertical difference
+// and only normalize the magnitude, so they assume the image y-axis points along
+// gravity. A tilted phone therefore fabricates signal in footPitchNorm and
+// kneeLiftNorm while leaving kneeAngle untouched — which is why roll needs its
+// own check rather than riding on the camera-angle one.
+
+/** Body rotated bodily about the frame centre, i.e. what a rolled camera sees. */
+function rolledBody(deg, opts = {}) {
+  const rad = (deg * Math.PI) / 180;
+  const cx = W / 2;
+  const cy = H / 2;
+  return body(opts).map(k => {
+    const dx = k.x - cx;
+    const dy = k.y - cy;
+    return {
+      ...k,
+      x: cx + dx * Math.cos(rad) - dy * Math.sin(rad),
+      y: cy + dx * Math.sin(rad) + dy * Math.cos(rad),
+    };
+  });
+}
+
+describe('checkCameraRoll', () => {
+  it('accepts a level camera in every view', () => {
+    for (const view of ['front', 'side', 'diagonal']) {
+      expect(checkCameraRoll(body(), view).status).toBe('good');
+    }
+  });
+
+  it('measures roll off the shoulder line when facing the camera', () => {
+    const res = checkCameraRoll(rolledBody(20), 'front');
+    expect(res.reference).toBe('shoulders');
+    expect(res.rollDeg).toBeCloseTo(20, 0);
+    expect(res.status).toBe('rolled');
+  });
+
+  it('measures roll off the trunk axis in a side view', () => {
+    // The decisive case. Shoulders foreshorten to almost nothing side-on, so the
+    // shoulder line is degenerate and this used to go completely unchecked.
+    const res = checkCameraRoll(rolledBody(20, { shoulderGap: 8 }), 'side');
+    expect(res.reference).toBe('trunk');
+    expect(res.rollDeg).toBeCloseTo(20, 0);
+    expect(res.status).toBe('rolled');
+  });
+
+  it('catches a tilt in a side view that the camera-angle check passes', () => {
+    // checkCameraAngle only tests shoulder separation for a side view, so a
+    // rolled phone looks perfectly fine to it.
+    const tilted = rolledBody(20, { shoulderGap: 8 });
+    expect(checkCameraAngle(tilted, W, H, 'side').status).toBe('good');
+    expect(checkCameraRoll(tilted, 'side').status).toBe('rolled');
+  });
+
+  it('honours a per-exercise limit', () => {
+    const tilted = rolledBody(10, { shoulderGap: 8 });
+    expect(checkCameraRoll(tilted, 'side').status).toBe('good');            // 12 default
+    expect(checkCameraRoll(tilted, 'side', { maxRollDeg: 8 }).status).toBe('rolled');
+  });
+
+  it('reports unknown rather than blocking when the body is not visible', () => {
+    expect(checkCameraRoll([], 'side').status).toBe('unknown');
+  });
+
+  it('names both possible causes, since one view cannot tell them apart', () => {
+    // A rolled camera and a leaning patient are indistinguishable from a single
+    // 2D view, so the message must not assert either.
+    expect(checkCameraRoll(rolledBody(25), 'front').message).toMatch(/camera|straighten/i);
+  });
+});
+
+describe('roll gates the session', () => {
+  it('blocks a rolled setup even when everything else is fine', () => {
+    const spec = { framing: { view: 'side' } };
+    const level = runAllChecks(body({ shoulderGap: 8 }), W, H, spec);
+    const tilted = runAllChecks(rolledBody(20, { shoulderGap: 8 }), W, H, spec);
+    expect(level.allGood).toBe(true);
+    expect(tilted.allGood).toBe(false);
+    expect(tilted.checks.find(c => c.name === 'roll').status).toBe('rolled');
+  });
+
+  it('reports roll as its own check dimension', () => {
+    const res = runAllChecks(body(), W, H, { framing: { view: 'front' } });
+    expect(res.checks.map(c => c.name)).toContain('roll');
+  });
+
+  it('does not block when roll cannot be judged', () => {
+    // Missing keypoints are the visibility check's job to reject, not this one.
+    const res = checkCameraRoll([{ name: 'nose', x: 1, y: 1, score: 0.9 }], 'side');
+    expect(res.status).toBe('unknown');
   });
 });

@@ -140,14 +140,26 @@ in able-bodied adults is roughly 50° plantarflexion to 20° dorsiflexion, with 
 variously reported as 0–16.5° non-weight-bearing and 7.1–34.7° weight-bearing; 0–15° is the usual
 functional-gait requirement.
 
-Two things make this the weakest group:
+Three things make this the weakest group:
 - Post-stroke plantarflexor spasticity and contracture routinely reduce dorsiflexion well below
   normal, so a floor set from healthy geometry is the wrong shape of constraint entirely.
 - These are the four MediaPipe exercises, where `visibility` defaults to `1.0` when the model omits
   it (`detectors.js:194`), so the keypoints these caps depend on can carry unearned confidence.
 
+- `footPitchNorm` is a vertical difference in image space, so it is sensitive to camera roll in a
+  way the angle features are not. A camera rolled by θ injects roughly `0.65 x sin(θ)` — about 0.11
+  at 10° — against a real signal of 0.05–0.15. `checkCameraRoll` now rejects setups beyond 8° for
+  these exercises, but even 8° leaves ~0.09 of potential offset. Holding roll to the ~3° that would
+  make the measurement trustworthy is not realistic in a home setting.
+
 **These four should be calibrated from measured `footPitchNorm` distributions before review**, not
 argued from literature. That is exactly what the WI-1 captures are for.
+
+**And the roll sensitivity is independent evidence for the spec's WI-6 Experiment C**: an
+angle-based ankle feature (`anklePitchAngle`, the three-point angle knee→ankle→foot_index) would be
+invariant to camera roll by construction, removing this entire error class rather than policing it
+with a setup check. Worth deciding before these caps are calibrated, since calibrating
+`footPitchNorm` and then replacing it wastes the work.
 
 ---
 
