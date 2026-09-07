@@ -1,3 +1,4 @@
+import { DTWPhaseMachine } from './DTWPhaseMachine';
 // Phase labels decide refStartValue and templateDirection, so getting them wrong
 // inverts the direction gate and the exercise silently counts nothing. These
 // tests pin the signal-based labelling that replaced the old positional split.
@@ -5,7 +6,7 @@ import {
   labelPhasesBySignal, resolveExpectedDirection, resolvePhaseRoles, resolveCycle,
 } from './phaseLabeller';
 import { checkPhaseSeparation } from './referenceHealth';
-import { EXERCISE_CONFIGS } from './specToReference';
+import { EXERCISE_CONFIGS, generateReference } from './specToReference';
 import recorded from './__fixtures__/broken-positional-labels.ref.json';
 
 const ARM_PHASES = ['lowered', 'transition_up', 'raised', 'transition_down'];
@@ -180,5 +181,76 @@ describe('rescuing the existing recorded reference', () => {
     // The arm-down end becomes the start posture and the arm-up end the effort.
     expect(after.details.startMean).toBeLessThan(40);
     expect(after.details.effortMean).toBeGreaterThan(80);
+  });
+});
+
+// ─── Declared feature directions ─────────────────────────────────────────────
+// The labeller anchors "which end is rest" on the canonical template. That works
+// only for features the template sweeps, so an alternative feature could not be
+// trialled without first inventing template magnitudes for it — which is exactly
+// what sank the earlier ankleAngleToe attempt, where a guessed 88->68 met a real
+// 100-130.
+//
+// A config may now declare a feature's DIRECTION without its magnitude.
+// Direction follows from anatomy and holds for every body; magnitude does not.
+
+describe('resolveExpectedDirection', () => {
+  it('still prefers the canonical template where it has values', () => {
+    // footPitchNorm is swept by the template, so nothing about this changes.
+    expect(resolveExpectedDirection('SeatedDorsiflexion', 'footPitchNormL')).toBe(-1);
+    expect(resolveExpectedDirection('CalfRaisesSeated', 'footPitchNormL')).toBe(1);
+  });
+
+  it('falls back to a declared direction for a feature the template omits', () => {
+    // Without this the labeller refuses outright: "cannot tell which end of
+    // ankleAngleToeR is the rest posture".
+    expect(resolveExpectedDirection('SeatedDorsiflexion', 'ankleAngleToeR')).toBe(-1);
+    expect(resolveExpectedDirection('StandingDorsiflexion', 'ankleAngleToeL')).toBe(-1);
+  });
+
+  it('has dorsiflexion and calf raises pointing opposite ways', () => {
+    // The anatomy: dorsiflexion brings the toes toward the shin and CLOSES the
+    // knee-ankle-toe angle; a calf raise plantarflexes and OPENS it. Getting
+    // these the same way round would make each exercise count the other.
+    expect(resolveExpectedDirection('SeatedDorsiflexion', 'ankleAngleToeR')).toBe(-1);
+    expect(resolveExpectedDirection('CalfRaisesSeated', 'ankleAngleToeR')).toBe(1);
+    expect(resolveExpectedDirection('StandingDorsiflexion', 'ankleAngleToeR')).toBe(-1);
+    expect(resolveExpectedDirection('CalfRaisesStanding', 'ankleAngleToeR')).toBe(1);
+  });
+
+  it('applies the declaration to every side and aggregate of the family', () => {
+    for (const key of ['ankleAngleToeL', 'ankleAngleToeR', 'ankleAngleHeelL']) {
+      expect(`${key}:${resolveExpectedDirection('SeatedDorsiflexion', key)}`)
+        .toBe(`${key}:-1`);
+    }
+  });
+
+  it('declares direction only, never magnitude', () => {
+    // The guard against repeating the previous failure. The config must not
+    // acquire ankleAngleToe VALUES this way — those have to be measured.
+    const cfg = EXERCISE_CONFIGS.SeatedDorsiflexion;
+    expect(cfg.featureDirections.ankleAngleToe).toBe(-1);
+    for (const ph of cfg.phases) {
+      expect(Object.keys(ph.features)).not.toContain('ankleAngleToe');
+    }
+  });
+
+  it('leaves the counting feature unchanged', () => {
+    // Declaring a direction must not switch anything over. The switch is a
+    // separate, evidence-led decision.
+    expect(EXERCISE_CONFIGS.SeatedDorsiflexion.primaryFeatureBase).toBe('footPitchNorm');
+    const eng = new DTWPhaseMachine(
+      generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion),
+      { targetReps: 5, side: 'left' }
+    );
+    expect(eng.primaryFeature).toBe('footPitchNormL');
+  });
+
+  it('returns 0 for a feature with neither template values nor a declaration', () => {
+    expect(resolveExpectedDirection('SeatedDorsiflexion', 'elbowAngleMin')).toBe(0);
+  });
+
+  it('returns 0 for an unknown exercise', () => {
+    expect(resolveExpectedDirection('NotAnExercise', 'ankleAngleToeR')).toBe(0);
   });
 });

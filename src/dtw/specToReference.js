@@ -99,6 +99,7 @@ export function generateReference(config) {
     minRomPct: config.minRomPct ?? null,
     primaryFeature: config.primaryFeature || null,
     primaryFeatureBase: config.primaryFeatureBase || null,
+    featureDirections: config.featureDirections || null,
     // Absolute clinical safety ceilings, side-generic (e.g. { shoulderAngle: { max: 95 } }).
     // Resolved to L/R at runtime by DTWPhaseMachine and checked every frame, independently
     // of the template — a template-relative check alone can never catch "too far" reliably.
@@ -694,6 +695,13 @@ export const EXERCISE_CONFIGS = {
     // pivots about the TOE, so the ankle angle barely moves (5-15 degrees of real
     // change against a 50-degree template) — see the comment below. Keep it here.
     primaryFeatureBase: 'footPitchNorm',
+    // Direction only, no magnitudes. Which way ankleAngleToe moves follows from
+    // anatomy and is true of every body; how FAR it moves does not, and guessing
+    // that is what sank the previous attempt at this feature. Declaring the
+    // direction lets the labeller anchor ankleAngleToe well enough to be trialled
+    // on real footage, which is how the magnitudes should be obtained.
+    // plantarflexion: the heel lifts and the foot rotates away from the shin, opening the knee-ankle-toe angle.
+    featureDirections: { ankleAngleToe: +1, ankleAngleHeel: +1 },
     minRomPct: 0.65,
     // 400ms dwell requires sustained phase positioning, filtering transient glitches.
     timing: { dwellMs: 400 },
@@ -765,6 +773,13 @@ export const EXERCISE_CONFIGS = {
     // Same pin as the seated variant: the ankle angle is the wrong instrument for a
     // calf raise, and without this a recorded reference would select it.
     primaryFeatureBase: 'footPitchNorm',
+    // Direction only, no magnitudes. Which way ankleAngleToe moves follows from
+    // anatomy and is true of every body; how FAR it moves does not, and guessing
+    // that is what sank the previous attempt at this feature. Declaring the
+    // direction lets the labeller anchor ankleAngleToe well enough to be trialled
+    // on real footage, which is how the magnitudes should be obtained.
+    // plantarflexion, as the seated variant.
+    featureDirections: { ankleAngleToe: +1, ankleAngleHeel: +1 },
     minRomPct: 0.65,
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
     // Standing calf raise tops out at footPitchNorm 0.12. Rising higher onto the toes
@@ -842,6 +857,13 @@ export const EXERCISE_CONFIGS = {
     // construction. The switch waits on measured values from a capture; the last
     // attempt failed because the template numbers were guessed.
     primaryFeatureBase: 'footPitchNorm',
+    // Direction only, no magnitudes. Which way ankleAngleToe moves follows from
+    // anatomy and is true of every body; how FAR it moves does not, and guessing
+    // that is what sank the previous attempt at this feature. Declaring the
+    // direction lets the labeller anchor ankleAngleToe well enough to be trialled
+    // on real footage, which is how the magnitudes should be obtained.
+    // dorsiflexion: the toes come up toward the shin, closing the knee-ankle-toe angle.
+    featureDirections: { ankleAngleToe: -1, ankleAngleHeel: -1 },
     minRomPct: 0.80,
     timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
@@ -910,6 +932,13 @@ export const EXERCISE_CONFIGS = {
     // Same as the seated variant, and the same pending switch. The previous attempt
     // used a template of 88->68 while real standing geometry lands at 100-130.
     primaryFeatureBase: 'footPitchNorm',
+    // Direction only, no magnitudes. Which way ankleAngleToe moves follows from
+    // anatomy and is true of every body; how FAR it moves does not, and guessing
+    // that is what sank the previous attempt at this feature. Declaring the
+    // direction lets the labeller anchor ankleAngleToe well enough to be trialled
+    // on real footage, which is how the magnitudes should be obtained.
+    // dorsiflexion, as the seated variant.
+    featureDirections: { ankleAngleToe: -1, ankleAngleHeel: -1 },
     minRomPct: 0.80,
     timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],

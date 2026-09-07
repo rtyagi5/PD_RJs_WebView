@@ -13,7 +13,7 @@ import { registerReference } from './referenceRegistry';
 import { EXERCISE_CONFIGS } from './specToReference';
 import PoseOverlay from './PoseOverlay';
 import { PROCESSING_MAX_WIDTH } from '../captureConfig';
-import { MIRROR_SENSITIVE_FEATURES } from './universalFeatures';
+import { MIRROR_SENSITIVE_FEATURES, stripSideSuffix } from './universalFeatures';
 import { labelPhasesBySignal, resolveCycle } from './phaseLabeller';
 import { checkPhaseSeparation } from './referenceHealth';
 import { getServiceUrl } from '../config';
@@ -107,6 +107,32 @@ const S = {
 
 const PHASE_COLORS = ['#4466ff', '#ff6644', '#44cc66', '#cc44ff', '#ffaa22', '#22cccc'];
 
+/**
+ * The feature dropdown, ranked by range but guaranteed to contain the ones this
+ * exercise is actually about.
+ *
+ * Ranking alone is not enough: a seated dorsiflexion clip is dominated by the
+ * arms, so the feature the exercise measures can fall outside the top few
+ * entirely. Any alternative the config declares a direction for is offered too,
+ * which is what makes trialling ankleAngleToe against footPitchNorm on the same
+ * footage a dropdown change rather than a code change.
+ */
+function featureChoices(frames, cfg, topN = 8) {
+  const top = getTopFeatures(frames, topN);
+  if (!cfg) return top;
+
+  const wanted = new Set();
+  if (cfg.primaryFeatureBase) wanted.add(cfg.primaryFeatureBase);
+  for (const key of Object.keys(cfg.featureDirections || {})) wanted.add(key);
+  if (!wanted.size) return top;
+
+  const have = new Set(top.map(f => f.key));
+  const extra = getTopFeatures(frames, Infinity)
+    .filter(f => !have.has(f.key) && wanted.has(stripSideSuffix(f.key)) && f.range > 0);
+
+  return [...top, ...extra];
+}
+
 // ─── Component ────────────────────────────────────────────
 
 export default function ReferenceExtractor() {
@@ -125,6 +151,7 @@ export default function ReferenceExtractor() {
   const [reps, setReps] = useState([]); // [{start, end, peakFrame}]
   const [phases, setPhases] = useState(['lowered', 'raised']); // phase names
   const [phaseLabels, setPhaseLabels] = useState([]); // per-rep-frame phase assignments
+  const [unlabelledReps, setUnlabelledReps] = useState(new Set()); // reps the labeller refused
   const [repCycle, setRepCycle] = useState({ start: 'lowered', effort: 'raised', return: 'lowered' });
   const [feedback, setFeedback] = useState({
     phase: {}, form: [], range: { tooLittle: '', tooMuch: '' }, tempo: { tooFast: '', holdCue: '' },
@@ -278,7 +305,7 @@ export default function ReferenceExtractor() {
       setExtractProgress(100);
 
       // Compute top features for dropdown
-      const top = getTopFeatures(result.frames, 8);
+      const top = featureChoices(result.frames, EXERCISE_CONFIGS[exerciseName]);
       setTopFeatures(top);
 
       // For a known exercise the primary feature comes from its canonical config,
@@ -376,6 +403,7 @@ export default function ReferenceExtractor() {
     // actually measures. Picking the exercise after extracting is the normal
     // order, so without this the run keeps whatever the range ranking chose.
     if (framesRef.current.length) {
+      setTopFeatures(featureChoices(framesRef.current, cfg));
       const key = resolvePrimaryFeatureKey(cfg, framesRef.current);
       if (key) {
         const detection = detectRepBoundaries(framesRef.current, key);
@@ -413,6 +441,7 @@ export default function ReferenceExtractor() {
     // ended up with its "lowered" phase at 92 degrees, arm up.
     const labels = [];
     const failures = [];
+    const failedReps = new Set();
     for (let r = 0; r < reps.length; r++) {
       const rep = reps[r];
       const repFrames = frames.slice(rep.start, rep.end + 1);
@@ -425,14 +454,20 @@ export default function ReferenceExtractor() {
       });
       if (!res.ok) {
         failures.push(`rep ${r + 1}: ${res.reason}`);
+        failedReps.add(r);
         continue;
       }
       for (let i = 0; i < repFrames.length; i++) {
-        labels.push({ frame: rep.start + i, phase: res.labels[i] });
+        // Tag the rep at creation. Inferring it later from frame ranges
+        // miscounts, because rep boundaries share endpoints: a rep that
+        // failed to label still appeared to own its neighbours' edge frames,
+        // so it looked partly labelled when it was not labelled at all.
+        labels.push({ frame: rep.start + i, phase: res.labels[i], rep: r });
       }
     }
 
     setPhaseLabels(labels);
+    setUnlabelledReps(failedReps);
     if (failures.length) {
       setStatusMsg(
         `Labelled ${reps.length - failures.length}/${reps.length} reps. ` +
@@ -1075,12 +1110,17 @@ export default function ReferenceExtractor() {
               {phaseLabels.length > 0 && (
                 <div style={{ marginTop: 12 }}>
                   <label style={S.label}>
-                    Frames per phase — per rep, across {reps.length} rep{reps.length === 1 ? '' : 's'}
+                    Frames per phase — per rep, across {reps.length - unlabelledReps.size} labelled
+                    rep{reps.length - unlabelledReps.size === 1 ? '' : 's'}
+                    {unlabelledReps.size > 0 && ` (${unlabelledReps.size} refused)`}
                   </label>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {phases.map((ph, i) => {
                       const n = phaseLabels.filter(l => l.phase === ph).length;
-                      const per = reps.length ? (n / reps.length).toFixed(1) : '0';
+                      // Averaged over the reps that were actually labelled. Dividing
+                      // by every rep understates each phase whenever one is refused.
+                      const labelled = reps.length - unlabelledReps.size;
+                      const per = labelled ? (n / labelled).toFixed(1) : '0';
                       return (
                         <span key={ph} style={{
                           fontSize: 11, padding: '3px 8px', borderRadius: 10,
@@ -1099,9 +1139,15 @@ export default function ReferenceExtractor() {
                       total for that phase. This breaks it out per rep so that is visible. */}
                   <div style={{ marginTop: 8, fontSize: 11, color: '#aab' }}>
                     {reps.map((rep, r) => {
-                      const inRep = phaseLabels.filter(
-                        l => l.frame >= rep.start && l.frame <= rep.end
-                      );
+                      if (unlabelledReps.has(r)) {
+                        return (
+                          <div key={r} style={{ color: '#ff6b6b' }}>
+                            Rep {r + 1}: not labelled — the labeller refused this rep. See the
+                            message above; its boundary is almost always cut mid-cycle.
+                          </div>
+                        );
+                      }
+                      const inRep = phaseLabels.filter(l => l.rep === r);
                       const missing = phases.filter(ph => !inRep.some(l => l.phase === ph));
                       return (
                         <div key={r} style={{ color: missing.length ? '#ffaa22' : '#aab' }}>
@@ -1114,10 +1160,9 @@ export default function ReferenceExtractor() {
                     })}
                   </div>
 
-                  {reps.some(rep => {
-                    const inRep = phaseLabels.filter(
-                      l => l.frame >= rep.start && l.frame <= rep.end
-                    );
+                  {reps.some((rep, r) => {
+                    if (unlabelledReps.has(r)) return true;
+                    const inRep = phaseLabels.filter(l => l.rep === r);
                     return phases.some(ph => !inRep.some(l => l.phase === ph));
                   }) && (
                     <p style={{ fontSize: 11, color: '#ffaa22', marginBottom: 0 }}>

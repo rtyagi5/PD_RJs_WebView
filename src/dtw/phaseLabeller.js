@@ -19,6 +19,7 @@
 // at the top of the movement still labels correctly.
 // ---------------------------------------------
 import { EXERCISE_CONFIGS, generateReference } from './specToReference.js';
+import { stripSideSuffix } from './universalFeatures.js';
 
 /** Fraction of the observed span that counts as "at" the start or effort posture. */
 export const DEFAULT_BAND_PCT = 0.15;
@@ -68,8 +69,21 @@ export function resolveExpectedDirection(exerciseName, primaryFeature) {
 
   const startMean = mean(valuesIn(cycle.start));
   const effortMean = mean(valuesIn(cycle.effort));
-  if (!Number.isFinite(startMean) || !Number.isFinite(effortMean)) return 0;
-  return Math.sign(effortMean - startMean);
+  if (Number.isFinite(startMean) && Number.isFinite(effortMean)) {
+    return Math.sign(effortMean - startMean);
+  }
+
+  // The template is the preferred anchor, but it only sweeps the features the
+  // exercise currently counts with. A config may also DECLARE the direction of a
+  // feature it does not sweep, which is what makes an alternative feature
+  // testable on real footage without first inventing template magnitudes for it
+  // — the exact mistake that sank the previous ankleAngleToe attempt, where a
+  // guessed 88->68 met a real 100-130.
+  //
+  // Direction is safe to declare where magnitude is not, because it follows from
+  // anatomy rather than from any particular body.
+  const declared = config.featureDirections?.[stripSideSuffix(primaryFeature)];
+  return Number.isFinite(declared) ? Math.sign(declared) : 0;
 }
 
 /**
