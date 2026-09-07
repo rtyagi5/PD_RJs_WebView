@@ -13,6 +13,7 @@ import { registerReference } from './referenceRegistry';
 import { EXERCISE_CONFIGS } from './specToReference';
 import PoseOverlay from './PoseOverlay';
 import { PROCESSING_MAX_WIDTH } from '../captureConfig';
+import { MIRROR_SENSITIVE_FEATURES } from './universalFeatures';
 import { labelPhasesBySignal, resolveCycle } from './phaseLabeller';
 import { checkPhaseSeparation } from './referenceHealth';
 import { getServiceUrl } from '../config';
@@ -521,6 +522,24 @@ export default function ReferenceExtractor() {
     // Compute feature ranges
     const featureRanges = computeFeatureRanges(template);
 
+    // A mirrored source (phone front cameras often save the flipped preview)
+    // is harmless for everything except a signed horizontal feature, whose sign
+    // would invert. Warn only when the template actually contains one, rather
+    // than asking every operator about video orientation they cannot easily
+    // check — and note a wrong answer to such a question would itself introduce
+    // the error it is meant to prevent.
+    const mirrorSensitive = MIRROR_SENSITIVE_FEATURES.filter(
+      k => featureRanges[k] && (featureRanges[k].range || 0) > 0
+    );
+    if (mirrorSensitive.length) {
+      console.warn(
+        `[Extractor] "${exerciseName}" uses ${mirrorSensitive.join(', ')}, which is a SIGNED ` +
+        `horizontal measurement. If this clip came from a front camera that saved the ` +
+        `mirrored preview, its sign is inverted relative to every live session. Check that ` +
+        `text in the background reads the right way round before trusting this reference.`
+      );
+    }
+
     if (mirror.mirrored.length) {
       console.log(
         `[Extractor] mirrored ${mirror.mirrored.length} feature famil` +
@@ -584,6 +603,10 @@ export default function ReferenceExtractor() {
         bilateralFamilies: mirror.bilateral,
         repsAveraged: reps.length,
         processedAtWidth: PROCESSING_MAX_WIDTH,
+        // Cannot be determined from the footage; recorded so a reviewer knows it
+        // was not checked. Only matters for mirrorSensitiveFeatures.
+        sourceOrientationVerified: false,
+        mirrorSensitiveFeatures: mirrorSensitive,
       },
     };
 

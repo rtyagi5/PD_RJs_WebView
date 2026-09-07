@@ -223,6 +223,23 @@ export const UNIVERSAL_FEATURE_KEYS = [
  * Body-part name → feature keys mapping.
  * Used by the feedback system: PT says "back" → system watches trunkAngle features.
  */
+/**
+ * Features whose value depends on which way round the image is.
+ *
+ * Almost the whole feature set is invariant under a horizontal mirror: every
+ * three-point angle is unchanged by reflection, and the normalized height
+ * features are built from differences in y. handsXNorm is the exception —
+ * it is a SIGNED horizontal offset, `(hands.x - midShoulder.x) / shoulderWidth`,
+ * so a mirrored source flips its sign and inverts the movement it describes.
+ *
+ * This matters because phone front cameras often save the mirrored preview
+ * rather than the sensor image, while getUserMedia always delivers the sensor
+ * image (the live app only mirrors the preview in CSS). A reference extracted
+ * from a mirrored recording would therefore disagree with every live session
+ * on these features, and only on these.
+ */
+export const MIRROR_SENSITIVE_FEATURES = ['handsXNorm'];
+
 export const BODY_PART_FEATURE_MAP = {
   'back':     ['trunkAngleL', 'trunkAngleR', 'trunkAngleMin'],
   'trunk':    ['trunkAngleL', 'trunkAngleR', 'trunkAngleMin'],

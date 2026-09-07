@@ -162,6 +162,33 @@ there is real data on both and nothing is overwritten. The exported
 `provenance` block records which side was recorded and which families were
 mirrored, so a reviewer can tell a copy from a second recording.
 
+## If you recorded on a front camera
+
+Phone front cameras frequently save the mirrored *preview* rather than the sensor
+image. `getUserMedia` always delivers the sensor image — the live app only mirrors
+the preview in CSS — so a mirrored recording is flipped relative to every live
+session.
+
+**To check: look at any text in the background.** If the writing on a whiteboard
+or a book spine reads backwards, the file is mirrored.
+
+For almost every exercise this does not matter, and the reason is the same one
+that makes side-mirroring exact: the feature set is invariant under a horizontal
+flip. Three-point angles do not change under reflection, and the normalized
+height features are differences in `y`. A mirrored recording swaps which
+keypoints the model calls left and right, and the export mirrors the exercised
+side onto the idle one anyway — so the labels wash out entirely.
+
+**The exception is `handsXNorm`**, used only by `LiftsAndChops`. It is a signed
+horizontal offset, so a mirrored source inverts its sign and with it the movement
+it describes. The extractor warns in the console when a template contains a
+mirror-sensitive feature. Record that exercise on the rear camera, or verify the
+background text first.
+
+There is deliberately no "my video is mirrored" checkbox. Only one feature is
+affected, and a checkbox answered wrongly would introduce exactly the error it
+exists to prevent.
+
 ## The one that actually matters
 
 **Rest fully at the start posture between reps, and hold for about a second.**
