@@ -365,7 +365,10 @@ export default function ReferenceExtractor() {
         `Could not label: ${failures.join('; ')}`
       );
     } else {
-      setStatusMsg(`Labelled ${labels.length} frames across ${phases.length} phases, by movement.`);
+      setStatusMsg(
+        `Labelled ${reps.length} rep${reps.length === 1 ? '' : 's'} independently — ` +
+        `${labels.length} frames across ${phases.length} phases, by movement.`
+      );
     }
   }, [reps, frames, phases, repCycle, primaryFeature, exerciseName, phaseBandPct]);
 
@@ -911,25 +914,57 @@ export default function ReferenceExtractor() {
 
               {phaseLabels.length > 0 && (
                 <div style={{ marginTop: 12 }}>
-                  <label style={S.label}>Frames per phase</label>
+                  <label style={S.label}>
+                    Frames per phase — per rep, across {reps.length} rep{reps.length === 1 ? '' : 's'}
+                  </label>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {phases.map((ph, i) => {
                       const n = phaseLabels.filter(l => l.phase === ph).length;
+                      const per = reps.length ? (n / reps.length).toFixed(1) : '0';
                       return (
                         <span key={ph} style={{
                           fontSize: 11, padding: '3px 8px', borderRadius: 10,
                           background: n ? PHASE_COLORS[i % PHASE_COLORS.length] : '#333',
                           color: n ? '#fff' : '#777',
                         }}>
-                          {ph}: {n}
+                          {ph}: {per}/rep ({n} total)
                         </span>
                       );
                     })}
                   </div>
-                  {phases.some(ph => !phaseLabels.some(l => l.phase === ph)) && (
+
+                  {/* Each rep is labelled on its own, so each one must contain the whole
+                      cycle. A total can hide a rep that is missing a phase entirely:
+                      three reps where one never reaches the top still shows a healthy
+                      total for that phase. This breaks it out per rep so that is visible. */}
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#aab' }}>
+                    {reps.map((rep, r) => {
+                      const inRep = phaseLabels.filter(
+                        l => l.frame >= rep.start && l.frame <= rep.end
+                      );
+                      const missing = phases.filter(ph => !inRep.some(l => l.phase === ph));
+                      return (
+                        <div key={r} style={{ color: missing.length ? '#ffaa22' : '#aab' }}>
+                          Rep {r + 1}: {phases.map(ph =>
+                            `${ph} ${inRep.filter(l => l.phase === ph).length}`
+                          ).join(' · ')}
+                          {missing.length > 0 && `   ← missing ${missing.join(', ')}`}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {reps.some(rep => {
+                    const inRep = phaseLabels.filter(
+                      l => l.frame >= rep.start && l.frame <= rep.end
+                    );
+                    return phases.some(ph => !inRep.some(l => l.phase === ph));
+                  }) && (
                     <p style={{ fontSize: 11, color: '#ffaa22', marginBottom: 0 }}>
-                      A phase with no frames means the clip never covers that part of the
-                      movement — usually a half-recorded rep. Its coaching cues will never fire.
+                      A rep missing a phase never covers that part of the movement — usually a
+                      rep boundary cut mid-cycle, or a half-recorded rep. Its coaching cues will
+                      never fire, and it drags the averaged template toward a shape the patient
+                      cannot match. Fix the boundary or widen the posture band.
                     </p>
                   )}
                 </div>

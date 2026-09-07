@@ -132,13 +132,27 @@ export function detectRepBoundaries(frames, primaryFeature) {
   let bestResult = { reps: [], signal: [] };
   let bestFeature = candidates[0]?.key || null;
 
+  // Report what every candidate found, not just the winner. When auto-detection
+  // undercounts a video that clearly has many cycles, the useful question is
+  // whether the extrema were never found (peaks/valleys near zero) or found but
+  // not paired into valley→peak→valley reps (extrema plentiful, reps few) —
+  // and that is invisible from the one-line result in the UI.
+  const diag = [];
   for (const { key } of candidates) {
     const result = _detectRepsForFeature(frames, key);
+    diag.push(
+      `${key}: ${result.reps.length} reps ` +
+      `(${result.peaks} peaks, ${result.valleys} valleys, ` +
+      `range ${result.range.toFixed(1)}, threshold ${result.threshold.toFixed(2)}, ` +
+      `${result.nonFinite} unusable frames)`
+    );
     if (result.reps.length > bestResult.reps.length) {
       bestResult = result;
       bestFeature = key;
     }
   }
+  console.log(`[RepDetect] ${frames.length} frames. Candidates:`);
+  for (const line of diag) console.log(`  ${line}`);
 
   // Fallback: if still 0 reps, treat entire video as 1 rep
   if (bestResult.reps.length === 0 && frames.length > 10) {
@@ -153,6 +167,9 @@ function _detectRepsForFeature(frames, featureKey) {
   const signal = frames.map(f => f.features[featureKey] ?? NaN);
   const smoothed = emaSmooth(signal, 0.3);
   const { peaks, valleys } = findPeaksAndValleys(smoothed, 0.08);
+
+  const usable = smoothed.filter(Number.isFinite);
+  const range = usable.length ? Math.max(...usable) - Math.min(...usable) : 0;
 
   // Build rep boundaries: valley → peak → valley
   const reps = [];
@@ -173,7 +190,12 @@ function _detectRepsForFeature(frames, featureKey) {
     }
   }
 
-  return { reps, signal: smoothed };
+  return {
+    reps, signal: smoothed,
+    peaks: peaks.length, valleys: valleys.length,
+    range, threshold: 0.08 * range,
+    nonFinite: smoothed.length - usable.length,
+  };
 }
 
 /**
