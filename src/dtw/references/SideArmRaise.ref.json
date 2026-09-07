@@ -1934,7 +1934,7 @@
   },
   "feedback": {
     "phase": {
-      "lowered": "Start the raising the <left/right> arm ",
+      "lowered": "Start raising your arm",
       "transition_up": "Keep going up",
       "raised": "Raised Enough",
       "transition_down": "Keep Lowering "

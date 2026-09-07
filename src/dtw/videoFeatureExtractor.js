@@ -63,7 +63,7 @@ export async function extractFeaturesFromVideo(videoEl, detector, opts = {}) {
   if (scaled) {
     console.log(
       `[VideoExtractor] processing at ${procW}x${procH} ` +
-      `(source ${videoEl.videoWidth}x${videoEl.videoHeight}) to match live capture`
+      `(source ${videoEl.videoWidth}x${videoEl.videoHeight}) (extractor cap)`
     );
   }
 

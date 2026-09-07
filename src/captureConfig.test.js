@@ -1,40 +1,45 @@
 import { PROCESSING_MAX_WIDTH, VIDEO_CONSTRAINTS, processingSize } from './captureConfig';
 import { extractFeaturesFromVideo } from './dtw/videoFeatureExtractor';
 
-// Both detectors resize their own person-ROI before inference - MoveNet to
-// 192x192, BlazePose to 256x256 - so the subject fills the model input however
-// far away they stand. What the capture resolution decides is whether that ROI
-// is downsampled from real pixels or upsampled from too few. At Chrome's
-// 640x480 default a seated patient's ROI is roughly 200-300px stretched to 256,
-// which invents detail before the model runs.
+// PROCESSING_MAX_WIDTH governs the OFFLINE reference extractor only: a template
+// built from a raw 1080p phone recording encodes landmark quality a live session
+// cannot reproduce - systematically unreachable, the same class of defect as the
+// open LiftsAndChops scale mismatch.
 //
-// The same number has to govern offline reference extraction, or a template
-// built from a 1080p phone recording encodes landmark quality a live session
-// cannot reproduce - systematically unreachable, the same class of defect as
-// the open LiftsAndChops scale mismatch.
+// The LIVE path deliberately requests no resolution at all. Asking for one was
+// tried and measured on a Galaxy A36: the phone answered `width: {ideal: 1280}`
+// with 720x1280 PORTRAIT - 3x the pixels of the 640x480 default and a NARROWER
+// frame (aspect 0.56 vs 1.33) - which collapsed the pose rate to 6.6-7.5/s at
+// 120-150ms latency. At that rate the top of a raise is never sampled: the
+// primary feature reads NaN through the `raised` phase, rom goes to -Infinity,
+// phases thrash and reps go uncounted. These tests exist to stop that returning.
 
 describe('capture constraints', () => {
-  it('asks the camera for a real resolution', () => {
-    // Previously the only constraint was facingMode, so Chrome returned 640x480.
-    expect(VIDEO_CONSTRAINTS.width).toEqual({ ideal: PROCESSING_MAX_WIDTH });
-  });
-
-  it('asks as an ideal, not an exact', () => {
-    // `exact` makes getUserMedia fail outright on a device that cannot comply,
-    // which would lose the camera rather than lower the resolution.
-    expect(VIDEO_CONSTRAINTS.width.exact).toBeUndefined();
-  });
-
-  it('does not constrain height', () => {
-    // Constraining both would push most phones from 4:3 to 16:9, changing the
-    // vertical field of view and with it checkDistance's bodyHeight / frameH -
-    // a hard P0 gate. Width alone raises resolution at a fixed aspect ratio.
+  it('requests no resolution, so the browser keeps its cheap default', () => {
+    // The regression this pins: a width hint made the phone hand back a portrait
+    // frame at 3x the pixel cost, and pose inference could no longer keep up
+    // with the movement it was measuring.
+    expect(VIDEO_CONSTRAINTS.width).toBeUndefined();
     expect(VIDEO_CONSTRAINTS.height).toBeUndefined();
     expect(VIDEO_CONSTRAINTS.aspectRatio).toBeUndefined();
+    expect(VIDEO_CONSTRAINTS.frameRate).toBeUndefined();
   });
 
   it('keeps the front camera', () => {
     expect(VIDEO_CONSTRAINTS.facingMode).toBe('user');
+  });
+
+  it('constrains nothing but the camera to use', () => {
+    // Any future key here changes what the phone negotiates, and the negotiated
+    // format is what decides whether the engine can see the top of a rep.
+    expect(Object.keys(VIDEO_CONSTRAINTS)).toEqual(['facingMode']);
+  });
+
+  it('keeps the extractor cap independent of the live path', () => {
+    // They were briefly the same number. Re-coupling them would drag the live
+    // regression back in the next time the extractor cap is tuned.
+    expect(PROCESSING_MAX_WIDTH).toBe(1280);
+    expect(VIDEO_CONSTRAINTS.width).toBeUndefined();
   });
 });
 
