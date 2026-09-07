@@ -2,7 +2,7 @@
 // that is structurally perfect but whose phase labels invert the direction gate.
 import { checkPhaseSeparation } from './referenceHealth';
 import { generateAllReferences, EXERCISE_CONFIGS } from './specToReference';
-import recordedSideArmRaise from './references/Left Side Arm Raise.ref.json';
+import recordedSideArmRaise from './__fixtures__/broken-positional-labels.ref.json';
 
 /** Minimal rep-mode reference with controllable start/effort postures. */
 function makeRef({ startVals, effortVals, feature = 'shoulderAngleL' }) {

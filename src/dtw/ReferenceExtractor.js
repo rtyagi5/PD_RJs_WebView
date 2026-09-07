@@ -10,6 +10,8 @@ import { extractFeaturesFromVideo, detectRepBoundaries, buildTemplateFromReps, g
 import { computeFeatureRanges, validateReference } from './referenceSchema';
 import { registerReference } from './referenceRegistry';
 import { EXERCISE_CONFIGS } from './specToReference';
+import { labelPhasesBySignal, resolveCycle } from './phaseLabeller';
+import { checkPhaseSeparation } from './referenceHealth';
 import { getServiceUrl } from '../config';
 import { clearCachedReference } from './referenceStorage';
 
@@ -132,6 +134,7 @@ export default function ReferenceExtractor() {
   const [topFeatures, setTopFeatures] = useState([]);   // top features by range for dropdown
   const [primaryFeature, setPrimaryFeature] = useState(''); // user-selected or auto-detected
   const [featureSignal, setFeatureSignal] = useState([]); // smoothed signal for sparkline
+  const [phaseBandPct, setPhaseBandPct] = useState(0.15); // how close counts as "at" a posture
 
   const videoRef = useRef(null);
   const detectorRef = useRef(null);
@@ -300,6 +303,20 @@ export default function ReferenceExtractor() {
     setStatusMsg(`Re-detected ${count} rep${count !== 1 ? 's' : ''} using "${featureKey}".`);
   }, [frames]);
 
+  // Seed phases and repCycle from the canonical config as soon as an exercise is
+  // picked. They used to default to ['lowered','raised'] and be typed by hand,
+  // so a recorded reference could end up structurally incomparable to the
+  // synthetic one it replaces — different phase ids, different cycle.
+  useEffect(() => {
+    const cfg = EXERCISE_CONFIGS[exerciseName];
+    if (!cfg) return;
+    const ids = (cfg.phases || []).map(p => p.id).filter(Boolean);
+    if (ids.length >= 2) setPhases(ids);
+    const cycle = resolveCycle(cfg.repCycle);
+    if (cycle) setRepCycle({ start: cycle.start, effort: cycle.effort, return: cycle.start });
+    if (cfg.detector) setDetectorType(cfg.detector);
+  }, [exerciseName]);
+
   // ─── Step 4: Phase Labeling ────────────────────────
   const handleAddPhase = useCallback(() => {
     const name = prompt('Phase name (e.g., "extended", "flexed", "hold"):');
@@ -315,20 +332,42 @@ export default function ReferenceExtractor() {
   const autoLabelPhases = useCallback(() => {
     if (!reps.length || !frames.length || phases.length < 2) return;
 
-    // Simple auto-labeling: first half of rep = phase[0], second half = phase[1]
-    // For 3+ phases: divide equally
+    // Label from the MOVEMENT, never from the frame index. The old code split
+    // each rep into equal segments by frame count and assigned phases in order,
+    // which mislabels any clip that does not happen to start at the rest
+    // posture — and that is exactly how the one recorded reference in this repo
+    // ended up with its "lowered" phase at 92 degrees, arm up.
     const labels = [];
-    for (const rep of reps) {
-      const repLen = rep.end - rep.start + 1;
-      const segLen = Math.ceil(repLen / phases.length);
-      for (let f = rep.start; f <= rep.end; f++) {
-        const segIdx = Math.min(Math.floor((f - rep.start) / segLen), phases.length - 1);
-        labels.push({ frame: f, phase: phases[segIdx] });
+    const failures = [];
+    for (let r = 0; r < reps.length; r++) {
+      const rep = reps[r];
+      const repFrames = frames.slice(rep.start, rep.end + 1);
+      const res = labelPhasesBySignal(repFrames, {
+        phases,
+        repCycle,
+        primaryFeature,
+        exerciseName,
+        bandPct: phaseBandPct,
+      });
+      if (!res.ok) {
+        failures.push(`rep ${r + 1}: ${res.reason}`);
+        continue;
+      }
+      for (let i = 0; i < repFrames.length; i++) {
+        labels.push({ frame: rep.start + i, phase: res.labels[i] });
       }
     }
+
     setPhaseLabels(labels);
-    setStatusMsg(`Auto-labeled ${labels.length} frames across ${phases.length} phases.`);
-  }, [reps, frames, phases]);
+    if (failures.length) {
+      setStatusMsg(
+        `Labelled ${reps.length - failures.length}/${reps.length} reps. ` +
+        `Could not label: ${failures.join('; ')}`
+      );
+    } else {
+      setStatusMsg(`Labelled ${labels.length} frames across ${phases.length} phases, by movement.`);
+    }
+  }, [reps, frames, phases, repCycle, primaryFeature, exerciseName, phaseBandPct]);
 
   // ─── Step 5: Feedback ──────────────────────────────
   const handlePhaseFeedback = useCallback((phase, text) => {
@@ -369,21 +408,30 @@ export default function ReferenceExtractor() {
     // Build template from reps
     const template = buildTemplateFromReps(frames, reps, 60);
 
-    // Apply phase labels to template
-    if (phaseLabels.length > 0 && phases.length >= 2) {
-      // Map phase labels to template frames by proportion
-      const repLen = reps[0].end - reps[0].start + 1;
-      for (let t = 0; t < template.length; t++) {
-        const srcFrame = reps[0].start + Math.round((t / (template.length - 1)) * (repLen - 1));
-        const label = phaseLabels.find(l => l.frame === srcFrame);
-        template[t].phase = label?.phase || phases[Math.floor(t / (template.length / phases.length))];
-      }
-    } else {
-      // Default: first half = phases[0], second half = phases[1]
-      for (let t = 0; t < template.length; t++) {
-        const segIdx = Math.min(Math.floor(t / (template.length / phases.length)), phases.length - 1);
-        template[t].phase = phases[segIdx];
-      }
+    // Label the averaged template directly from its own signal.
+    //
+    // This used to map labels across from rep 0 by proportion and fall back to a
+    // positional split. Both were wrong: the template is an AVERAGE across reps,
+    // so rep 0's frame positions do not describe it, and a positional split
+    // ignores the movement entirely. Labelling the template from its own values
+    // is the only version that is correct regardless of where detectRepBoundaries
+    // cut the rep.
+    const labelResult = labelPhasesBySignal(template, {
+      phases,
+      repCycle,
+      primaryFeature,
+      exerciseName,
+      bandPct: phaseBandPct,
+    });
+    if (!labelResult.ok) {
+      setStatusMsg(
+        `Cannot label phases: ${labelResult.reason} ` +
+        `Check the primary feature and rep boundaries, or widen the posture band.`
+      );
+      return;
+    }
+    for (let t = 0; t < template.length; t++) {
+      template[t].phase = labelResult.labels[t];
     }
 
     // Compute feature ranges
@@ -434,10 +482,21 @@ export default function ReferenceExtractor() {
       },
     };
 
-    // Validate
+    // Validate: shape first, then semantics.
     const result = validateReference(reference);
     if (!result.valid) {
       setStatusMsg(`Validation errors: ${result.errors.join('; ')}`);
+      return;
+    }
+
+    // validateReference only checks SHAPE. A reference can have every required
+    // field and still invert the direction gate at runtime if its phase labels
+    // do not separate the rest posture from the effort posture. Catch that here,
+    // while the operator still has the video open, rather than at app startup on
+    // someone's phone.
+    const health = checkPhaseSeparation(reference);
+    if (!health.ok) {
+      setStatusMsg(`Reference is not usable: ${health.reason}`);
       return;
     }
 
@@ -447,7 +506,8 @@ export default function ReferenceExtractor() {
     setExportedJSON(reference);
     setStatusMsg(`Reference "${reference.name}" exported and registered! ${template.length} template frames, ${Object.keys(featureRanges).length} features.`);
     setStep(6);
-  }, [frames, reps, phases, phaseLabels, repCycle, feedback, exerciseName, exerciseSide, exerciseMode, detectorType, fps]);
+  }, [frames, reps, phases, repCycle, feedback, exerciseName, exerciseSide, exerciseMode,
+      detectorType, fps, primaryFeature, phaseBandPct]);
 
   const handleDownload = useCallback(() => {
     if (!exportedJSON) return;
@@ -827,7 +887,53 @@ export default function ReferenceExtractor() {
                 Example: lowered → raised → lowered = 1 complete rep
               </p>
 
+              <label style={S.label}>
+                Posture band — how close a frame must be to an end position to count as
+                being AT it, as a share of the movement range
+              </label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                <input
+                  type="range" min="5" max="35" step="1"
+                  value={Math.round(phaseBandPct * 100)}
+                  onChange={e => setPhaseBandPct(Number(e.target.value) / 100)}
+                  style={{ flex: 1 }}
+                />
+                <span style={{ fontSize: 12, color: '#ccc', minWidth: 36 }}>
+                  {Math.round(phaseBandPct * 100)}%
+                </span>
+              </div>
+              <p style={{ fontSize: 11, color: '#666', marginTop: 0, marginBottom: 12 }}>
+                Widen this for a noisy clip or one where the patient never fully settles between
+                reps. Too wide and the two postures merge; too narrow and neither is found.
+              </p>
+
               <button style={S.btnSecondary} onClick={autoLabelPhases}>Re-label Frames</button>
+
+              {phaseLabels.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <label style={S.label}>Frames per phase</label>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {phases.map((ph, i) => {
+                      const n = phaseLabels.filter(l => l.phase === ph).length;
+                      return (
+                        <span key={ph} style={{
+                          fontSize: 11, padding: '3px 8px', borderRadius: 10,
+                          background: n ? PHASE_COLORS[i % PHASE_COLORS.length] : '#333',
+                          color: n ? '#fff' : '#777',
+                        }}>
+                          {ph}: {n}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {phases.some(ph => !phaseLabels.some(l => l.phase === ph)) && (
+                    <p style={{ fontSize: 11, color: '#ffaa22', marginBottom: 0 }}>
+                      A phase with no frames means the clip never covers that part of the
+                      movement — usually a half-recorded rep. Its coaching cues will never fire.
+                    </p>
+                  )}
+                </div>
+              )}
               <button style={S.btn} onClick={() => setStep(5)}>Next: Feedback</button>
             </div>
           )}
