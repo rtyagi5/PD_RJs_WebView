@@ -763,11 +763,25 @@ export default function ExerciseTrackerRefactored({
         // also switch which leg is highlighted based on the active side
         if (isDTW) {
           const q = stepResult.quality ?? 0;
-          const color = q > 0.7 ? '#66FF00' : '#FFB020';
+          const breaching = (stepResult.capBreaches?.length ?? 0) > 0;
+
+          // Three states, in priority order. Safety outranks match quality:
+          // a patient can be tracking the template beautifully and still be
+          // past a clinical limit, and that is precisely the case that must
+          // not be shown in green.
+          //   red   — past a clinical cap right now
+          //   amber — moving, but not matching the reference well
+          //   green — good
+          const color = breaching ? '#FF3B30' : (q > 0.7 ? '#66FF00' : '#FFB020');
           const ref = getReference(exerciseType);
           const hlParts = ref?.highlightKeypoints ?? [];
 
-          if (ref?.side === 'alternating' && hlParts.length) {
+          // A breach colours the WHOLE skeleton, not just the tracked joint.
+          // The limb at fault is rarely where the patient is looking, and a
+          // safety warning that has to be hunted for is not a warning.
+          if (breaching) {
+            setHighlight({ keypoints: keypointsRef.current, color });
+          } else if (ref?.side === 'alternating' && hlParts.length) {
             const activeSide = stepResult.activeSide; // null when idle / undetected
             let hlKps;
             if (activeSide === 'left' || activeSide === 'right') {

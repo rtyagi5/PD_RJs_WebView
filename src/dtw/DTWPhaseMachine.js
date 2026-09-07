@@ -349,8 +349,14 @@ export class DTWPhaseMachine {
     // warning is spoken immediately by _pickFeedback, but a spoken string is
     // gone the moment the next one replaces it — the rep record is what a
     // clinician can actually review afterwards.
+    // Evaluated every frame, not only mid-rep, so the UI can warn the moment a
+    // patient goes past a safe limit rather than waiting for a rep to open.
+    // A spoken cue alone is not enough here: it is gone as soon as the next one
+    // replaces it, and a patient looking at their own skeleton will not hear it
+    // over the sound of the exercise.
+    const liveCapBreaches = this._capBreaches(features);
     if (this.cycleState !== 'idle') {
-      for (const b of this._capBreaches(features)) {
+      for (const b of liveCapBreaches) {
         if (!this.cycleCapBreaches.some(x => x.key === b.key && x.bound === b.bound)) {
           this.cycleCapBreaches.push(b);
         }
@@ -613,6 +619,10 @@ export class DTWPhaseMachine {
       quality: result.quality,
       templatePosition: result.templatePosition,
       deviations: result.deviations,
+      // Clinical caps exceeded on THIS frame. Distinct from
+      // repClassification.capBreaches, which is the whole rep and only arrives
+      // on the frame a rep is counted — far too late to be a live warning.
+      capBreaches: liveCapBreaches,
       // Patient baseline data
       repClassification,
       // Per-rep ROM summary — non-null only on the frame a rep is counted

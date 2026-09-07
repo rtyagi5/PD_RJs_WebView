@@ -724,3 +724,87 @@ describe('canonical policy overlay', () => {
     ]));
   });
 });
+
+// ─── Live cap breach, for a visible cue ──────────────────────────────────────
+// A cap breach used to produce a spoken string and, once the rep closed, a flag
+// on the rep. Neither is visible while it is happening: the spoken cue is gone
+// as soon as the next one replaces it, and repClassification.capBreaches only
+// arrives on the frame a rep is counted, which is far too late to warn anyone.
+//
+// stepResult.capBreaches reports the caps exceeded on THIS frame, so the
+// renderer can turn the skeleton red at the moment it matters.
+
+describe('live cap breaches', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('reports nothing while the patient is inside the caps', () => {
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, armRaiseRep(), { feature: 'shoulderAngleL' });
+    expect(out.every(r => r.capBreaches.length === 0)).toBe(true);
+  });
+
+  it('reports the breach on the frames it is happening', () => {
+    // SideArmRaise caps shoulderAngleL at 95.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [...hold(30, 8), ...ramp(30, 110, 14), ...hold(110, 8)],
+      { feature: 'shoulderAngleL' });
+
+    const breaching = out.filter(r => r.capBreaches.length > 0);
+    expect(breaching.length).toBeGreaterThan(0);
+    expect(breaching[0].capBreaches[0]).toMatchObject({
+      key: 'shoulderAngleL', bound: 'max', limit: 95,
+    });
+  });
+
+  it('clears as soon as the patient comes back inside the limit', () => {
+    // The cue has to be live, not sticky, or it stops meaning anything.
+    // Ramped rather than jumped: an 80-degree step in one frame is masked by the
+    // velocity filter as a tracking artefact, so it correctly reports no breach.
+    const eng = makeArmRaiseEngine();
+    const values = [...hold(30, 6), ...ramp(30, 110, 14), ...hold(110, 4),
+                    ...ramp(110, 60, 10), ...hold(60, 6)];
+    const out = drive(eng, values, { feature: 'shoulderAngleL' });
+
+    expect(out.some(r => r.capBreaches.length > 0)).toBe(true);
+    expect(out[out.length - 1].capBreaches).toHaveLength(0);
+  });
+
+  it('warns even before a rep has started', () => {
+    // The accumulating per-rep list is gated on the cycle being active. A
+    // patient holding their arm too high before they begin still needs telling.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, hold(110, 6), { feature: 'shoulderAngleL' });
+    expect(eng.cycleState).toBe('idle');
+    expect(out[out.length - 1].capBreaches.length).toBeGreaterThan(0);
+  });
+
+  it('does not fire on missing keypoints', () => {
+    // NaN is absence, not a breach — colouring the skeleton red because a limb
+    // went out of frame would train patients to ignore the cue.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [NaN, NaN, NaN], { feature: 'shoulderAngleL' });
+    expect(out.every(r => r.capBreaches.length === 0)).toBe(true);
+  });
+
+  it('is independent of DTW match quality', () => {
+    // The case the colour priority exists for: a patient can track the template
+    // well and still be past a clinical limit. Quality alone would show green.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [...hold(30, 8), ...ramp(30, 110, 14), ...hold(110, 8)],
+      { feature: 'shoulderAngleL' });
+    const overshoot = out.filter(r => r.capBreaches.length > 0);
+    expect(overshoot.some(r => (r.quality ?? 0) > 0.7)).toBe(true);
+  });
+
+  it('still records the breach against the rep as well', () => {
+    // Additive: the live signal must not have replaced the per-rep record a
+    // clinician reviews afterwards.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [
+      ...hold(30, 8), ...ramp(30, 110, 14), ...hold(110, 8), ...ramp(110, 30, 14), ...hold(30, 8),
+    ], { feature: 'shoulderAngleL' });
+    const rep = out.find(r => r.repDelta > 0);
+    expect(rep.repClassification.flagged).toBe(true);
+    expect(rep.repClassification.capBreaches.length).toBeGreaterThan(0);
+  });
+});
