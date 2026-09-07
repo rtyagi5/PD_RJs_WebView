@@ -21,6 +21,7 @@ import {
 import { IDEAL_BODY_RATIO } from './PoseQuality';
 import { DTWPhaseMachine, computeUniversalFeatures } from './dtw';
 import { KeypointRecorder } from './KeypointRecorder';
+import { VIDEO_CONSTRAINTS } from './captureConfig';
 import { getReference } from './dtw/referenceRegistry';
 import { bootstrapAllReferences, fetchAndCacheReference } from './dtw/bootstrapReferences';
 import {
@@ -934,7 +935,7 @@ export default function ExerciseTrackerRefactored({
         playsInline
         controls={false}
         style={{ position: 'absolute', top: 0, left: 0, zIndex: 9, width: '100%', height: '100vh', objectFit: 'fill', transform: 'scaleX(-1)' }}
-        videoConstraints={{ facingMode: 'user' }}
+        videoConstraints={VIDEO_CONSTRAINTS}
       />
       <canvas
         ref={canvasRef}

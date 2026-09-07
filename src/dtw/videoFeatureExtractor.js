@@ -4,6 +4,7 @@
 // extracts universal features, and returns a timeline of feature vectors.
 // ---------------------------------------------
 import { computeUniversalFeatures } from './universalFeatures.js';
+import { processingSize } from '../captureConfig.js';
 
 const MOVE_NET_NAMES = [
   'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
@@ -42,11 +43,29 @@ export async function extractFeaturesFromVideo(videoEl, detector, opts = {}) {
   const totalFrames = Math.ceil(duration * fps);
   const frames = [];
 
-  // Create offscreen canvas for pose detection
+  // Offscreen canvas: this is what pose detection actually runs on, NOT the
+  // video element. A phone recording is 1080p or better, while a live session
+  // captures at PROCESSING_MAX_WIDTH — extracting at native resolution would
+  // build the template from landmark quality a live session can never
+  // reproduce, making it systematically unreachable. Capping here keeps the
+  // reference and the sessions it is compared against on the same footing.
+  //
+  // Note this equalises pixel COUNT, not image quality: a rear-camera recording
+  // is still sharper than a front-camera live frame.
+  const { width: procW, height: procH, scaled } = processingSize(
+    videoEl.videoWidth, videoEl.videoHeight
+  );
   const canvas = document.createElement('canvas');
-  canvas.width = videoEl.videoWidth;
-  canvas.height = videoEl.videoHeight;
+  canvas.width = procW;
+  canvas.height = procH;
   const ctx = canvas.getContext('2d');
+
+  if (scaled) {
+    console.log(
+      `[VideoExtractor] processing at ${procW}x${procH} ` +
+      `(source ${videoEl.videoWidth}x${videoEl.videoHeight}) to match live capture`
+    );
+  }
 
   for (let i = 0; i < totalFrames; i++) {
     if (signal?.aborted) break;
@@ -64,7 +83,10 @@ export async function extractFeaturesFromVideo(videoEl, detector, opts = {}) {
     // Run pose detection
     let keypoints = [];
     try {
-      const poses = await detector.estimatePoses(videoEl);
+      // The canvas, not videoEl — otherwise the cap above does nothing.
+      // Keypoints come back in canvas pixel space, which is fine: every
+      // universal feature is a ratio, so all of them are scale-invariant.
+      const poses = await detector.estimatePoses(canvas);
       const raw = poses?.[0]?.keypoints || [];
       keypoints = raw.map((k, idx) => (k?.name ? k : { ...k, name: MOVE_NET_NAMES[idx] }));
     } catch (e) {
