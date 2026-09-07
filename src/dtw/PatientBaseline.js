@@ -60,7 +60,8 @@ export class PatientBaseline {
     this.reps = {
       completed: 0,    // Full ROM reps (within tolerance of baseline)
       attempts: 0,     // Partial reps (movement detected but insufficient ROM)
-      total: 0,        // completed + attempts
+      flagged: 0,      // Reps that breached a clinical cap — counted, but not a quality claim
+      total: 0,        // completed + attempts + flagged
     };
 
     // Per-rep quality buffer (tracks feature extremes within current rep)
@@ -93,8 +94,20 @@ export class PatientBaseline {
    * @param {number} quality - DTW quality score (0-1)
    * @returns {{ completed: boolean, quality: number, romPct: number, details: Object }}
    */
-  onRepDetected(features, quality) {
+  onRepDetected(features, quality, opts = {}) {
     this.reps.total++;
+
+    // A rep that breached a clinical cap still happened — the patient moved, and
+    // silently discarding that is the failure the baseline ROM gate exists to
+    // avoid. But it must not be reported as a good rep either, so it is counted
+    // separately and excluded from the completion rate rather than being graded.
+    const capBreaches = opts.capBreaches || [];
+    if (capBreaches.length > 0) {
+      this.reps.flagged++;
+      const analysis = this.isCalibrating ? { romPct: 1.0, details: {} } : this._analyzeRep();
+      this._resetRepBuffer();
+      return { completed: false, flagged: true, capBreaches, quality, ...analysis };
+    }
 
     if (this.isCalibrating && !this.isLocked) {
       this.calibrationRepsCompleted++;
@@ -109,7 +122,7 @@ export class PatientBaseline {
       // baseline locks inherits the full calibration min/max — so it always scored
       // 100% ROM and was graded "completed" no matter how short it actually was.
       this._resetRepBuffer();
-      return { completed: true, quality, romPct: 1.0, details: { calibrating: true } };
+      return { completed: true, flagged: false, quality, romPct: 1.0, details: { calibrating: true } };
     }
 
     // Compare rep against baseline
@@ -119,12 +132,12 @@ export class PatientBaseline {
       // Within tolerance = completed rep
       this.reps.completed++;
       this._resetRepBuffer();
-      return { completed: true, quality, ...repAnalysis };
+      return { completed: true, flagged: false, quality, ...repAnalysis };
     } else {
       // Insufficient ROM = attempt
       this.reps.attempts++;
       this._resetRepBuffer();
-      return { completed: false, quality, ...repAnalysis };
+      return { completed: false, flagged: false, quality, ...repAnalysis };
     }
   }
 
@@ -210,8 +223,11 @@ export class PatientBaseline {
       date: new Date().toISOString(),
       baseline: this.baseline ? { ...this.baseline } : null,
       reps: { ...this.reps },
-      completionRate: this.reps.total > 0
-        ? Math.round((this.reps.completed / this.reps.total) * 100)
+      // Flagged reps are excluded from the denominator, not counted as failures:
+      // the rate answers "of the reps we can make a quality claim about, how many
+      // were full range", and an unsafe rep is not one we can claim anything about.
+      completionRate: (this.reps.total - this.reps.flagged) > 0
+        ? Math.round((this.reps.completed / (this.reps.total - this.reps.flagged)) * 100)
         : 0,
       isCalibrating: this.isCalibrating,
     };

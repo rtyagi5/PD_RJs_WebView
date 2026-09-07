@@ -186,7 +186,8 @@ export class DTWPhaseMachine {
     this.minRomForRep = this.templateRomGate; // refined below once a baseline exists
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
-    this.cycleSummary = {}; // { <featureKey>: { min, max } } for the in-flight rep
+    this.cycleSummary = {};
+    this.cycleCapBreaches = []; // { <featureKey>: { min, max } } for the in-flight rep
     console.log(`[DTW] Primary feature: ${bestKey} range=${bestRange.toFixed(1)} minROM=${this.minRomForRep.toFixed(1)} side=${this.side}`);
 
     // Effort-adjacent phases: include transition phases leading to the effort phase
@@ -283,7 +284,8 @@ export class DTWPhaseMachine {
     this._prevPrimaryValue = null;
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
-    this.cycleSummary = {}; // { <featureKey>: { min, max } } for the in-flight rep
+    this.cycleSummary = {};
+    this.cycleCapBreaches = []; // { <featureKey>: { min, max } } for the in-flight rep
     this.lastActiveSide = null;
     this.activeSideDuringCycle = null;
     this._repAnnouncedUntil = 0;
@@ -330,6 +332,18 @@ export class DTWPhaseMachine {
       }
     }
 
+    // Remember any clinical-cap breach for the rep currently in flight. The
+    // warning is spoken immediately by _pickFeedback, but a spoken string is
+    // gone the moment the next one replaces it — the rep record is what a
+    // clinician can actually review afterwards.
+    if (this.cycleState !== 'idle') {
+      for (const b of this._capBreaches(features)) {
+        if (!this.cycleCapBreaches.some(x => x.key === b.key && x.bound === b.bound)) {
+          this.cycleCapBreaches.push(b);
+        }
+      }
+    }
+
     // Run DTW matching
     const result = this.dtw.step(features);
     let repDelta = 0;
@@ -363,6 +377,7 @@ export class DTWPhaseMachine {
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
         this.cycleSummary = {};
+        this.cycleCapBreaches = [];
         this.activeSideDuringCycle = null;
       }
     } else if (newPhase !== this.phase) {
@@ -425,6 +440,7 @@ export class DTWPhaseMachine {
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
         this.cycleSummary = {};
+        this.cycleCapBreaches = [];
         this.activeSideDuringCycle = null;
       }
       if (this.cycleState === 'sawStart') {
@@ -489,6 +505,7 @@ export class DTWPhaseMachine {
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
         this.cycleSummary = {};
+        this.cycleCapBreaches = [];
         this.activeSideDuringCycle = null;
         this._movedAwayAt = null;
       } else if (repGateReady && now < this.refractoryUntil) {
@@ -500,6 +517,7 @@ export class DTWPhaseMachine {
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
         this.cycleSummary = {};
+        this.cycleCapBreaches = [];
         this.activeSideDuringCycle = null;
         this._movedAwayAt = null;
       }
@@ -532,6 +550,7 @@ export class DTWPhaseMachine {
         this.cycleFeatureMin = Infinity;
         this.cycleFeatureMax = -Infinity;
         this.cycleSummary = {};
+        this.cycleCapBreaches = [];
         this.activeSideDuringCycle = null;
         this._movedAwayAt = null;
       }
@@ -587,6 +606,7 @@ export class DTWPhaseMachine {
       repSummary,
       isCalibrating: this.patientBaseline?.isCalibrating ?? false,
       completedReps: this.patientBaseline?.reps?.completed ?? this.repCount,
+      flaggedReps: this.patientBaseline?.reps?.flagged ?? 0,
       attemptedReps: this.patientBaseline?.reps?.attempts ?? 0,
       totalReps: this.patientBaseline?.reps?.total ?? this.repCount,
       activeSide: this.activeSideDuringCycle,   // null when idle; 'left'/'right' during rep
@@ -675,12 +695,22 @@ export class DTWPhaseMachine {
    *
    * @returns {boolean} true if any watched feature is outside its safe limit
    */
-  _exceedsClinicalCap(features) {
+  /**
+   * Which clinical caps the current frame breaches, and by how much.
+   * Returns details rather than a boolean so a breach can be attached to the rep
+   * it happened during, not just spoken and forgotten.
+   * @returns {Array<{key:string, value:number, bound:'min'|'max', limit:number, source:string}>}
+   */
+  _capBreaches(features) {
+    const out = [];
     for (const cap of this.clinicalCaps) {
       const v = features[cap.key];
       if (!Number.isFinite(v)) continue;
-      if (cap.max !== null && v > cap.max) return true;
-      if (cap.min !== null && v < cap.min) return true;
+      if (cap.max !== null && v > cap.max) {
+        out.push({ key: cap.key, value: v, bound: 'max', limit: cap.max, source: 'clinicalCap' });
+      } else if (cap.min !== null && v < cap.min) {
+        out.push({ key: cap.key, value: v, bound: 'min', limit: cap.min, source: 'clinicalCap' });
+      }
     }
     // Patient-specific envelope (only meaningful once the baseline has locked).
     if (this.patientBaseline && !this.patientBaseline.isCalibrating) {
@@ -688,10 +718,16 @@ export class DTWPhaseMachine {
         const v = features[cap.key];
         if (!Number.isFinite(v)) continue;
         const verdict = this.patientBaseline.checkSafety(cap.key, v);
-        if (verdict && verdict.safe === false) return true;
+        if (verdict && verdict.safe === false) {
+          out.push({ key: cap.key, value: v, bound: 'envelope', limit: null, source: 'baselineEnvelope' });
+        }
       }
     }
-    return false;
+    return out;
+  }
+
+  _exceedsClinicalCap(features) {
+    return this._capBreaches(features).length > 0;
   }
 
   _pickFeedback(dtwResult, features, now = performance.now()) {
@@ -777,10 +813,15 @@ export class DTWPhaseMachine {
    * If no baseline is set, all reps count as completed.
    */
   _classifyRep(features, quality) {
+    const capBreaches = this.cycleCapBreaches || [];
+    const flagged = capBreaches.length > 0;
     if (!this.patientBaseline) {
-      return { completed: true, quality, romPct: 1.0, details: {} };
+      return {
+        completed: !flagged, flagged, capBreaches,
+        quality, romPct: 1.0, details: {},
+      };
     }
-    return this.patientBaseline.onRepDetected(features, quality);
+    return this.patientBaseline.onRepDetected(features, quality, { capBreaches });
   }
 
   /**

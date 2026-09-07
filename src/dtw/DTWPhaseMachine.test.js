@@ -445,3 +445,87 @@ describe('baseline-driven ROM gate', () => {
     expect(withBaseline.repCount).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ─── Clinical caps flag the rep ──────────────────────────────────────────────
+// Caps used to be advisory only: _exceedsClinicalCap was read solely by
+// _pickFeedback, so a breach produced a spoken string and nothing else. A
+// spoken string is gone the moment the next one replaces it, leaving no record
+// a clinician could review. These pin the flagging that replaced that, and pin
+// the decision NOT to block the rep.
+
+describe('clinical cap flagging', () => {
+  beforeEach(() => localStorage.clear());
+
+  // SideArmRaise caps shoulderAngle at 95. This rep goes to 110.
+  const overshootRep = () => [
+    ...hold(30, 8), ...ramp(30, 110, 14), ...hold(110, 8), ...ramp(110, 30, 14), ...hold(30, 8),
+  ];
+
+  it('still counts a rep that breaches a cap', () => {
+    // Silently discarding movement is the failure the baseline ROM gate exists
+    // to avoid, and 14 of 16 caps are unreviewed — blocking on them would
+    // punish patients for numbers nobody has signed off.
+    const eng = makeArmRaiseEngine();
+    drive(eng, overshootRep(), { feature: 'shoulderAngleL' });
+    expect(eng.repCount).toBe(1);
+  });
+
+  it('marks the rep flagged and records which cap and bound', () => {
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, overshootRep(), { feature: 'shoulderAngleL' });
+    const rep = out.find(r => r.repDelta > 0);
+    expect(rep.repClassification.flagged).toBe(true);
+    expect(rep.repClassification.completed).toBe(false);
+    const breach = rep.repClassification.capBreaches[0];
+    expect(breach).toMatchObject({ key: 'shoulderAngleL', bound: 'max', limit: 95 });
+    expect(breach.value).toBeGreaterThan(95);
+  });
+
+  it('leaves a clean rep unflagged', () => {
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, armRaiseRep(), { feature: 'shoulderAngleL' });
+    const rep = out.find(r => r.repDelta > 0);
+    expect(rep.repClassification.flagged).toBe(false);
+    expect(rep.repClassification.capBreaches).toHaveLength(0);
+  });
+
+  it('does not carry a breach over into the next rep', () => {
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [...overshootRep(), ...armRaiseRep()], { feature: 'shoulderAngleL' });
+    const reps = out.filter(r => r.repDelta > 0);
+    expect(reps).toHaveLength(2);
+    expect(reps[0].repClassification.flagged).toBe(true);
+    expect(reps[1].repClassification.flagged).toBe(false);
+  });
+
+  it('counts flagged reps separately and keeps them out of the completion rate', () => {
+    seedBaseline('p1', 'SideArmRaise', { shoulderAngleL: 60 });
+    const eng = makeArmRaiseEngine({ patientId: 'p1' });
+    drive(eng, [...armRaiseRep(), ...overshootRep()], { feature: 'shoulderAngleL' });
+
+    const reps = eng.patientBaseline.reps;
+    expect(reps.total).toBe(2);
+    expect(reps.flagged).toBe(1);
+    // The rate answers "of the reps we can make a quality claim about, how many
+    // were full range" — an unsafe rep is not one we can claim anything about,
+    // so it leaves the denominator rather than counting as a failure.
+    expect(eng.getSessionSummary().completionRate).toBe(100);
+  });
+
+  it('reports the flagged count in the step result', () => {
+    seedBaseline('p1', 'SideArmRaise', { shoulderAngleL: 60 });
+    const eng = makeArmRaiseEngine({ patientId: 'p1' });
+    const out = drive(eng, overshootRep(), { feature: 'shoulderAngleL' });
+    expect(out[out.length - 1].flaggedReps).toBe(1);
+  });
+
+  it('still surfaces the safety warning while the patient is over the cap', () => {
+    // Flagging is additive: the existing top-priority cue must not have been
+    // displaced by it. Checked across the rep rather than on the last frame,
+    // since the rep ends back at the rest posture where nothing is breached.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, overshootRep(), { feature: 'shoulderAngleL' });
+    const tooMuch = EXERCISE_CONFIGS.SideArmRaise.feedback.range.tooMuch;
+    expect(out.some(r => r.feedback === tooMuch)).toBe(true);
+  });
+});
