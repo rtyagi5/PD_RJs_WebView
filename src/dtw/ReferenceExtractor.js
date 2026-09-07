@@ -158,6 +158,9 @@ export default function ReferenceExtractor() {
   });
   const [exportedJSON, setExportedJSON] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
+  // A way out of a dead end: a refused export needs a route back to the thing
+  // it is complaining about, not just an explanation of it.
+  const [statusAction, setStatusAction] = useState(null); // {label, step}
   const [publishing, setPublishing] = useState(false);
   const [publishStatus, setPublishStatus] = useState(null); // null | 'success' | 'error'
   const [currentFrame, setCurrentFrame] = useState(0); // video playback position as frame index
@@ -238,6 +241,7 @@ export default function ReferenceExtractor() {
     setDuration(0);
     setExtractProgress(0);
     setPublishStatus(null);
+    setStatusAction(null);
     setFeedback({
       phase: {}, form: [], range: { tooLittle: '', tooMuch: '' }, tempo: { tooFast: '', holdCue: '' },
     });
@@ -512,6 +516,7 @@ export default function ReferenceExtractor() {
 
   // ─── Step 6: Export ────────────────────────────────
   const handleExport = useCallback(() => {
+    setStatusAction(null);
     if (!frames.length || !reps.length) {
       setStatusMsg('Need at least extracted frames and one rep to export.');
       return;
@@ -659,7 +664,13 @@ export default function ReferenceExtractor() {
     // someone's phone.
     const health = checkPhaseSeparation(reference);
     if (!health.ok) {
-      setStatusMsg(`Reference is not usable: ${health.reason}`);
+      setStatusMsg(
+        `Reference is not usable: ${health.reason} ` +
+        `Nothing is lost — your reps, labels and cues are all still here. ` +
+        `This usually means the primary feature does not tell the two postures apart, ` +
+        `so try a different one on step 3, or widen the posture band on step 4.`
+      );
+      setStatusAction({ label: 'Back to Reps — change the primary feature', step: 3 });
       return;
     }
 
@@ -733,8 +744,15 @@ export default function ReferenceExtractor() {
 
       {/* Status bar */}
       {statusMsg && (
-        <div style={{ ...S.card, background: '#1a1a33', padding: '10px 16px', fontSize: 13 }}>
-          {statusMsg}
+        <div style={{ ...S.card, background: '#1a1a33', padding: '10px 16px', fontSize: 13,
+                      display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <span style={{ flex: 1, minWidth: 240 }}>{statusMsg}</span>
+          {statusAction && (
+            <button style={{ ...S.btn, whiteSpace: 'nowrap' }}
+              onClick={() => { setStep(statusAction.step); setStatusAction(null); }}>
+              {statusAction.label}
+            </button>
+          )}
         </div>
       )}
 
@@ -745,10 +763,19 @@ export default function ReferenceExtractor() {
             ...S.badge(i + 1 <= step ? '#4466ff' : '#333355'),
             cursor: i + 1 <= step ? 'pointer' : 'default',
             opacity: i + 1 <= step ? 1 : 0.5,
+            // A reachable step is a control; it needs to look like one, or an
+            // operator who hits a refusal assumes the run is lost.
+            border: i + 1 <= step ? '1px solid #7a8cff' : '1px solid transparent',
+            textDecoration: i + 1 < step ? 'underline' : 'none',
           }} onClick={() => i + 1 <= step && setStep(i + 1)}>
             {i + 1}. {label}
           </div>
         ))}
+        {step > 1 && (
+          <span style={{ fontSize: 11, color: '#667', alignSelf: 'center', marginLeft: 8 }}>
+            click any completed step to go back — nothing is discarded
+          </span>
+        )}
       </div>
 
       <div style={S.row}>
