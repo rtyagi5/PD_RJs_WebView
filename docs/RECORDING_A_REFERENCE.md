@@ -132,6 +132,36 @@ Two things to know before you try:
 - The file is only flushed on the completion path, so **finish the set**. An aborted session leaves
   nothing behind.
 
+## Which side you record
+
+Record a one-sided exercise from whichever side is comfortable. On export the
+extractor copies the exercised side onto the idle one, and says so:
+
+```
+Reference "SeatedDorsiflexion" exported ... right side mirrored to the other so a
+patient can sit either way round.
+```
+
+This is exact, not an approximation. Every universal feature is invariant under a
+left-right reflection — three-point angles do not change under reflection, and
+the normalized height features are differences in `y`, which a horizontal mirror
+leaves untouched. So the recorded side's numbers are precisely what the other
+side would have produced. The synthetic references have always been symmetric
+this way; only the recorded path was missing it.
+
+It matters because the failure it prevents is silent. A right-side recording used
+to leave `footPitchNormL` flat, and the engine picks its primary feature as the
+widest-ranging one in the family **on the patient's side**. A zero range is never
+wider than zero, so a left-sided patient got `primaryFeature = null` — the
+direction gate, the ROM gate and the return-to-start check all switched off at
+once, and nothing in the logs complained. Whoever records a reference also tests
+it on their own side, which is exactly why this would not have been caught.
+
+A genuinely two-sided recording is left alone: if both sides moved comparably
+there is real data on both and nothing is overwritten. The exported
+`provenance` block records which side was recorded and which families were
+mirrored, so a reviewer can tell a copy from a second recording.
+
 ## The one that actually matters
 
 **Rest fully at the start posture between reps, and hold for about a second.**

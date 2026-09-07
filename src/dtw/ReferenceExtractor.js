@@ -7,11 +7,12 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import axios from 'axios';
 import { createPoseDetector } from '../detectors';
 import { extractFeaturesFromVideo, detectRepBoundaries, buildTemplateFromReps, getTopFeatures,
-  resolvePrimaryFeatureKey } from './videoFeatureExtractor';
+  resolvePrimaryFeatureKey, mirrorTemplateSides } from './videoFeatureExtractor';
 import { computeFeatureRanges, validateReference } from './referenceSchema';
 import { registerReference } from './referenceRegistry';
 import { EXERCISE_CONFIGS } from './specToReference';
 import PoseOverlay from './PoseOverlay';
+import { PROCESSING_MAX_WIDTH } from '../captureConfig';
 import { labelPhasesBySignal, resolveCycle } from './phaseLabeller';
 import { checkPhaseSeparation } from './referenceHealth';
 import { getServiceUrl } from '../config';
@@ -483,6 +484,14 @@ export default function ReferenceExtractor() {
     // Build template from reps
     const template = buildTemplateFromReps(frames, reps, 60);
 
+    // Copy the exercised side onto the idle one. You record a seated
+    // dorsiflexion sitting one way round; a patient may sit the other way, and
+    // without this they get a template whose range on their side is flat.
+    // Exact rather than approximate: every universal feature is invariant under
+    // a left-right reflection. Runs BEFORE labelling and before feature ranges
+    // are computed, so both see the symmetric template.
+    const mirror = mirrorTemplateSides(template);
+
     // Label the averaged template directly from its own signal.
     //
     // This used to map labels across from rep 0 by proportion and fall back to a
@@ -511,6 +520,14 @@ export default function ReferenceExtractor() {
 
     // Compute feature ranges
     const featureRanges = computeFeatureRanges(template);
+
+    if (mirror.mirrored.length) {
+      console.log(
+        `[Extractor] mirrored ${mirror.mirrored.length} feature famil` +
+        `${mirror.mirrored.length === 1 ? 'y' : 'ies'} onto the idle side: ` +
+        mirror.mirrored.map(m => `${m.from}->${m.to}`).join(', ')
+      );
+    }
 
     // Estimate timing
     const avgRepDuration = reps.reduce((s, r) => {
@@ -555,6 +572,19 @@ export default function ReferenceExtractor() {
         dwellMs: 100,
         refractoryMs: 300,
       },
+      // How this template was made, for whoever reviews it later. Not read by
+      // the engine — bootstrapReferences overrides `side` from EXERCISE_CONFIGS
+      // anyway — but a reviewer needs to know the left side of this template is
+      // a copy of the right, and not a second recording.
+      provenance: {
+        recordedSide: mirror.mirrored.length
+          ? (mirror.mirrored[0].from.endsWith('L') ? 'left' : 'right')
+          : 'both',
+        mirroredFamilies: mirror.mirrored.map(m => m.base),
+        bilateralFamilies: mirror.bilateral,
+        repsAveraged: reps.length,
+        processedAtWidth: PROCESSING_MAX_WIDTH,
+      },
     };
 
     // Validate: shape first, then semantics.
@@ -579,7 +609,14 @@ export default function ReferenceExtractor() {
     registerReference(reference.name, reference);
 
     setExportedJSON(reference);
-    setStatusMsg(`Reference "${reference.name}" exported and registered! ${template.length} template frames, ${Object.keys(featureRanges).length} features.`);
+    setStatusMsg(
+      `Reference "${reference.name}" exported and registered! ` +
+      `${template.length} template frames, ${Object.keys(featureRanges).length} features` +
+      (mirror.mirrored.length
+        ? `, ${reference.provenance.recordedSide} side mirrored to the other so a patient ` +
+          `can sit either way round.`
+        : '.')
+    );
     setStep(6);
   }, [frames, reps, phases, repCycle, feedback, exerciseName, exerciseSide, exerciseMode,
       detectorType, fps, primaryFeature, phaseBandPct]);

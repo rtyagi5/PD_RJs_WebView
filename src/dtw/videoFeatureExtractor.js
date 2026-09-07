@@ -315,6 +315,93 @@ export function getTopFeatures(frames, topN = 5) {
 }
 
 /**
+ * Copy the exercised side of a recorded template onto the idle side.
+ *
+ * A demonstrator records a one-sided exercise sitting one way round. A patient
+ * may sit the other way. Without this the recorded template carries a real
+ * sweep on, say, footPitchNormR and a flat line on footPitchNormL, and a
+ * left-sided patient gets a template range near zero. That is not a small
+ * error: DTWPhaseMachine sets nearStartTolerance from the raw template range
+ * with no floor applied, so the return-to-start window collapses and reps open
+ * but never close. Nothing logs a complaint — the session simply counts zero.
+ *
+ * Mirroring is exact, not an approximation. Every universal feature is
+ * invariant under a left-right reflection: three-point angles do not change
+ * under reflection at all, and the normalized height features are built from
+ * differences in y, which a horizontal mirror leaves untouched. So the recorded
+ * side's numbers are precisely what the other side would have produced.
+ *
+ * The synthetic references have always been symmetric this way — specToReference
+ * mirrors every side-generic config value onto both sides. Only the recorded
+ * path was missing the equivalent.
+ *
+ * A genuinely two-sided recording is left alone: if both sides moved comparably
+ * there is nothing to copy and real data must not be overwritten.
+ *
+ * @param {Array} template from buildTemplateFromReps (mutated in place)
+ * @param {Object} [opts]
+ * @param {number} [opts.dominanceRatio=0.3] quiet side must be under this share
+ *   of the active side's range before it is treated as idle
+ * @returns {{ mirrored: Array<{base,from,to}>, bilateral: string[] }}
+ */
+export function mirrorTemplateSides(template, opts = {}) {
+  const dominanceRatio = opts.dominanceRatio ?? 0.3;
+  const result = { mirrored: [], bilateral: [] };
+  if (!template?.length) return result;
+
+  const ranges = {};
+  for (const f of template) {
+    for (const [key, val] of Object.entries(f.features || {})) {
+      if (!Number.isFinite(val)) continue;
+      if (!ranges[key]) ranges[key] = { min: val, max: val };
+      else {
+        ranges[key].min = Math.min(ranges[key].min, val);
+        ranges[key].max = Math.max(ranges[key].max, val);
+      }
+    }
+  }
+  const spanOf = key => (ranges[key] ? ranges[key].max - ranges[key].min : 0);
+
+  // Families are derived from the keys present, not from a hardcoded list, so
+  // this cannot drift out of step with universalFeatures.
+  const bases = new Set();
+  for (const key of Object.keys(ranges)) {
+    if (/[LR]$/.test(key)) bases.add(key.slice(0, -1));
+  }
+
+  for (const base of bases) {
+    const L = `${base}L`;
+    const R = `${base}R`;
+    const spanL = spanOf(L);
+    const spanR = spanOf(R);
+    const active = spanL >= spanR ? L : R;
+    const idle = active === L ? R : L;
+    const activeSpan = Math.max(spanL, spanR);
+    const idleSpan = Math.min(spanL, spanR);
+
+    if (activeSpan <= 0) continue;                       // nothing moved either side
+    if (idleSpan / activeSpan >= dominanceRatio) {        // both sides genuinely used
+      result.bilateral.push(base);
+      continue;
+    }
+
+    for (const f of template) {
+      const val = f.features?.[active];
+      if (!Number.isFinite(val)) continue;
+      f.features[idle] = val;
+      // With both sides equal, every aggregate collapses to the same number.
+      for (const suffix of ['Min', 'Max', 'Avg']) {
+        const agg = base + suffix;
+        if (agg in f.features) f.features[agg] = val;
+      }
+    }
+    result.mirrored.push({ base, from: active, to: idle });
+  }
+
+  return result;
+}
+
+/**
  * Given detected rep boundaries, extract a single representative template
  * by averaging feature vectors across all reps (time-normalized).
  *

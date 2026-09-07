@@ -1,5 +1,7 @@
-import { resolvePrimaryFeatureKey } from './videoFeatureExtractor';
-import { EXERCISE_CONFIGS } from './specToReference';
+import { resolvePrimaryFeatureKey, mirrorTemplateSides } from './videoFeatureExtractor';
+import { EXERCISE_CONFIGS, generateReference } from './specToReference';
+import { computeFeatureRanges } from './referenceSchema';
+import { DTWPhaseMachine } from './DTWPhaseMachine';
 
 // The extractor used to choose which feature counts reps by ranking raw feature
 // ranges. That is invalid across families, because the universal feature set
@@ -91,5 +93,169 @@ describe('resolvePrimaryFeatureKey', () => {
 
   it('does not throw on an empty clip', () => {
     expect(resolvePrimaryFeatureKey(EXERCISE_CONFIGS.SeatedDorsiflexion, [])).toBeNull();
+  });
+});
+
+// ─── Side mirroring ──────────────────────────────────────────────────────────
+// A demonstrator records a one-sided exercise sitting one way round; a patient
+// may sit the other way. The synthetic references have always been symmetric —
+// specToReference mirrors every side-generic config value onto both sides — but
+// the recorded path had no equivalent, so a right-sided recording gave a
+// left-sided patient a flat template on their own side.
+//
+// Mirroring is exact rather than approximate: three-point angles do not change
+// under reflection, and the normalized height features are differences in y,
+// which a horizontal mirror leaves untouched.
+
+/** A template where only one side moves, as in a side-on seated recording. */
+function oneSidedTemplate({ active = 'R', span = 0.17, idleJitter = 0 } = {}) {
+  const idle = active === 'R' ? 'L' : 'R';
+  return Array.from({ length: 60 }, (_, t) => {
+    const v = 0.12 - span * Math.max(0, Math.sin((t / 60) * Math.PI));
+    return {
+      frame: t,
+      features: {
+        [`footPitchNorm${active}`]: v,
+        [`footPitchNorm${idle}`]: 0.12 + idleJitter * Math.sin(t / 3),
+        footPitchNormAvg: (v + 0.12) / 2,
+        [`kneeAngle${active}`]: 95 + 10 * Math.sin(t / 9),
+        [`kneeAngle${idle}`]: 95,
+        kneeAngleMin: 95,
+      },
+    };
+  });
+}
+
+describe('mirrorTemplateSides', () => {
+  it('copies the exercised side onto the idle one', () => {
+    const tpl = oneSidedTemplate({ active: 'R' });
+    const res = mirrorTemplateSides(tpl);
+
+    expect(res.mirrored.map(m => m.base)).toContain('footPitchNorm');
+    for (const f of tpl) {
+      expect(f.features.footPitchNormL).toBe(f.features.footPitchNormR);
+    }
+  });
+
+  it('gives the idle side a real range where it had none', () => {
+    // The point of the exercise. Before mirroring the idle side is flat, and a
+    // flat template range is what breaks the engine.
+    const tpl = oneSidedTemplate({ active: 'R' });
+    const spanOf = key => {
+      const vals = tpl.map(f => f.features[key]).filter(Number.isFinite);
+      return Math.max(...vals) - Math.min(...vals);
+    };
+    expect(spanOf('footPitchNormL')).toBeCloseTo(0, 5);
+    mirrorTemplateSides(tpl);
+    expect(spanOf('footPitchNormL')).toBeCloseTo(spanOf('footPitchNormR'), 5);
+  });
+
+  it('collapses the aggregates onto the same value', () => {
+    // With both sides equal, min, max and average are all that same number.
+    const tpl = oneSidedTemplate({ active: 'R' });
+    mirrorTemplateSides(tpl);
+    for (const f of tpl) {
+      expect(f.features.footPitchNormAvg).toBe(f.features.footPitchNormR);
+      expect(f.features.kneeAngleMin).toBe(f.features.kneeAngleR);
+    }
+  });
+
+  it('works whichever side was recorded', () => {
+    const tpl = oneSidedTemplate({ active: 'L' });
+    const res = mirrorTemplateSides(tpl);
+    expect(res.mirrored.find(m => m.base === 'footPitchNorm'))
+      .toMatchObject({ from: 'footPitchNormL', to: 'footPitchNormR' });
+  });
+
+  it('leaves a genuinely two-sided recording alone', () => {
+    // Overwriting real data would be worse than the problem being fixed.
+    const tpl = Array.from({ length: 60 }, (_, t) => ({
+      frame: t,
+      features: {
+        shoulderAngleL: 30 + 60 * Math.sin((t / 60) * Math.PI),
+        shoulderAngleR: 32 + 58 * Math.sin((t / 60) * Math.PI),
+      },
+    }));
+    const before = tpl.map(f => f.features.shoulderAngleR);
+    const res = mirrorTemplateSides(tpl);
+    expect(res.bilateral).toContain('shoulderAngle');
+    expect(res.mirrored).toHaveLength(0);
+    expect(tpl.map(f => f.features.shoulderAngleR)).toEqual(before);
+  });
+
+  it('treats a barely-moving idle side as idle, not as bilateral', () => {
+    // The far foot in a side view is tracked, just badly — it jitters without
+    // moving. That must not read as a two-sided recording.
+    const tpl = oneSidedTemplate({ active: 'R', idleJitter: 0.01 });
+    expect(mirrorTemplateSides(tpl).mirrored.map(m => m.base))
+      .toContain('footPitchNorm');
+  });
+
+  it('does nothing when neither side moved', () => {
+    const tpl = Array.from({ length: 30 }, () => ({
+      features: { footPitchNormL: 0.12, footPitchNormR: 0.12 },
+    }));
+    const res = mirrorTemplateSides(tpl);
+    expect(res.mirrored).toHaveLength(0);
+    expect(res.bilateral).toHaveLength(0);
+  });
+
+  it('does not throw on an empty template', () => {
+    expect(mirrorTemplateSides([])).toEqual({ mirrored: [], bilateral: [] });
+    expect(mirrorTemplateSides(null)).toEqual({ mirrored: [], bilateral: [] });
+  });
+});
+
+describe('the runtime failure mirroring prevents', () => {
+  /** Minimal reference shaped like one the extractor would export. */
+  function referenceFrom(template, name = 'SeatedDorsiflexion') {
+    const cfg = EXERCISE_CONFIGS[name];
+    return {
+      ...generateReference(cfg),
+      template: template.map((f, i) => ({ ...f, phase: i < 20 || i > 40 ? 'lowered' : 'raised' })),
+      featureRanges: computeFeatureRanges(template),
+    };
+  }
+
+  it('leaves the opposite-side patient with no primary feature at all', () => {
+    // Worse than a small template range. The auto-picker takes the widest
+    // feature in the pinned family with `range > bestRange`, starting from 0 —
+    // and the unrecorded side's range is exactly 0, so nothing is ever
+    // selected. primaryFeature comes out null, which switches off the direction
+    // gate, the ROM gate and the return-to-start check together.
+    //
+    // The gate would be degenerate even if a feature were picked:
+    // nearStartTolerance is set from the RAW template range with no floor,
+    // unlike minRomForRep which romGate floors at 0.02.
+    const unmirrored = referenceFrom(oneSidedTemplate({ active: 'R' }));
+    const eng = new DTWPhaseMachine(unmirrored, { targetReps: 5, side: 'left' });
+
+    expect(eng.primaryFeature).toBeNull();
+    expect(eng.primaryFeatureRange).toBeCloseTo(0, 3);
+    expect(eng.nearStartTolerance).toBeCloseTo(0, 3);
+  });
+
+  it('still resolves normally for the side that WAS recorded', () => {
+    // Which is why this never showed up in testing: whoever records the
+    // reference also tests it, on their own side.
+    const unmirrored = referenceFrom(oneSidedTemplate({ active: 'R' }));
+    const eng = new DTWPhaseMachine(unmirrored, { targetReps: 5, side: 'right' });
+    expect(eng.primaryFeature).toBe('footPitchNormR');
+    expect(eng.primaryFeatureRange).toBeGreaterThan(0.1);
+  });
+
+  it('gives that patient the same window as the recorded side once mirrored', () => {
+    const tpl = oneSidedTemplate({ active: 'R' });
+    mirrorTemplateSides(tpl);
+    const mirrored = referenceFrom(tpl);
+
+    const left = new DTWPhaseMachine(mirrored, { targetReps: 5, side: 'left' });
+    const right = new DTWPhaseMachine(mirrored, { targetReps: 5, side: 'right' });
+
+    expect(left.primaryFeature).toBe('footPitchNormL');
+    expect(right.primaryFeature).toBe('footPitchNormR');
+    expect(left.primaryFeatureRange).toBeCloseTo(right.primaryFeatureRange, 5);
+    expect(left.nearStartTolerance).toBeCloseTo(right.nearStartTolerance, 5);
+    expect(left.nearStartTolerance).toBeGreaterThan(0);
   });
 });
