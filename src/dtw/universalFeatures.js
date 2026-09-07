@@ -13,6 +13,18 @@ import { angle, distance, kp, present } from '../features.js';
  * @param {Array} kps - Array of keypoint objects { name, x, y, score }
  * @returns {Object} feature vector with 30 named features (see UNIVERSAL_FEATURE_KEYS)
  */
+/**
+ * Strip the side / aggregate suffix from a universal feature key, so keys can be
+ * compared as a family: footPitchNormL -> footPitchNorm, kneeAngleMin -> kneeAngle.
+ *
+ * Needed wherever features are ranked or matched, because the key set mixes
+ * degrees with dimensionless ratios and a naive comparison of raw ranges lets a
+ * 100-degree elbow beat a 0.17 foot-pitch every time.
+ */
+export function stripSideSuffix(key) {
+  return String(key).replace(/(L|R|Min|Max|Avg)$/, '');
+}
+
 export function computeUniversalFeatures(kps) {
   // --- Lookup keypoints ---
   const Ls  = kp(kps, 'left_shoulder');  const Rs  = kp(kps, 'right_shoulder');

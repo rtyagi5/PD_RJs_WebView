@@ -6,10 +6,12 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import axios from 'axios';
 import { createPoseDetector } from '../detectors';
-import { extractFeaturesFromVideo, detectRepBoundaries, buildTemplateFromReps, getTopFeatures } from './videoFeatureExtractor';
+import { extractFeaturesFromVideo, detectRepBoundaries, buildTemplateFromReps, getTopFeatures,
+  resolvePrimaryFeatureKey } from './videoFeatureExtractor';
 import { computeFeatureRanges, validateReference } from './referenceSchema';
 import { registerReference } from './referenceRegistry';
 import { EXERCISE_CONFIGS } from './specToReference';
+import PoseOverlay from './PoseOverlay';
 import { labelPhasesBySignal, resolveCycle } from './phaseLabeller';
 import { checkPhaseSeparation } from './referenceHealth';
 import { getServiceUrl } from '../config';
@@ -132,6 +134,8 @@ export default function ReferenceExtractor() {
   const [currentFrame, setCurrentFrame] = useState(0); // video playback position as frame index
   const [currentTime, setCurrentTime] = useState(0);   // video playback position in seconds
   const [topFeatures, setTopFeatures] = useState([]);   // top features by range for dropdown
+  const framesRef = useRef([]);                         // latest frames, for the exercise-change effect
+  const [showOverlay, setShowOverlay] = useState(true);  // skeleton drawn over the video
   const [primaryFeature, setPrimaryFeature] = useState(''); // user-selected or auto-detected
   const [featureSignal, setFeatureSignal] = useState([]); // smoothed signal for sparkline
   const [phaseBandPct, setPhaseBandPct] = useState(0.15); // how close counts as "at" a posture
@@ -187,16 +191,57 @@ export default function ReferenceExtractor() {
   }, []);
 
   // ─── Step 1: Upload Video ──────────────────────────
+  // Everything derived from a clip, cleared in one place. Loading a second video
+  // used to reset only frames, reps and the exported JSON, leaving the previous
+  // clip's phase labels, feedback cues and primary feature in place — so a
+  // second extraction could silently inherit the first one's labelling.
+  const resetDerivedState = useCallback(() => {
+    setFrames([]);
+    framesRef.current = [];
+    setReps([]);
+    setPhaseLabels([]);
+    setExportedJSON(null);
+    setPrimaryFeature('');
+    setFeatureSignal([]);
+    setTopFeatures([]);
+    setCurrentFrame(0);
+    setCurrentTime(0);
+    setDuration(0);
+    setExtractProgress(0);
+    setPublishStatus(null);
+    setFeedback({
+      phase: {}, form: [], range: { tooLittle: '', tooMuch: '' }, tempo: { tooFast: '', holdCue: '' },
+    });
+  }, []);
+
   const handleFileUpload = useCallback((e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    setVideoSrc(url);
-    setFrames([]);
-    setReps([]);
-    setExportedJSON(null);
+    // Release the previous blob; without this every re-upload leaks the whole
+    // decoded video for the life of the tab.
+    setVideoSrc(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+    resetDerivedState();
     setStatusMsg('Video loaded. Configure settings and click "Extract Features".');
-  }, []);
+  }, [resetDerivedState]);
+
+  // Start over without a page refresh. Keeps the exercise selection, since the
+  // usual reason to start again is a second take of the same exercise.
+  const handleNewExtraction = useCallback(() => {
+    if (frames.length && !window.confirm(
+      'Discard this extraction and start over? Rep boundaries, phase labels and ' +
+      'feedback cues will be lost.'
+    )) return;
+    setVideoSrc(prev => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    resetDerivedState();
+    setStep(1);
+    setStatusMsg('Started a new extraction. Upload a video to begin.');
+  }, [frames.length, resetDerivedState]);
 
   // ─── Step 2: Extract Features ──────────────────────
   const handleExtract = useCallback(async () => {
@@ -226,6 +271,7 @@ export default function ReferenceExtractor() {
       );
 
       setFrames(result.frames);
+      framesRef.current = result.frames;
       setDuration(result.duration);
       setExtractProgress(100);
 
@@ -233,8 +279,15 @@ export default function ReferenceExtractor() {
       const top = getTopFeatures(result.frames, 8);
       setTopFeatures(top);
 
-      // Auto-detect reps (tries multiple features, picks best)
-      const detection = detectRepBoundaries(result.frames);
+      // For a known exercise the primary feature comes from its canonical config,
+      // NOT from ranking raw feature ranges. Ranking mixes units: in a seated
+      // dorsiflexion clip the demonstrator sits, settles and moves their arms, so
+      // elbowAngleMin sweeps ~100 degrees while footPitchNorm — the actual
+      // movement — sweeps 0.17, and the elbow wins on magnitude alone. Phase
+      // labelling then fails outright, because nothing can say which end of an
+      // elbow angle is the rest posture for a dorsiflexion.
+      const canonicalKey = resolvePrimaryFeatureKey(EXERCISE_CONFIGS[exerciseName], result.frames);
+      const detection = detectRepBoundaries(result.frames, canonicalKey || undefined);
       setReps(detection.reps);
       setPrimaryFeature(detection.primaryFeature || top[0]?.key || '');
       setFeatureSignal(detection.signal || []);
@@ -245,7 +298,8 @@ export default function ReferenceExtractor() {
         `Extracted ${result.frames.length} frames (${result.duration.toFixed(1)}s). ` +
         (fallback
           ? `Could not auto-detect individual reps — treating entire video as 1 rep. Use the video controls to mark rep boundaries.`
-          : `Auto-detected ${autoCount} rep${autoCount !== 1 ? 's' : ''} using "${detection.primaryFeature}".`)
+          : `Auto-detected ${autoCount} rep${autoCount !== 1 ? 's' : ''} using "${detection.primaryFeature}"` +
+            `${canonicalKey ? ' (from the canonical config)' : ' (by widest range — no exercise selected)'}.`)
       );
       setStep(3);
     } catch (err) {
@@ -254,7 +308,7 @@ export default function ReferenceExtractor() {
     } finally {
       setIsExtracting(false);
     }
-  }, [videoSrc, detectorType, fps]);
+  }, [videoSrc, detectorType, fps, exerciseName]);
 
   // ─── Step 3: Rep Boundaries ────────────────────────
   const handleAddManualRep = useCallback(() => {
@@ -315,6 +369,24 @@ export default function ReferenceExtractor() {
     const cycle = resolveCycle(cfg.repCycle);
     if (cycle) setRepCycle({ start: cycle.start, effort: cycle.effort, return: cycle.start });
     if (cfg.detector) setDetectorType(cfg.detector);
+
+    // If frames are already extracted, switch to the feature this exercise
+    // actually measures. Picking the exercise after extracting is the normal
+    // order, so without this the run keeps whatever the range ranking chose.
+    if (framesRef.current.length) {
+      const key = resolvePrimaryFeatureKey(cfg, framesRef.current);
+      if (key) {
+        const detection = detectRepBoundaries(framesRef.current, key);
+        setPrimaryFeature(key);
+        setReps(detection.reps);
+        setFeatureSignal(detection.signal || []);
+        setStatusMsg(
+          `Using "${key}" for ${exerciseName}, from its canonical config. ` +
+          `Re-detected ${detection.reps.length} rep${detection.reps.length === 1 ? '' : 's'}.`
+        );
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exerciseName]);
 
   // ─── Step 4: Phase Labeling ────────────────────────
@@ -555,7 +627,14 @@ export default function ReferenceExtractor() {
   return (
     <div style={S.page}>
       <div style={S.header}>Reference Extractor</div>
-      <div style={S.subheader}>Upload a PT demonstration video → extract movement template → export reference JSON</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16 }}>
+        <div style={S.subheader}>Upload a PT demonstration video → extract movement template → export reference JSON</div>
+        {(videoSrc || frames.length > 0) && (
+          <button style={{ ...S.btnSecondary, whiteSpace: 'nowrap' }} onClick={handleNewExtraction}>
+            New Extraction
+          </button>
+        )}
+      </div>
 
       {/* Status bar */}
       {statusMsg && (
@@ -588,8 +667,29 @@ export default function ReferenceExtractor() {
 
             {videoSrc && (
               <>
-                <video ref={videoRef} src={videoSrc} style={S.video}
-                  controls preload="auto" crossOrigin="anonymous" />
+                {/* The overlay has to sit in the video's own box, so the canvas can
+                    size itself to the DISPLAYED video rather than the page. */}
+                <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
+                  <video ref={videoRef} src={videoSrc} style={S.video}
+                    controls preload="auto" crossOrigin="anonymous" />
+                  {showOverlay && frames[currentFrame]?.keypoints?.length > 0 && (
+                    <PoseOverlay
+                      videoRef={videoRef}
+                      keypoints={frames[currentFrame].keypoints}
+                      featureKey={primaryFeature}
+                      featureValue={frames[currentFrame].features?.[primaryFeature]}
+                    />
+                  )}
+                </div>
+
+                {frames.length > 0 && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6,
+                                  fontSize: 12, color: '#aab', marginTop: 6 }}>
+                    <input type="checkbox" checked={showOverlay}
+                      onChange={e => setShowOverlay(e.target.checked)} />
+                    Show what the model saw — skeleton, confidence, and the measured joint
+                  </label>
+                )}
 
                 {/* Current position indicator */}
                 {frames.length > 0 && (

@@ -3,7 +3,7 @@
 // Processes an uploaded video frame-by-frame through pose detection,
 // extracts universal features, and returns a timeline of feature vectors.
 // ---------------------------------------------
-import { computeUniversalFeatures } from './universalFeatures.js';
+import { computeUniversalFeatures, stripSideSuffix } from './universalFeatures.js';
 import { processingSize } from '../captureConfig.js';
 
 const MOVE_NET_NAMES = [
@@ -196,6 +196,98 @@ function _detectRepsForFeature(frames, featureKey) {
     range, threshold: 0.08 * range,
     nonFinite: smoothed.length - usable.length,
   };
+}
+
+/**
+ * Resolve which feature should count reps for a KNOWN exercise, from its
+ * canonical config rather than by ranking raw ranges.
+ *
+ * Ranking by range is wrong across feature families because the key set mixes
+ * units. In a seated dorsiflexion clip the demonstrator sits, settles and moves
+ * their arms, so elbowAngleMin sweeps ~100 degrees while the actual movement,
+ * footPitchNorm, sweeps 0.17 — and the elbow wins on magnitude alone. The
+ * extractor then tries to label phases from a feature the exercise has no
+ * opinion about, and the labeller correctly refuses because it cannot tell
+ * which end of an elbow angle is the rest posture for a dorsiflexion.
+ *
+ * @param {Object} cfg   an EXERCISE_CONFIGS entry, or null for a free-text name
+ * @param {Array}  frames from extractFeaturesFromVideo
+ * @returns {string|null} concrete feature key present in the frames, or null
+ */
+export function resolvePrimaryFeatureKey(cfg, frames) {
+  if (!cfg || !frames?.length) return null;
+
+  const ranges = {};
+  for (const f of frames) {
+    for (const [key, val] of Object.entries(f.features || {})) {
+      if (!Number.isFinite(val)) continue;
+      if (!ranges[key]) ranges[key] = { min: val, max: val };
+      else {
+        ranges[key].min = Math.min(ranges[key].min, val);
+        ranges[key].max = Math.max(ranges[key].max, val);
+      }
+    }
+  }
+
+  // An exact pin wins outright, if the clip actually produced that key.
+  if (cfg.primaryFeature && ranges[cfg.primaryFeature]) return cfg.primaryFeature;
+
+  // Otherwise take the declared family and pick the side that actually moved,
+  // which is how a side-on foot exercise finds the near foot.
+  const base = cfg.primaryFeatureBase;
+  if (base) {
+    let best = null;
+    let bestRange = -1;
+    for (const [key, r] of Object.entries(ranges)) {
+      if (stripSideSuffix(key) !== base) continue;
+      const span = r.max - r.min;
+      if (span > bestRange) { bestRange = span; best = key; }
+    }
+    if (best) return best;
+  }
+
+  // Last resort, for an exercise that declares neither: take the family its own
+  // canonical template sweeps widest.
+  //
+  // Ranked by the span the TEMPLATE declares, not by the span this clip happens
+  // to show. Two reasons. It compares only features the same exercise defines,
+  // so it never weighs degrees against ratios. And it is the same choice
+  // DTWPhaseMachine's auto-picker makes at runtime from the template's
+  // featureRanges — so the reference is authored against the feature the engine
+  // will actually count with, instead of whichever one this particular
+  // demonstrator waved around most.
+  const spans = {};
+  for (const ph of cfg.phases || []) {
+    for (const [key, def] of Object.entries(ph.features || {})) {
+      const vals = [def?.from, def?.to].filter(Number.isFinite);
+      if (!vals.length) continue;
+      const lo = Math.min(...vals);
+      const hi = Math.max(...vals);
+      if (!spans[key]) spans[key] = { min: lo, max: hi };
+      else {
+        spans[key].min = Math.min(spans[key].min, lo);
+        spans[key].max = Math.max(spans[key].max, hi);
+      }
+    }
+  }
+
+  let widest = null;
+  let widestSpan = -1;
+  for (const [key, r] of Object.entries(spans)) {
+    const span = r.max - r.min;
+    if (span > widestSpan) { widestSpan = span; widest = key; }
+  }
+  if (!widest) return null;
+
+  // Resolve that family to whichever concrete side this clip actually captured.
+  let best = null;
+  let bestRange = -1;
+  for (const [key, r] of Object.entries(ranges)) {
+    if (stripSideSuffix(key) !== widest && key !== widest) continue;
+    const span = r.max - r.min;
+    if (span > bestRange) { bestRange = span; best = key; }
+  }
+  return best;
 }
 
 /**

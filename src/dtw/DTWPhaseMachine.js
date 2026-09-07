@@ -5,7 +5,7 @@
 // ---------------------------------------------
 import { OnlineSubsequenceDTW } from './dtwEngine.js';
 import { computeFeatureRanges, extractPhaseOrder } from './referenceSchema.js';
-import { BODY_PART_FEATURE_MAP } from './universalFeatures.js';
+import { BODY_PART_FEATURE_MAP, stripSideSuffix } from './universalFeatures.js';
 import { PatientBaseline } from './PatientBaseline.js';
 import { resolveRomGate } from './romGate.js';
 
@@ -26,14 +26,6 @@ function resolveStartCue(cue, side) {
     return cue.left || cue.right || cue.alternating || null;
   }
   return null;
-}
-
-/**
- * Strip the side / aggregate suffix from a universal feature key so it can be
- * compared against a family name: footPitchNormL -> footPitchNorm.
- */
-function stripSideSuffix(key) {
-  return String(key).replace(/(L|R|Min|Max|Avg)$/, '');
 }
 
 export class DTWPhaseMachine {
