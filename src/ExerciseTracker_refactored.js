@@ -222,6 +222,8 @@ export default function ExerciseTrackerRefactored({
   const segmentColorsRef = useRef('#66FF00');
   const feedbackLogRef = useRef('');
   const feedbackRef = useRef('Initializing...');
+  // 'safety' | 'normal' — travels with the string so the host knows what may interrupt.
+  const feedbackPriorityRef = useRef('normal');
   const prevPhaseRef = useRef(null);
   const prevRepRef = useRef(0);
   const specRef = useRef(null);
@@ -348,6 +350,7 @@ export default function ExerciseTrackerRefactored({
         completionStatusRef: false,
         repCount: repCountRef.current,
         feedback: feedbackRef.current,
+        feedbackPriority: feedbackPriorityRef.current,
         ...exerciseData,
       };
       // Normally throttled to frames where the feedback text changed. `force` is used
@@ -801,7 +804,12 @@ export default function ExerciseTrackerRefactored({
         // so the per-exercise startCue ("Raise your right arm out to the side") reaches the
         // host. Without this, the engine's null feedback + existing fallback would keep
         // showing "Starting in 1…" from the countdown instead.
+        const usedSessionMessage = !!sessionResult.message;
         feedbackRef.current = sessionResult.message || feedback || feedbackRef.current;
+        // A session-level message (start cue, countdown) is never a clinical warning.
+        feedbackPriorityRef.current = usedSessionMessage
+          ? 'normal'
+          : (stepResult.feedbackPriority || 'normal');
 
         // Log feedback changes for validation
         if (feedbackRef.current && feedbackRef.current !== feedbackLogRef.current) {

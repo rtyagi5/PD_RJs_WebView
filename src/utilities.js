@@ -85,6 +85,10 @@ export const sendUpdates = async (data, exerciseType, activityData, setDisplayMe
     exerciseType: exerciseType,
     completionStatusRef: data.completionStatusRef,
     // Session state context for WebView TTS / coaching
+    // 'safety' tells the host this cue may interrupt speech already in progress.
+    // Everything else is routine and must wait its turn - see services/speech.js
+    // in the mobile app.
+    ...(data.feedbackPriority != null && { feedbackPriority: data.feedbackPriority }),
     ...(data.sessionState != null && { sessionState: data.sessionState }),
     ...(data.coachingChecks != null && { coachingChecks: data.coachingChecks }),
     ...(data.countdownRemaining != null && { countdownRemaining: data.countdownRemaining }),

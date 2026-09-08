@@ -14,6 +14,27 @@ import { resolveRomGate } from './romGate.js';
 // almost never reach the patient. Safety/overshoot warnings pre-empt this entirely.
 const REP_ANNOUNCE_MS = 1200;
 
+// Minimum wall-clock gap between two ROUTINE spoken cues.
+//
+// The engine runs its whole feedback ladder every step with no memory, so the
+// winner ping-pongs between categories and the string changed 19 times in 8
+// seconds on device - a mean gap of 427ms against utterances that need 1.1-2.3s
+// to speak. 94% of cues were physically unable to finish.
+//
+// Rate limiting belongs HERE rather than in the host, because the transport only
+// sends a message when the string CHANGES (ExerciseTracker.maybeSendUpdates).
+// Holding the previous string is therefore exactly equivalent to "say nothing
+// new", and costs no extra plumbing.
+//
+// 2500ms clears the longest cue in the reference ("Please do not bend the
+// elbow", ~2.2s) with room to breathe.
+const FEEDBACK_MIN_GAP_MS = 2500;
+
+// Corrective form cues are limited to one per repetition on top of the gap.
+// A posture fault is a property of the rep, not of the frame, and repeating it
+// mid-movement gives the patient nothing they can act on.
+const FORM_CUE_PER_REP = 1;
+
 // Resolve a startCue against the active side. Accepts either a plain string (returned
 // as-is) or an object keyed by side ('left' | 'right' | 'alternating' | 'both').
 // Resolution order: exact side match → 'both' → first available variant.
@@ -97,6 +118,10 @@ export class DTWPhaseMachine {
     this.refractoryUntil = 0;
     this.lastPhaseEnterAt = 0;
     this._repAnnouncedUntil = 0; // suppress lower-priority feedback for REP_ANNOUNCE_MS after a rep counts
+    this._lastCueAt = 0;        // when a routine (non-safety, non-rep) cue was last issued
+    this._formCuesThisRep = 0;  // form cues already spent on the current rep
+    this._formCueRepIdx = -1;   // which rep those were spent on
+    this._lastPriority = 'normal'; // priority of the cue currently held in lastFeedback
 
     // Time-mode timers
     this.holdStartMs = null;
@@ -302,6 +327,10 @@ export class DTWPhaseMachine {
     this.lastActiveSide = null;
     this.activeSideDuringCycle = null;
     this._repAnnouncedUntil = 0;
+    this._lastCueAt = 0;
+    this._formCuesThisRep = 0;
+    this._formCueRepIdx = -1;
+    this._lastPriority = 'normal';
     this.dtw.reset();
     // Don't reset patient baseline on counter reset — it persists across the session
   }
@@ -612,6 +641,11 @@ export class DTWPhaseMachine {
       repDelta,
       repCount: this.repCount,
       feedback: this.lastFeedback,
+      // 'safety' means this cue may interrupt speech already in progress. Without
+      // it the host cannot tell a clinical warning from "Keep going up", and a
+      // never-interrupt speech policy would silently delay the one cue that
+      // must not wait.
+      feedbackPriority: this._lastPriority,
       done,
       timeHeldMs: this.mode === 'time' ? timeHeldMs : undefined,
       timeRemainingMs: this.mode === 'time' ? Math.max(0, timeRemainingMs ?? 0) : undefined,
@@ -753,7 +787,7 @@ export class DTWPhaseMachine {
     return this._capBreaches(features).length > 0;
   }
 
-  _pickFeedback(dtwResult, features, now = performance.now()) {
+  _selectFeedback(dtwResult, features, now = performance.now()) {
     const fb = this.feedback;
     const deviations = dtwResult.deviations;
 
@@ -761,21 +795,21 @@ export class DTWPhaseMachine {
     // moving past a clinical limit needs to hear it immediately; suppressing it
     // behind the rep number is how "don't raise above 90°" went silent.
     if (this._exceedsClinicalCap(features) && fb.range?.tooMuch) {
-      return fb.range.tooMuch;
+      return { say: fb.range.tooMuch, tier: 'safety' };
     }
 
     // 0a. Rep just counted: announce the number for REP_ANNOUNCE_MS.
     // Uses the caller-supplied clock (same one that set _repAnnouncedUntil) rather
     // than wall time, so the window is consistent and deterministic under test.
     if (now < this._repAnnouncedUntil) {
-      return String(this.repCount);
+      return { say: String(this.repCount), tier: 'rep' };
     }
 
     // 0b. Alternating guardrail: warn when same leg used twice in a row
     if (this.isAlternating && this.cycleState === 'sawEffort'
         && this.activeSideDuringCycle && this.lastActiveSide
         && this.activeSideDuringCycle === this.lastActiveSide) {
-      return 'Switch legs — alternate each step!';
+      return { say: 'Switch legs — alternate each step!', tier: 'safety' };
     }
 
     // 1. Form/safety: only check posture during stable phases (lowered/raised).
@@ -787,7 +821,7 @@ export class DTWPhaseMachine {
         for (const key of featureKeys) {
           const dev = deviations[key];
           if (dev && Math.abs(dev.normalizedDelta) > this.formDeviationThreshold) {
-            return formRule.say;
+            return { say: formRule.say, tier: 'form' };
           }
         }
       }
@@ -798,11 +832,11 @@ export class DTWPhaseMachine {
       const pos = dtwResult.templatePosition;
       // Near the peak of the movement (70-100% through template) but quality is low
       if (pos > 0.5 && pos < 0.9 && dtwResult.quality < 0.5 && fb.range.tooLittle) {
-        return fb.range.tooLittle;
+        return { say: fb.range.tooLittle, tier: 'range' };
       }
       // Overshoot detection: features exceed reference range
       if (this._detectOvershoot(deviations) && fb.range.tooMuch) {
-        return fb.range.tooMuch;
+        return { say: fb.range.tooMuch, tier: 'safety' };
       }
     }
 
@@ -810,10 +844,75 @@ export class DTWPhaseMachine {
 
     // 4. Phase feedback (default)
     if (fb.phase && this.phase) {
-      return fb.phase[this.phase] || fb.phase.transition || this.lastFeedback;
+      return { say: fb.phase[this.phase] || fb.phase.transition || this.lastFeedback, tier: 'phase' };
     }
 
-    return this.lastFeedback || '';
+    return { say: this.lastFeedback || '', tier: 'phase' };
+  }
+
+  /**
+   * Pace the selected cue.
+   *
+   * The selector above re-runs its whole ladder every step with no memory, so on
+   * device the winning string changed 19 times in 8 seconds - a mean gap of 427ms
+   * against utterances needing 1.1-2.3s. 94% of cues could not physically finish
+   * before the host cut them off.
+   *
+   * Rate limiting has to happen here rather than in the host, because the host
+   * only ever hears about a cue when the string CHANGES. Returning the PREVIOUS
+   * string is therefore precisely "say nothing new", with no new plumbing and no
+   * risk of the host and engine disagreeing about what is currently being said.
+   *
+   * Safety is never paced. Everything else waits its turn.
+   */
+  _pickFeedback(dtwResult, features, now = performance.now()) {
+    const picked = this._selectFeedback(dtwResult, features, now);
+    const say = picked?.say ?? '';
+    const tier = picked?.tier ?? 'phase';
+
+    // Safety always speaks, immediately, and resets the routine clock so a
+    // routine cue cannot follow one straight down the patient's ear.
+    if (tier === 'safety') {
+      if (say && say !== this.lastFeedback) this._lastCueAt = now;
+      this._lastPriority = 'safety';
+      return say;
+    }
+
+    // The rep number is short, self-explanatory and time-critical. It is not
+    // paced, but it does not reset the routine clock either - it is not coaching.
+    if (tier === 'rep') {
+      this._lastPriority = 'normal';
+      return say;
+    }
+
+    // A form fault belongs to the repetition, not the frame. Repeating it
+    // mid-movement gives the patient nothing they can act on.
+    if (tier === 'form') {
+      if (this.repCount !== this._formCueRepIdx) {
+        this._formCueRepIdx = this.repCount;
+        this._formCuesThisRep = 0;
+      }
+      if (this._formCuesThisRep >= FORM_CUE_PER_REP) {
+        this._lastPriority = 'normal';
+        return this.lastFeedback;
+      }
+    }
+
+    // Unchanged string: nothing is sent, so nothing to pace.
+    if (say === this.lastFeedback) {
+      this._lastPriority = 'normal';
+      return this.lastFeedback;
+    }
+
+    if (now - this._lastCueAt < FEEDBACK_MIN_GAP_MS) {
+      this._lastPriority = 'normal';
+      return this.lastFeedback;
+    }
+
+    if (tier === 'form') this._formCuesThisRep += 1;
+    this._lastCueAt = now;
+    this._lastPriority = 'normal';
+    return say;
   }
 
   /**

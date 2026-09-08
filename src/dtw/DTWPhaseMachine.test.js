@@ -808,3 +808,101 @@ describe('live cap breaches', () => {
     expect(rep.repClassification.capBreaches.length).toBeGreaterThan(0);
   });
 });
+
+// ─── Feedback pacing ─────────────────────────────────────────────────────────
+// The engine re-ran its whole priority ladder every step with no memory, so the
+// winning string ping-ponged between categories. Measured on a Galaxy A36
+// during a real set: 19 cues in 8 seconds, mean gap 427ms, against utterances
+// needing 1.1-2.3s to speak. 94% could not physically finish before the host
+// cut them off, including the "Raise too high" that mattered.
+//
+// Pacing lives here rather than in the host because the transport only sends a
+// message when the string CHANGES, so returning the PREVIOUS string is exactly
+// "say nothing new".
+
+/** Every distinct coaching string the engine emitted, in order. */
+function cueChanges(results) {
+  const out = [];
+  for (const r of results) {
+    if (r.feedback && r.feedback !== out[out.length - 1]) out.push(r.feedback);
+  }
+  return out;
+}
+
+describe('feedback pacing', () => {
+  it('does not change the cue more than once per gap window', () => {
+    // Four full reps at 30fps is ~10s of wall clock. Before pacing this window
+    // produced a new string every few frames.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [
+      ...armRaiseRep(), ...armRaiseRep(), ...armRaiseRep(), ...armRaiseRep(),
+    ], { feature: 'shoulderAngleL' });
+
+    const spanMs = out.length * FRAME_MS;
+    const changes = cueChanges(out).length;
+    // Allow the rep-number announcements on top of the paced cues.
+    expect(changes).toBeLessThanOrEqual(Math.ceil(spanMs / 2500) + eng.repCount + 1);
+  });
+
+  it('holds the previous string rather than inventing silence', () => {
+    // Returning '' between cues would make the host flicker its caption to blank.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, armRaiseRep(), { feature: 'shoulderAngleL' });
+    const afterFirst = out.slice(out.findIndex(r => r.feedback));
+    expect(afterFirst.every(r => r.feedback !== '')).toBe(true);
+  });
+
+  it('lets a safety warning through immediately, ignoring the gap', () => {
+    // The regression this exists to prevent: a clinical-cap breach queued behind
+    // "Keep going up" is a warning the patient never hears in time.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [
+      ...hold(30, 8), ...ramp(30, 88, 12), ...hold(88, 4), ...ramp(88, 130, 8), ...hold(130, 6),
+    ], { feature: 'shoulderAngleL' });
+
+    const breaching = out.filter(r => r.capBreaches.length > 0);
+    expect(breaching.length).toBeGreaterThan(0);
+    expect(breaching.some(r => r.feedback === 'That\'s high enough'
+      || r.feedback === 'Raise too high')).toBe(true);
+  });
+
+  it('marks a safety cue so the host knows it may interrupt', () => {
+    // Without this the host cannot tell a clinical warning from a phase cue, and
+    // a never-interrupt speech policy would silently delay the one that matters.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [
+      ...hold(30, 8), ...ramp(30, 88, 12), ...hold(88, 4), ...ramp(88, 130, 8), ...hold(130, 6),
+    ], { feature: 'shoulderAngleL' });
+
+    const breaching = out.filter(r => r.capBreaches.length > 0);
+    expect(breaching.some(r => r.feedbackPriority === 'safety')).toBe(true);
+  });
+
+  it('marks ordinary coaching as normal priority', () => {
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, armRaiseRep(), { feature: 'shoulderAngleL' });
+    const clean = out.filter(r => r.capBreaches.length === 0);
+    expect(clean.every(r => r.feedbackPriority === 'normal')).toBe(true);
+  });
+
+  it('still announces every rep number', () => {
+    // Pacing must not swallow the count — it is the one cue the patient is
+    // actively waiting for.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [...armRaiseRep(), ...armRaiseRep(), ...armRaiseRep()],
+      { feature: 'shoulderAngleL' });
+    const said = cueChanges(out);
+    for (let n = 1; n <= eng.repCount; n++) {
+      expect(said).toContain(String(n));
+    }
+  });
+
+  it('resets its pacing clock when the counter resets', () => {
+    // A second set must not inherit the first set's cooldown.
+    const eng = makeArmRaiseEngine();
+    drive(eng, armRaiseRep(), { feature: 'shoulderAngleL' });
+    eng.resetCounters();
+    expect(eng._lastCueAt).toBe(0);
+    expect(eng._formCueRepIdx).toBe(-1);
+  });
+});
