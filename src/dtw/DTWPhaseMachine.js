@@ -758,6 +758,23 @@ export class DTWPhaseMachine {
    * it happened during, not just spoken and forgotten.
    * @returns {Array<{key:string, value:number, bound:'min'|'max', limit:number, source:string}>}
    */
+  /**
+   * Form-check feature keys for a body part, restricted to the active side.
+   *
+   * BODY_PART_FEATURE_MAP lists both sides plus an aggregate. For a one-sided
+   * exercise only the working side can be at fault, and the aggregates
+   * (elbowAngleMin and friends) track whichever limb is more bent - normally
+   * the resting one. Both produced form corrections about the wrong arm.
+   */
+  _formKeysFor(bodyPart) {
+    const all = BODY_PART_FEATURE_MAP[bodyPart] || [];
+    if (this.side !== 'left' && this.side !== 'right') return all;
+    const suffix = this.side === 'left' ? 'L' : 'R';
+    const sided = all.filter(k => k.endsWith(suffix));
+    // Fall back to the full list if this part has no per-side keys at all.
+    return sided.length ? sided : all;
+  }
+
   _capBreaches(features) {
     const out = [];
     for (const cap of this.clinicalCaps) {
@@ -817,7 +834,14 @@ export class DTWPhaseMachine {
     const isStablePhase = this.cycleState === 'idle' || this.cycleState === 'sawStart';
     if (isStablePhase && fb.form && Array.isArray(fb.form)) {
       for (const formRule of fb.form) {
-        const featureKeys = BODY_PART_FEATURE_MAP[formRule.bodyPart] || [];
+        // Restrict to the side being exercised. The map lists L, R and the
+        // aggregate for every body part, and checking all three meant a bend in
+        // the RESTING arm raised "Please do not bend the elbow" during a
+        // right-side raise - a correction aimed at a limb the patient is not
+        // using. Aggregates (…Min/…Max/…Avg) are dropped for the same reason:
+        // elbowAngleMin is whichever elbow is more bent, which in a one-sided
+        // exercise is almost always the idle one.
+        const featureKeys = this._formKeysFor(formRule.bodyPart);
         for (const key of featureKeys) {
           const dev = deviations[key];
           if (dev && Math.abs(dev.normalizedDelta) > this.formDeviationThreshold) {

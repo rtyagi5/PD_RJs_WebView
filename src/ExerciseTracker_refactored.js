@@ -779,22 +779,32 @@ export default function ExerciseTrackerRefactored({
           const ref = getReference(exerciseType);
           const hlParts = ref?.highlightKeypoints ?? [];
 
+          // setHighlight takes keypoint NAMES. drawKeypoints/drawSkeleton test
+          // `keypoints_CC.includes(keypoint.name)` and fall back to "aqua" on a
+          // miss, so handing them keypoint OBJECTS silently painted the whole
+          // skeleton cyan — no red on a breach, and no green/amber either. That
+          // is why the focused limb stopped being highlighted once a set began:
+          // the setup branch above passes names correctly, this one did not.
+          const allNames = () =>
+            (keypointsRef.current ?? []).map(k => k?.name).filter(Boolean);
+
           // A breach colours the WHOLE skeleton, not just the tracked joint.
           // The limb at fault is rarely where the patient is looking, and a
           // safety warning that has to be hunted for is not a warning.
           if (breaching) {
-            setHighlight({ keypoints: keypointsRef.current, color });
-          } else if (ref?.side === 'alternating' && hlParts.length) {
-            const activeSide = stepResult.activeSide; // null when idle / undetected
-            let hlKps;
-            if (activeSide === 'left' || activeSide === 'right') {
-              hlKps = hlParts.map(p => `${activeSide}_${p}`);
-            } else {
-              hlKps = hlParts.flatMap(p => [`left_${p}`, `right_${p}`]);
-            }
+            setHighlight({ keypoints: allNames(), color });
+          } else if (hlParts.length) {
+            // Same side resolution as the setup branch, so the limb in focus
+            // keeps its highlight from coaching straight through the set.
+            const s = ref?.side === 'alternating'
+              ? stepResult.activeSide
+              : (side || '').toLowerCase();
+            const hlKps = (s === 'left' || s === 'right')
+              ? hlParts.map(p => `${s}_${p}`)
+              : hlParts.flatMap(p => [`left_${p}`, `right_${p}`]);
             setHighlight({ keypoints: hlKps, color });
           } else {
-            setHighlight({ keypoints: keypointsRef.current, color });
+            setHighlight({ keypoints: allNames(), color });
           }
         }
 

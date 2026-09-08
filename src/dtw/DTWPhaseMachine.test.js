@@ -906,3 +906,44 @@ describe('feedback pacing', () => {
     expect(eng._formCueRepIdx).toBe(-1);
   });
 });
+
+// ─── Form cues address the limb being exercised ──────────────────────────────
+// BODY_PART_FEATURE_MAP lists both sides plus an aggregate for every body part,
+// and _selectFeedback checked all of them regardless of the session side. During
+// a right-side arm raise a bend in the RESTING left arm therefore produced
+// "Please do not bend the elbow" — a correction about a limb the patient was not
+// using, and one they cannot act on without guessing which arm is meant.
+
+describe('form cue side selection', () => {
+  it('only considers the exercised side', () => {
+    const right = makeArmRaiseEngine({ side: 'right' });
+    expect(right._formKeysFor('elbow')).toEqual(['elbowAngleR']);
+
+    const left = makeArmRaiseEngine({ side: 'left' });
+    expect(left._formKeysFor('elbow')).toEqual(['elbowAngleL']);
+  });
+
+  it('drops the aggregates, which track the wrong limb', () => {
+    // elbowAngleMin is whichever elbow is more bent. In a one-sided exercise
+    // that is normally the idle arm, so it is the worst possible form signal.
+    const eng = makeArmRaiseEngine({ side: 'right' });
+    const keys = eng._formKeysFor('elbow');
+    expect(keys).not.toContain('elbowAngleMin');
+    expect(keys).not.toContain('elbowAngleL');
+  });
+
+  it('keeps both sides when the exercise is genuinely bilateral', () => {
+    const eng = makeArmRaiseEngine({ side: 'both' });
+    expect(eng._formKeysFor('elbow')).toEqual(
+      expect.arrayContaining(['elbowAngleL', 'elbowAngleR'])
+    );
+  });
+
+  it('falls back to the full list for a part with no per-side keys', () => {
+    // 'foot' includes footPitchNormAvg; a part whose keys are all aggregates
+    // must not resolve to an empty list and silently disable its form rule.
+    const eng = makeArmRaiseEngine({ side: 'right' });
+    expect(eng._formKeysFor('nonexistent-part')).toEqual([]);
+    expect(eng._formKeysFor('foot').length).toBeGreaterThan(0);
+  });
+});
