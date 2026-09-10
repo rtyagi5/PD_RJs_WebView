@@ -60,6 +60,29 @@ const MIN_ARTEFACT_BUDGET = 5;
 // actually is, and the filter has lost track. Resync rather than staying blind.
 const MAX_REJECT_STREAK_MS = 250;
 
+// Tempo. The reference has always declared feedback.tempo {tooFast, holdCue} and
+// _pickFeedback has always had a "3. Tempo (future: needs movement speed
+// tracking)" stub, so the cue could never fire however fast the patient moved.
+//
+// The template's own sweep rate is the natural yardstick: one half-rep covers
+// the primary feature's full range, so range / (repDuration/2) is the pace the
+// exercise was demonstrated at. Anything far above that is not a rep the engine
+// can measure - which is exactly the regime where reps were being lost.
+const TOO_FAST_RATIO = 2.5;
+
+// Cue importance, low number = more important. The routine gap is per-cue, but a
+// cooldown started by a trivial cue must not silence an important one: a phase
+// cue fired at the top of a set was holding back "slow down" for 2.5s, which is
+// exactly the window in which the patient's speed was costing them reps.
+const TIER_RANK = {
+  safety: 0, rep: 1, guardrail: 2, form: 3, range: 4, tempo: 5, phase: 6,
+};
+
+// Rate is noisy per sample; smooth it before comparing, and require the patient
+// to be genuinely moving before calling anything "too fast".
+const RATE_EMA = 0.4;
+const MIN_RATE_FOR_TEMPO = 1e-6;
+
 // Resolve a startCue against the active side. Accepts either a plain string (returned
 // as-is) or an object keyed by side ('left' | 'right' | 'alternating' | 'both').
 // Resolution order: exact side match → 'both' → first available variant.
@@ -114,6 +137,10 @@ export class DTWPhaseMachine {
     this.dwellMs = timing.dwellMs ?? 200;
     this.refractoryMs = timing.refractoryMs ?? 300;
 
+    // Pace the template was demonstrated at, in feature-units per second. Half a
+    // rep sweeps the primary feature's full range, hence the /2.
+    this.repDurationMs = timing.repDurationMs ?? 2000;
+
     // Time-mode config
     this.targetMs = this.mode === 'time'
       ? (typeof targetSeconds === 'number' ? targetSeconds * 1000
@@ -150,6 +177,8 @@ export class DTWPhaseMachine {
     this._lastPhaseCued = null; // phase whose cue was last spoken
     this._prevPrimaryAt = NaN;  // when _prevPrimaryValue was accepted
     this._rejectingSince = 0;   // start of the current rejection streak, 0 when clear
+    this._featureRate = 0;      // smoothed |d(primary)/dt|, feature-units per second
+    this._lastCueTier = 'phase'; // importance of the cue that started the cooldown
 
     // Time-mode timers
     this.holdStartMs = null;
@@ -362,6 +391,8 @@ export class DTWPhaseMachine {
     this._lastPhaseCued = null;
     this._prevPrimaryAt = NaN;
     this._rejectingSince = 0;
+    this._featureRate = 0;
+    this._lastCueTier = 'phase';
     this.dtw.reset();
     // Don't reset patient baseline on counter reset — it persists across the session
   }
@@ -417,6 +448,9 @@ export class DTWPhaseMachine {
             this._rejectingSince = 0;
           }
         } else {
+          // Accepted: this is real movement, so it is also the tempo signal.
+          const rate = Math.abs(pVal - prev) / (dt / 1000);
+          this._featureRate = this._featureRate * (1 - RATE_EMA) + rate * RATE_EMA;
           this._prevPrimaryValue = pVal;
           this._prevPrimaryAt = now;
           this._rejectingSince = 0;
@@ -476,7 +510,8 @@ export class DTWPhaseMachine {
         `[DTW-diag] phase=${this.phase || '—'} cycle=${this.cycleState}` +
         ` quality=${(result.quality ?? 0).toFixed(3)} tPos=${(result.templatePosition ?? 0).toFixed(2)}` +
         ` pf=${pf}=${pVal} (ref ${rMin}→${rMax}) rom=${(this.cycleFeatureMax - this.cycleFeatureMin).toFixed(1)}` +
-        ` minRom=${this.minRomForRep.toFixed(1)} reps=${this.repCount}`
+        ` minRom=${this.minRomForRep.toFixed(1)} reps=${this.repCount}` +
+        ` rate=${this._featureRate.toFixed(0)}/s ref=${this.templateSweepRate.toFixed(0)}/s${this._movingTooFast() ? ' FAST' : ''}`
       );
     }
 
@@ -832,6 +867,23 @@ export class DTWPhaseMachine {
    * (elbowAngleMin and friends) track whichever limb is more bent - normally
    * the resting one. Both produced form corrections about the wrong arm.
    */
+  /**
+   * The pace this exercise was demonstrated at, in feature-units per second.
+   * Half a rep sweeps the primary feature's full range.
+   */
+  get templateSweepRate() {
+    const half = this.repDurationMs / 2 / 1000;
+    if (!half || !this.primaryFeatureRange) return 0;
+    return this.primaryFeatureRange / half;
+  }
+
+  /** True when the patient is moving well above the demonstrated pace. */
+  _movingTooFast() {
+    const ref = this.templateSweepRate;
+    if (!ref || this._featureRate <= MIN_RATE_FOR_TEMPO) return false;
+    return this._featureRate > TOO_FAST_RATIO * ref;
+  }
+
   _formKeysFor(bodyPart) {
     const all = BODY_PART_FEATURE_MAP[bodyPart] || [];
     if (this.side !== 'left' && this.side !== 'right') return all;
@@ -930,7 +982,12 @@ export class DTWPhaseMachine {
       }
     }
 
-    // 3. Tempo (future: needs movement speed tracking)
+    // 3. Tempo. Above the demonstrated pace the patient is outrunning what the
+    // engine can measure, and reps start being dropped rather than miscounted -
+    // so this is a correction with real consequences, not a style note.
+    if (this._movingTooFast() && fb.tempo?.tooFast) {
+      return { say: fb.tempo.tooFast, tier: 'tempo' };
+    }
 
     // 4. Phase feedback (default)
     if (fb.phase && this.phase) {
@@ -963,7 +1020,7 @@ export class DTWPhaseMachine {
     // Safety always speaks, immediately, and resets the routine clock so a
     // routine cue cannot follow one straight down the patient's ear.
     if (tier === 'safety') {
-      if (say && say !== this.lastFeedback) this._lastCueAt = now;
+      if (say && say !== this.lastFeedback) { this._lastCueAt = now; this._lastCueTier = 'safety'; }
       this._lastPriority = 'safety';
       return say;
     }
@@ -1000,19 +1057,28 @@ export class DTWPhaseMachine {
     // phase actually changes, or not at all - a late "Keep going up" is worse
     // than silence because the patient is already coming down.
     if (tier === 'phase') {
+      // Someone moving fast does not need telling they are going up; the cue is
+      // stale before it finishes being spoken.
+      if (this._movingTooFast()) return this.lastFeedback;
       if (this.phase === this._lastPhaseCued) return this.lastFeedback;
       if (now - this._lastCueAt < PHASE_CUE_MIN_GAP_MS) return this.lastFeedback;
       this._lastPhaseCued = this.phase;
       this._lastCueAt = now;
+      this._lastCueTier = 'phase';
       return say;
     }
 
-    if (now - this._lastCueAt < FEEDBACK_MIN_GAP_MS) {
+    // A cooldown started by a less important cue does not get to silence a more
+    // important one.
+    const outranksCooldown =
+      (TIER_RANK[tier] ?? 9) < (TIER_RANK[this._lastCueTier] ?? 9);
+    if (!outranksCooldown && now - this._lastCueAt < FEEDBACK_MIN_GAP_MS) {
       return this.lastFeedback;
     }
 
     if (tier === 'form') this._formCuesThisRep += 1;
     this._lastCueAt = now;
+    this._lastCueTier = tier;
     return say;
   }
 

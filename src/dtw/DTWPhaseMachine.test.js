@@ -1043,3 +1043,84 @@ describe('artefact filter, rate-based', () => {
     expect(eng._prevPrimaryValue).toBeCloseTo(0.13, 5);
   });
 });
+
+// ─── Tempo ───────────────────────────────────────────────────────────────────
+// feedback.tempo {tooFast, holdCue} has been declared in every reference since
+// the schema was written, and _pickFeedback carried a "3. Tempo (future: needs
+// movement speed tracking)" stub — so the cue could never fire however fast the
+// patient moved. On device that mattered: fast reps were being DROPPED, and the
+// one cue that would have explained why was unimplemented.
+
+describe('tempo', () => {
+  // Read the wording off the config rather than hardcoding it: the synthetic
+  // reference and the recorded .ref.json word this cue differently.
+  const TOO_FAST = EXERCISE_CONFIGS.SideArmRaise.feedback.tempo.tooFast;
+
+  it('derives the demonstrated pace from the template', () => {
+    // Half a rep sweeps the primary feature's full range.
+    const eng = makeArmRaiseEngine();
+    const expected = eng.primaryFeatureRange / (eng.repDurationMs / 2 / 1000);
+    expect(eng.templateSweepRate).toBeCloseTo(expected, 3);
+    expect(eng.templateSweepRate).toBeGreaterThan(0);
+  });
+
+  it('stays quiet at the demonstrated pace', () => {
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, armRaiseRep(), { feature: 'shoulderAngleL', frameMs: 133 });
+    expect(out.some(r => r.feedback === TOO_FAST)).toBe(false);
+  });
+
+  it('says so when the patient outruns the template', () => {
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [
+      ...hold(25, 2), ...ramp(25, 92, 3), ...hold(92, 2), ...ramp(92, 25, 3), ...hold(25, 2),
+    ], { feature: 'shoulderAngleL', frameMs: 60 });
+    expect(out.some(r => r.feedback === TOO_FAST)).toBe(true);
+  });
+
+  it('does not fire on a stationary limb', () => {
+    // A resting arm has a rate of zero, not an undefined one.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, hold(20, 30), { feature: 'shoulderAngleL', frameMs: 133 });
+    expect(eng._movingTooFast()).toBe(false);
+    expect(out.some(r => r.feedback === TOO_FAST)).toBe(false);
+  });
+
+  it('replaces the phase cue rather than stacking on top of it', () => {
+    // "Keep going up" is stale before it finishes being spoken at that pace, and
+    // tempo sits above phase in the ladder - so a fast patient hears the useful
+    // cue instead of the obvious one, not both.
+    const eng = makeArmRaiseEngine();
+    eng._featureRate = eng.templateSweepRate * 5;
+    expect(eng._movingTooFast()).toBe(true);
+    const said = eng._pickFeedback(
+      { deviations: {}, quality: 1, templatePosition: 0.2 }, {}, 99999
+    );
+    expect(said).toBe(TOO_FAST);
+    expect(said).not.toBe('Keep going up');
+  });
+
+  it('suppresses the phase cue even where no tempo wording exists', () => {
+    // Not every reference declares feedback.tempo. Those must still go quiet
+    // rather than falling through to a stale phase cue.
+    const eng = makeArmRaiseEngine();
+    eng.feedback = { ...eng.feedback, tempo: undefined };
+    eng._featureRate = eng.templateSweepRate * 5;
+    eng.lastFeedback = 'previous';
+    const held = eng._pickFeedback(
+      { deviations: {}, quality: 1, templatePosition: 0.2 }, {}, 99999
+    );
+    expect(held).toBe('previous');
+  });
+
+  it('never lets tempo outrank a safety warning', () => {
+    // Going fast AND past a clinical limit must still say the dangerous thing.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [
+      ...hold(25, 2), ...ramp(25, 130, 4), ...hold(130, 3),
+    ], { feature: 'shoulderAngleL', frameMs: 60 });
+    const breaching = out.filter(r => r.capBreaches.length > 0);
+    expect(breaching.length).toBeGreaterThan(0);
+    expect(breaching.some(r => r.feedbackPriority === 'safety')).toBe(true);
+  });
+});
