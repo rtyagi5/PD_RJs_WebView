@@ -967,3 +967,79 @@ describe('form cue side selection', () => {
     expect(eng._formKeysFor('foot').length).toBeGreaterThan(0);
   });
 });
+
+// ─── The artefact filter must not swallow reps ───────────────────────────────
+// Measured on a Galaxy A36, 10-rep set performed quickly. Two windows of 11.4s
+// and 9.6s produced NO rep at all — not completed, not attempt. The engine sat
+// at cycle=sawStart with pf=NaN while the logged angle swept 20→52→72→85→30.
+//
+// Two causes, both fixed here: the budget was per STEP rather than per second
+// (poses arrive at ~7.5/s, so a fast rep legitimately moves 30-55 degrees
+// between samples), and it LATCHED — _prevPrimaryValue was frozen during a
+// rejection streak, so every later sample stayed >budget from a stale value and
+// was rejected too.
+
+describe('artefact filter, rate-based', () => {
+  const stepAt = (eng, v, t) => eng.step({
+    t, now: t, features: { shoulderAngleL: v }, say: () => {}, setHighlight: () => {},
+  });
+
+  it('admits a fast rep sampled at the phone\'s real pose rate', () => {
+    // 7.5 poses/s is 133ms apart. A brisk raise covers ~40 degrees in that time;
+    // the old absolute 20-per-step gate rejected it as an artefact.
+    const eng = makeArmRaiseEngine();
+    stepAt(eng, 20, 1000);
+    stepAt(eng, 60, 1133);
+    expect(eng._prevPrimaryValue).toBe(60);
+    stepAt(eng, 95, 1266);
+    expect(eng._prevPrimaryValue).toBe(95);
+  });
+
+  it('still rejects a jump no limb could make', () => {
+    // Same 40-degree step, but in 16ms instead of 133ms — 2500 deg/s.
+    const eng = makeArmRaiseEngine();
+    stepAt(eng, 20, 1000);
+    stepAt(eng, 60, 1016);
+    expect(eng._prevPrimaryValue).toBe(20);
+  });
+
+  it('gives up rather than latching blind', () => {
+    // The behaviour that lost whole reps: once rejecting, the reference value
+    // was frozen, so nothing could ever come back inside the budget.
+    const eng = makeArmRaiseEngine();
+    stepAt(eng, 20, 1000);
+    stepAt(eng, 120, 1016);           // rejected, streak opens
+    expect(eng._prevPrimaryValue).toBe(20);
+    stepAt(eng, 122, 1200);           // still within the streak window
+    stepAt(eng, 124, 1400);           // streak has run long enough — resync
+    expect(eng._prevPrimaryValue).toBe(124);
+  });
+
+  it('counts a fast set instead of dropping it on the floor', () => {
+    // The regression test that matters: reps at roughly the cadence that
+    // produced the 11.4s silent window must actually be counted.
+    const eng = makeArmRaiseEngine();
+    const fastRep = [
+      ...hold(25, 2), ...ramp(25, 92, 5), ...hold(92, 2), ...ramp(92, 25, 5), ...hold(25, 2),
+    ];
+    drive(eng, [...fastRep, ...fastRep, ...fastRep], {
+      feature: 'shoulderAngleL', frameMs: 133,
+    });
+    expect(eng.repCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('scales the budget to the feature, not to degrees', () => {
+    // footPitchNorm's whole range is ~0.17, so an absolute 20-unit gate could
+    // never fire on it. A range-relative budget works for both unit systems.
+    const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+    const eng = new DTWPhaseMachine(ref, { targetReps: 5, side: 'left' });
+    const stepFoot = (v, t) => eng.step({
+      t, now: t, features: { [eng.primaryFeature]: v }, say: () => {}, setHighlight: () => {},
+    });
+    stepFoot(0.12, 1000);
+    stepFoot(0.13, 1133);            // plausible
+    expect(eng._prevPrimaryValue).toBeCloseTo(0.13, 5);
+    stepFoot(9.0, 1149);             // absurd for this feature
+    expect(eng._prevPrimaryValue).toBeCloseTo(0.13, 5);
+  });
+});

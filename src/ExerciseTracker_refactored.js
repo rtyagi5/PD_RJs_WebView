@@ -224,6 +224,8 @@ export default function ExerciseTrackerRefactored({
   const feedbackRef = useRef('Initializing...');
   // 'safety' | 'normal' — travels with the string so the host knows what may interrupt.
   const feedbackPriorityRef = useRef('normal');
+  // Timestamp of the pose the engine last consumed, so it sees each one once.
+  const lastSteppedPoseRef = useRef(null);
   const prevPhaseRef = useRef(null);
   const prevRepRef = useRef(0);
   const specRef = useRef(null);
@@ -732,6 +734,25 @@ export default function ExerciseTrackerRefactored({
         drawCanvas(drawPoses, vw, vh, ctx, keypointsRef.current, keypointColorsRef.current, segmentColorsRef.current);
         videoRecorderRef.current?.updateFrame?.(poses, vw, vh);
         skeletonRecorderRef.current?.updateFrame?.(poses, vw, vh);
+
+        // Step the engine ONCE PER UNIQUE POSE.
+        //
+        // The draw loop runs at 23-57fps but inference only completes ~7.5
+        // times a second, so without this the engine was stepped roughly four
+        // times on byte-identical keypoints. That is not merely wasted work: the
+        // artefact filter budgets change against elapsed time, and a duplicate
+        // frame looks like "no movement at all in 33ms", which resets that clock.
+        // The next genuinely new pose then gets a one-frame budget instead of a
+        // one-pose budget - about 20 degrees instead of 80 - and a fast rep is
+        // rejected as an artefact all over again.
+        //
+        // Drawing stays per-frame above; only the engine is gated.
+        const poseStamp = poseLatestRef.current?.t ?? null;
+        if (poseStamp !== null && poseStamp === lastSteppedPoseRef.current) {
+          if (isDetecting) rafId = requestAnimationFrame(loop);
+          return;
+        }
+        lastSteppedPoseRef.current = poseStamp;
 
         // Step PhaseMachine — ensure engine matches active spec
         const activeSpecName = specRef.current?.name;

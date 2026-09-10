@@ -45,6 +45,21 @@ const FORM_CUE_PER_REP = 1;
 // emitted at most once per entry into a phase.
 const PHASE_CUE_MIN_GAP_MS = 1000;
 
+// Artefact budget for the primary feature, expressed as template-ranges per
+// second. The template range is the exercise's own full sweep, so 8 of them per
+// second is far beyond any human movement while still admitting a fast rep:
+// shoulderAngleR's range is 75.6 degrees, giving ~605 deg/s, where a brisk arm
+// raise peaks near 230 deg/s.
+const MAX_FEATURE_RANGES_PER_SEC = 8;
+
+// Floor, so a near-static template or a very small dt cannot produce a budget of
+// approximately zero and reject every sample.
+const MIN_ARTEFACT_BUDGET = 5;
+
+// A rejection streak longer than this is not an artefact - it is where the limb
+// actually is, and the filter has lost track. Resync rather than staying blind.
+const MAX_REJECT_STREAK_MS = 250;
+
 // Resolve a startCue against the active side. Accepts either a plain string (returned
 // as-is) or an object keyed by side ('left' | 'right' | 'alternating' | 'both').
 // Resolution order: exact side match → 'both' → first available variant.
@@ -133,6 +148,8 @@ export class DTWPhaseMachine {
     this._formCueRepIdx = -1;   // which rep those were spent on
     this._lastPriority = 'normal'; // priority of the cue currently held in lastFeedback
     this._lastPhaseCued = null; // phase whose cue was last spoken
+    this._prevPrimaryAt = NaN;  // when _prevPrimaryValue was accepted
+    this._rejectingSince = 0;   // start of the current rejection streak, 0 when clear
 
     // Time-mode timers
     this.holdStartMs = null;
@@ -343,6 +360,8 @@ export class DTWPhaseMachine {
     this._formCueRepIdx = -1;
     this._lastPriority = 'normal';
     this._lastPhaseCued = null;
+    this._prevPrimaryAt = NaN;
+    this._rejectingSince = 0;
     this.dtw.reset();
     // Don't reset patient baseline on counter reset — it persists across the session
   }
@@ -353,24 +372,59 @@ export class DTWPhaseMachine {
    * @returns {Object} - { phase, repDelta, repCount, feedback, done, timeHeldMs?, timeRemainingMs? }
    */
   step({ t, features, now = performance.now(), say, setHighlight }) {
-    // Velocity filter on the primary feature. At typical FPS (10-30), a real exercise
-    // motion changes the joint angle by at most ~10° per frame. Single-frame jumps of
-    // 25°+ are body-translation artifacts, MediaPipe heel/foot keypoint instability, or
-    // background-edge confusion — NOT real motion. Mask such jumps as NaN so they don't
-    // pollute movedEnough / nearStart / cycleFeatureMin/Max.
+    // Artefact filter on the primary feature. Body-translation, MediaPipe foot
+    // keypoint instability and background-edge confusion all produce jumps that
+    // are not real motion, and letting them through pollutes movedEnough /
+    // nearStart / cycleFeatureMin/Max.
     //
-    // _prevPrimaryValue stays at the last GOOD value during a rejection streak so the
-    // engine doesn't lose track of the legitimate baseline.
+    // This used to be an absolute "> 20 units per STEP" test, which failed on
+    // device in two ways at once. Measured on a Galaxy A36, 10-rep set at speed:
     //
-    // Trade-off: at very low FPS (<5), real motion can exceed 25°/frame and get filtered.
-    // For rehab-grade exercises at 10+ FPS this is the right cutoff.
+    //   * Per STEP, not per second. Poses arrive at ~7.5/s, so a legitimate fast
+    //     rep moves 30-55 degrees between samples and was rejected as an artefact.
+    //   * It LATCHED. _prevPrimaryValue was deliberately frozen during a rejection
+    //     streak, so once the true angle sat >20 away from that stale value every
+    //     later sample was rejected too. The log shows sustained NaN with
+    //     cycle=sawStart across an 11.4s window in which roughly four full reps
+    //     were performed and NONE were recorded - not as completed, not even as
+    //     attempts. They vanished.
+    //
+    // Now it is a RATE limit, and it gives up rather than latching.
     if (this.primaryFeature) {
       const pVal = features[this.primaryFeature];
       const prev = this._prevPrimaryValue;
-      if (Number.isFinite(pVal) && Number.isFinite(prev) && Math.abs(pVal - prev) > 20) {
-        features = { ...features, [this.primaryFeature]: NaN };
+      const dt = Number.isFinite(this._prevPrimaryAt) ? now - this._prevPrimaryAt : 0;
+
+      if (Number.isFinite(pVal) && Number.isFinite(prev) && dt > 0) {
+        // Budget scales with the template's own span, so this works for degrees
+        // and for dimensionless ratios without a per-feature constant. A floor
+        // keeps a near-static template (or a very short dt) from rejecting
+        // everything.
+        const budget = Math.max(
+          MAX_FEATURE_RANGES_PER_SEC * (this.primaryFeatureRange || 0) * (dt / 1000),
+          MIN_ARTEFACT_BUDGET
+        );
+        if (Math.abs(pVal - prev) > budget) {
+          if (!this._rejectingSince) this._rejectingSince = now;
+          if (now - this._rejectingSince < MAX_REJECT_STREAK_MS) {
+            features = { ...features, [this.primaryFeature]: NaN };
+          } else {
+            // Rejecting this long means the "artefact" is where the limb actually
+            // is and the filter has lost track. Resync rather than staying blind
+            // - that blindness is what silently swallowed whole reps.
+            this._prevPrimaryValue = pVal;
+            this._prevPrimaryAt = now;
+            this._rejectingSince = 0;
+          }
+        } else {
+          this._prevPrimaryValue = pVal;
+          this._prevPrimaryAt = now;
+          this._rejectingSince = 0;
+        }
       } else if (Number.isFinite(pVal)) {
         this._prevPrimaryValue = pVal;
+        this._prevPrimaryAt = now;
+        this._rejectingSince = 0;
       }
     }
 
