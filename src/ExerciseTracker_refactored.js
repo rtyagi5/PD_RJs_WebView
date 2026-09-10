@@ -658,8 +658,16 @@ export default function ExerciseTrackerRefactored({
       };
       const spec = specRef.current;
 
-      // Apply highlights except during loading/inactive
-      if (sessionState !== 'loading' && sessionState !== 'inactive') {
+      // Apply highlights except during loading/inactive.
+      //
+      // ACTIVE is excluded deliberately. This block runs BEFORE drawCanvas,
+      // while the DTW colour decision (quality/cap breach) runs AFTER it. With
+      // ACTIVE included, the unconditional '#66FF00' below overwrote that
+      // decision on the very next iteration, so a red cap breach was computed
+      // correctly and then repainted green before a single frame of it was ever
+      // drawn. During ACTIVE the DTW block owns the highlight outright.
+      if (sessionState !== 'loading' && sessionState !== 'inactive'
+          && sessionState !== 'active') {
         if (isDTW) {
           // DTW mode: highlight exercise-specific body parts
           const ref = getReference(exerciseType);
@@ -779,14 +787,13 @@ export default function ExerciseTrackerRefactored({
           const ref = getReference(exerciseType);
           const hlParts = ref?.highlightKeypoints ?? [];
 
-          // setHighlight takes keypoint NAMES. drawKeypoints/drawSkeleton test
-          // `keypoints_CC.includes(keypoint.name)` and fall back to "aqua" on a
-          // miss, so handing them keypoint OBJECTS silently painted the whole
-          // skeleton cyan — no red on a breach, and no green/amber either. That
-          // is why the focused limb stopped being highlighted once a set began:
-          // the setup branch above passes names correctly, this one did not.
+          // setHighlight takes keypoint NAMES, and keypointsRef ALREADY holds
+          // that name list (setHighlight writes it). An earlier attempt at this
+          // mapped keypointsRef through `k.name`, which on a list of strings
+          // yields undefined for every entry and highlighted nothing at all.
+          // The pose objects are the right source for "every joint".
           const allNames = () =>
-            (keypointsRef.current ?? []).map(k => k?.name).filter(Boolean);
+            (poses?.[0]?.keypoints ?? []).map(k => k?.name).filter(Boolean);
 
           // A breach colours the WHOLE skeleton, not just the tracked joint.
           // The limb at fault is rarely where the patient is looking, and a

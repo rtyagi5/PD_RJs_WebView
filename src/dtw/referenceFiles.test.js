@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { checkPhaseSeparation } from './referenceHealth';
-import { applyCanonicalPolicy } from './bootstrapReferences';
+import { applyCanonicalPolicy, CANONICAL_FIELDS } from './bootstrapReferences';
 import { generateAllReferences } from './specToReference';
 import { DTWPhaseMachine } from './DTWPhaseMachine';
 
@@ -56,4 +56,24 @@ it('recorded references would load and drive the engine', () => {
     console.log(lines.join('\n'));
     expect(health.ok).toBe(true);
   }
+});
+
+// ─── Canonical fields survive a recording ────────────────────────────────────
+// A .ref.json replaces the synthetic reference WHOLESALE. Anything the recorder
+// does not write is therefore gone unless applyCanonicalPolicy puts it back.
+// highlightKeypoints was missing from that list, so dropping in a recorded
+// reference silently emptied the highlight name list and drew the entire
+// skeleton "aqua" — the green limb-in-focus cue disappeared with no error.
+describe('recorded references keep their highlight parts', () => {
+  it('lists highlightKeypoints as canonical', () => {
+    expect(CANONICAL_FIELDS).toContain('highlightKeypoints');
+  });
+
+  it('restores highlightKeypoints onto a recording that lacks them', () => {
+    const canonical = { highlightKeypoints: ['shoulder', 'elbow', 'wrist'] };
+    const recorded = { name: 'SideArmRaise', template: [] };
+    expect(recorded.highlightKeypoints).toBeUndefined();
+    const merged = applyCanonicalPolicy(recorded, canonical);
+    expect(merged.highlightKeypoints).toEqual(['shoulder', 'elbow', 'wrist']);
+  });
 });

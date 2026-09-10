@@ -35,6 +35,16 @@ const FEEDBACK_MIN_GAP_MS = 2500;
 // mid-movement gives the patient nothing they can act on.
 const FORM_CUE_PER_REP = 1;
 
+// Phase cues are timing-critical in a way corrective cues are not: "Keep going
+// up" is only useful while the patient is going up. Holding one behind the
+// routine gap meant it was spoken about a movement that had already finished,
+// which reads as the coach lagging behind you.
+//
+// So a phase cue fires on the phase CHANGE instead of on the gap clock, with
+// only a short floor to stop a thrashing phase machine from chattering. It is
+// emitted at most once per entry into a phase.
+const PHASE_CUE_MIN_GAP_MS = 1000;
+
 // Resolve a startCue against the active side. Accepts either a plain string (returned
 // as-is) or an object keyed by side ('left' | 'right' | 'alternating' | 'both').
 // Resolution order: exact side match → 'both' → first available variant.
@@ -122,6 +132,7 @@ export class DTWPhaseMachine {
     this._formCuesThisRep = 0;  // form cues already spent on the current rep
     this._formCueRepIdx = -1;   // which rep those were spent on
     this._lastPriority = 'normal'; // priority of the cue currently held in lastFeedback
+    this._lastPhaseCued = null; // phase whose cue was last spoken
 
     // Time-mode timers
     this.holdStartMs = null;
@@ -331,6 +342,7 @@ export class DTWPhaseMachine {
     this._formCuesThisRep = 0;
     this._formCueRepIdx = -1;
     this._lastPriority = 'normal';
+    this._lastPhaseCued = null;
     this.dtw.reset();
     // Don't reset patient baseline on counter reset — it persists across the session
   }
@@ -928,14 +940,25 @@ export class DTWPhaseMachine {
       return this.lastFeedback;
     }
 
+    this._lastPriority = 'normal';
+
+    // A phase cue is tied to a moment, not to a cooldown. Speak it when the
+    // phase actually changes, or not at all - a late "Keep going up" is worse
+    // than silence because the patient is already coming down.
+    if (tier === 'phase') {
+      if (this.phase === this._lastPhaseCued) return this.lastFeedback;
+      if (now - this._lastCueAt < PHASE_CUE_MIN_GAP_MS) return this.lastFeedback;
+      this._lastPhaseCued = this.phase;
+      this._lastCueAt = now;
+      return say;
+    }
+
     if (now - this._lastCueAt < FEEDBACK_MIN_GAP_MS) {
-      this._lastPriority = 'normal';
       return this.lastFeedback;
     }
 
     if (tier === 'form') this._formCuesThisRep += 1;
     this._lastCueAt = now;
-    this._lastPriority = 'normal';
     return say;
   }
 

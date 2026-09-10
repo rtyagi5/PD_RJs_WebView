@@ -36,6 +36,11 @@ let _initialized = false;
 export const CANONICAL_FIELDS = [
   'primaryFeature', 'primaryFeatureBase',
   'clinicalCaps', 'framing',
+  // A recording carries no highlightKeypoints, and without it ref.highlightKeypoints
+  // is undefined -> the highlight name list is empty -> the whole skeleton draws
+  // "aqua". Dropping a recorded reference in therefore silently removed the green
+  // limb-in-focus cue that the synthetic reference had.
+  'highlightKeypoints',
   'minRomPct', 'timing',
   'detector', 'mode', 'side',
 ];
