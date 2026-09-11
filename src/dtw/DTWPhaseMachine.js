@@ -118,6 +118,28 @@ const TIER_RANK = {
 const OFF_CALIBRATION_GRACE_MS = 4000;
 const OFF_CALIBRATION_RANGE_MULTIPLE = 1.0;
 
+// One piece of spoken advice per rep. A rep is a few seconds long and a cue
+// takes one to two of them to say, so a second cue in the same rep is still
+// being spoken while the patient has moved on - which is exactly how a patient
+// on rep four hears coaching about rep two.
+const PHASE_CUES_PER_REP = 1;
+
+// Measured on the device, Android TTS at the 0.45 default rate this app sets:
+//
+//     "Keep lifting"                  12 chars   1062ms
+//     "Lower slowly"                  12 chars   1233ms
+//     "That's far enough"             17 chars   1355ms
+//     "Start lifting your toes"       23 chars   1773ms
+//     "raised enough, start lowering"  29 chars   2366ms
+//
+// which fits ~290ms of engine latency plus ~65ms per character. This is a
+// different number from speech.js's watchdog, deliberately: that one is a
+// generous upper bound whose job is never to fire early, this one is a central
+// estimate whose job is to predict whether a cue can land in time.
+const SPEECH_LATENCY_MS = 290;
+const SPEECH_PER_CHAR_MS = 65;
+const speechDurationMs = text => SPEECH_LATENCY_MS + String(text || '').length * SPEECH_PER_CHAR_MS;
+
 // A breach that is continuously true is one fact, not one fact per frame. Speak
 // it for a window, go quiet, and repeat only if it is still true much later -
 // which also lets the rest of the ladder (the rep number especially) through in
@@ -195,6 +217,21 @@ export class DTWPhaseMachine {
     // rep sweeps the primary feature's full range, hence the /2.
     this.repDurationMs = timing.repDurationMs ?? 2000;
 
+    // How long each phase lasts in the demonstration, so a cue can be checked
+    // against the window it has to be heard in. On SeatedDorsiflexion the
+    // `raised` phase is 276ms and its cue takes 2.2s to speak: eight times too
+    // long, and no amount of pacing makes that advice arrive while it is true.
+    this.phaseDurationsMs = {};
+    if (Array.isArray(reference.template) && reference.template.length) {
+      const counts = {};
+      for (const f of reference.template) {
+        if (f.phase) counts[f.phase] = (counts[f.phase] || 0) + 1;
+      }
+      for (const [phase, n] of Object.entries(counts)) {
+        this.phaseDurationsMs[phase] = (this.repDurationMs * n) / reference.template.length;
+      }
+    }
+
     // Time-mode config
     this.targetMs = this.mode === 'time'
       ? (typeof targetSeconds === 'number' ? targetSeconds * 1000
@@ -226,6 +263,8 @@ export class DTWPhaseMachine {
     this._repAnnouncedUntil = 0; // suppress lower-priority feedback for REP_ANNOUNCE_MS after a rep counts
     this._lastCueAt = 0;        // when a routine (non-safety, non-rep) cue was last issued
     this._formCuesThisRep = 0;  // form cues already spent on the current rep
+    this._phaseCuesThisRep = 0; // phase cues already spent on the current rep
+    this._phaseCueRepIdx = -1;
     this._formCueRepIdx = -1;   // which rep those were spent on
     this._lastPriority = 'normal'; // priority of the cue currently held in lastFeedback
     this._lastPhaseCued = null; // phase whose cue was last spoken
@@ -451,6 +490,8 @@ export class DTWPhaseMachine {
     this._lastCueAt = 0;
     this._formCuesThisRep = 0;
     this._formCueRepIdx = -1;
+    this._phaseCuesThisRep = 0;
+    this._phaseCueRepIdx = -1;
     this._lastPriority = 'normal';
     this._lastPhaseCued = null;
     this._prevPrimaryAt = NaN;
@@ -572,15 +613,21 @@ export class DTWPhaseMachine {
     if (!this._diagFC) this._diagFC = 0;
     if (++this._diagFC % 60 === 0) {
       const pf = this.primaryFeature;
-      const pVal = pf && Number.isFinite(features[pf]) ? features[pf].toFixed(1) : 'NaN';
       const range = this.featureRanges[pf];
-      const rMin = range ? range.min?.toFixed(1) : '?';
-      const rMax = range ? range.max?.toFixed(1) : '?';
+      // Adaptive precision. Everything here used to print to one decimal, which
+      // for a footPitchNorm whose entire range is 0.265 renders the rep gate and
+      // the achieved ROM as the same "0.2" - so a set where every rep scraped
+      // the gate looked identical to one where every rep cleared it comfortably.
+      const dp = (range?.range ?? 0) < 5 ? 3 : 1;
+      const n = v => (Number.isFinite(v) ? v.toFixed(dp) : 'NaN');
+      const pVal = pf ? n(features[pf]) : 'NaN';
+      const rMin = range ? n(range.min) : '?';
+      const rMax = range ? n(range.max) : '?';
       console.log(
         `[DTW-diag] phase=${this.phase || '—'} cycle=${this.cycleState}` +
         ` quality=${(result.quality ?? 0).toFixed(3)} tPos=${(result.templatePosition ?? 0).toFixed(2)}` +
-        ` pf=${pf}=${pVal} (ref ${rMin}→${rMax}) rom=${(this.cycleFeatureMax - this.cycleFeatureMin).toFixed(1)}` +
-        ` minRom=${this.minRomForRep.toFixed(1)} reps=${this.repCount}` +
+        ` pf=${pf}=${pVal} (ref ${rMin}→${rMax}) rom=${n(this.cycleFeatureMax - this.cycleFeatureMin)}` +
+        ` minRom=${n(this.minRomForRep)} romSrc=${this.romGate?.source ?? '?'} reps=${this.repCount}` +
         ` rate=${this._featureRate.toFixed(3)}/s repDur=${this.repDurationMs}ms${this._movingTooFast(now) ? ' FAST' : ''}`
       );
     }
@@ -1286,6 +1333,26 @@ export class DTWPhaseMachine {
       if (this._movingTooFast(now)) return this.lastFeedback;
       if (this.phase === this._lastPhaseCued) return this.lastFeedback;
       if (now - this._lastCueAt < PHASE_CUE_MIN_GAP_MS) return this.lastFeedback;
+
+      // A cue that cannot finish inside the phase it describes is not advice,
+      // it is narration of something already over. Checked against the
+      // demonstration's own phase durations rather than a fixed threshold, so
+      // a slow exercise keeps its coaching and a quick one is not buried in it.
+      const window = this.phaseDurationsMs[this.phase];
+      if (Number.isFinite(window) && speechDurationMs(say) > window) {
+        this._lastPhaseCued = this.phase; // do not re-test it every step
+        return this.lastFeedback;
+      }
+
+      // One per rep. The patient hears the number and, at most, one thing to do
+      // about the next one.
+      if (this.repCount !== this._phaseCueRepIdx) {
+        this._phaseCueRepIdx = this.repCount;
+        this._phaseCuesThisRep = 0;
+      }
+      if (this._phaseCuesThisRep >= PHASE_CUES_PER_REP) return this.lastFeedback;
+      this._phaseCuesThisRep += 1;
+
       this._lastPhaseCued = this.phase;
       this._lastCueAt = now;
       this._lastCueTier = 'phase';

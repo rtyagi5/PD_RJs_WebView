@@ -140,6 +140,72 @@ describe('jitter and noise defences', () => {
   });
 });
 
+describe('one piece of advice per rep', () => {
+  // The patient reported hearing coaching for rep two while they were on rep
+  // four. Two causes, both real: the engine was running seconds behind (see the
+  // calibration deadlock in PatientBaseline), and it emitted more cues per rep
+  // than a rep has time to deliver.
+
+  const dorsiflexionEngine = () => {
+    const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+    return new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
+  };
+
+  it('knows how long each demonstrated phase lasts', () => {
+    const eng = dorsiflexionEngine();
+    const total = Object.values(eng.phaseDurationsMs).reduce((a, b) => a + b, 0);
+    expect(total).toBeCloseTo(eng.repDurationMs, 0);
+    for (const ms of Object.values(eng.phaseDurationsMs)) {
+      expect(ms).toBeGreaterThan(0);
+    }
+  });
+
+  it('drops a cue that cannot be spoken inside the phase it describes', () => {
+    const eng = dorsiflexionEngine();
+    // Pick the shortest phase that actually carries a cue, and confirm the
+    // engine would not have time to say it.
+    const withCues = Object.entries(eng.phaseDurationsMs)
+      .filter(([phase]) => eng.feedback.phase?.[phase]);
+    const impossible = withCues.filter(([phase, ms]) =>
+      290 + eng.feedback.phase[phase].length * 65 > ms);
+    expect(impossible.length).toBeGreaterThan(0);
+
+    // None of those strings may be emitted.
+    const out = drive(eng, [
+      ...hold(0.0, 10), ...ramp(0.0, 0.14, 14), ...hold(0.14, 10), ...ramp(0.14, 0.0, 14),
+      ...hold(0.0, 10),
+    ], { feature: 'footPitchNormL' });
+    const said = new Set(out.map(r => r.feedback));
+    for (const [phase] of impossible) {
+      expect(`${phase}: ${said.has(eng.feedback.phase[phase])}`).toBe(`${phase}: false`);
+    }
+  });
+
+  it('emits at most one phase cue per rep', () => {
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [...armRaiseRep(), ...armRaiseRep(), ...armRaiseRep()],
+      { feature: 'shoulderAngleL' });
+    expect(eng.repCount).toBe(3);
+
+    const phaseCues = new Set(Object.values(EXERCISE_CONFIGS.SideArmRaise.feedback.phase));
+    const emitted = out
+      .map(r => r.feedback)
+      .filter((c, i, a) => c && c !== a[i - 1] && phaseCues.has(c));
+    // Three reps, one phase cue each at the very most.
+    expect(emitted.length).toBeLessThanOrEqual(3);
+  });
+
+  it('still lets the rep number and a safety warning through', () => {
+    // Capping phase cues must not cap the two things that are not coaching.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, [...armRaiseRep(), ...ramp(30, 130, 12), ...hold(130, 10)],
+      { feature: 'shoulderAngleL' });
+    const said = out.map(r => r.feedback);
+    expect(said).toContain('1');
+    expect(said).toContain(EXERCISE_CONFIGS.SideArmRaise.feedback.range.tooMuch);
+  });
+});
+
 describe('clinical safety caps (the "raised too high" regression)', () => {
   it('exposes resolved caps for the active side only', () => {
     const eng = makeArmRaiseEngine();

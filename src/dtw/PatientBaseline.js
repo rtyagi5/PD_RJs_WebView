@@ -104,17 +104,31 @@ export class PatientBaseline {
     const capBreaches = opts.capBreaches || [];
     if (capBreaches.length > 0) {
       this.reps.flagged++;
+      // Calibration still advances. It used to return here, which deadlocks the
+      // moment a cap sits somewhere every rep crosses: no rep ever reaches the
+      // counter below, the baseline never locks, the ROM gate stays on the
+      // template forever, and nothing anywhere says so.
+      //
+      // Measured on a SeatedDorsiflexion set: the clinical floor (-0.12) sits
+      // 0.014 BELOW the demonstration's own peak (-0.106), so all five reps were
+      // flagged, "[PatientBaseline] Locked baseline" never appeared, and the gate
+      // stayed at 80% of the reference range while the patient's own reps
+      // measured just under it. Reps closed 4.5-9.0s after the patient finished
+      // them, so every cue they heard belonged to a rep they had already left.
+      //
+      // Calibrating on these reps is right, not a compromise: the baseline
+      // measures how far this patient moves, and a rep that crossed a limit is
+      // still a rep they performed. The frames were already in featureStats -
+      // updateFrame never filtered them - so only the rep counter was out of
+      // step with the statistics it gates.
+      this._advanceCalibration();
       const analysis = this.isCalibrating ? { romPct: 1.0, details: {} } : this._analyzeRep();
       this._resetRepBuffer();
       return { completed: false, flagged: true, capBreaches, quality, ...analysis };
     }
 
     if (this.isCalibrating && !this.isLocked) {
-      this.calibrationRepsCompleted++;
-      if (this.calibrationRepsCompleted >= this.calibrationReps &&
-          this.calibrationFrames >= CALIBRATION_MIN_FRAMES) {
-        this._lockBaseline();
-      }
+      this._advanceCalibration();
       // During calibration, all reps count as completed
       this.reps.completed++;
       // Reset the per-rep buffer here too. Without this the buffer keeps growing
@@ -325,6 +339,19 @@ export class PatientBaseline {
         s.sum += val;
         s.count++;
       }
+    }
+  }
+
+  /**
+   * One rep of calibration progress, locking once there is enough of it.
+   * Shared by the flagged and unflagged paths so a cap can never stall it.
+   */
+  _advanceCalibration() {
+    if (!this.isCalibrating || this.isLocked) return;
+    this.calibrationRepsCompleted++;
+    if (this.calibrationRepsCompleted >= this.calibrationReps &&
+        this.calibrationFrames >= CALIBRATION_MIN_FRAMES) {
+      this._lockBaseline();
     }
   }
 

@@ -44,6 +44,28 @@ describe('calibration', () => {
     expect(bl.baseline[KEY].max).toBeCloseTo(70, 0);
   });
 
+  it('locks even when every rep breached a cap', () => {
+    // The deadlock. A clinical cap that sits somewhere every rep crosses used to
+    // return before the calibration counter, so the baseline never locked, the
+    // ROM gate stayed on the template forever, and nothing said so. Measured on
+    // a SeatedDorsiflexion set: the clinical floor (-0.12) sat 0.014 BELOW the
+    // demonstration's own peak (-0.106), so all five reps were flagged and the
+    // patient scraped a gate set at 80% of a range they were never credited for.
+    const bl = makeBaseline();
+    const breach = { capBreaches: [{ key: KEY, bound: 'max', source: 'clinicalCap' }] };
+    for (let r = 0; r < 2; r++) {
+      for (let i = 0; i <= 20; i++) bl.updateFrame({ [KEY]: 30 + 60 * (i / 20) });
+      for (let i = 20; i >= 0; i--) bl.updateFrame({ [KEY]: 30 + 60 * (i / 20) });
+      bl.onRepDetected({ [KEY]: 90 }, 1, breach);
+    }
+    expect(bl.isLocked).toBe(true);
+    expect(bl.reps.flagged).toBe(2);
+    // Flagged reps still must not be graded as good ones.
+    expect(bl.reps.completed).toBe(0);
+    // And the range they demonstrated is what got captured.
+    expect(bl.baseline[KEY].range).toBeCloseTo(60, 0);
+  });
+
   it('does not lock on rep count alone without enough frames', () => {
     const bl = makeBaseline();
     // Two reps but only a handful of frames — below CALIBRATION_MIN_FRAMES.
