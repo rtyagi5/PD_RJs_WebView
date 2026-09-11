@@ -12,6 +12,11 @@ export const IDEAL_BODY_RATIO   = 0.50;  // body height ≈ 50 % of frame height
 export const DISTANCE_TOL_CLOSE = 0.20;  // ratio > ideal + this → "too close"  (max: 0.70)
 export const DISTANCE_TOL_FAR   = 0.30;  // ratio < ideal - this → "too far"    (min: 0.20 — allows normal standing distance)
 export const MIN_CONFIDENCE     = 0.3;   // per-keypoint visibility threshold
+
+// A limb the camera can see properly scores well above this in a side view; the
+// occluded one sits below it. Measured: near knee/ankle 0.94-0.99, far 0.43-0.75.
+export const FAR_LIMB_MAX_CONFIDENCE = 0.85;
+export const FAR_LIMB_CONFIDENCE_GAP = 0.2;
 export const LIGHTING_THRESHOLD = 0.25;
 export const MAX_ROLL_DEG        = 12;   // camera tilt beyond this rejects the setup  // avg score below this → poor lighting
 // Heel↔toe span may not exceed this fraction of shank length. Mirrors the
@@ -302,6 +307,42 @@ export function checkFootTracking(keypoints, overrides = {}) {
     : null;
   const groups = wanted ? FOOT_GROUPS.filter(g => g.side === wanted) : FOOT_GROUPS;
   const sideWord = wanted ? `${wanted} ` : '';
+
+  // Is the measured limb the FAR one?
+  //
+  // Presence alone cannot answer this. MediaPipe scores a keypoint 1.0 whenever
+  // it omits `visibility` (detectors.js), so heel and foot_index are effectively
+  // always "present", and MIN_CONFIDENCE of 0.3 passes a knee at 0.43. Measured
+  // on device with the patient side-on and the activity set to 'left':
+  //
+  //   kneeL=0.43 kneeR=0.99   ankleL=0.48 ankleR=0.96
+  //
+  // The left foot was complete and plausibly shaped, so every existing gate
+  // passed, and six reps were counted off the occluded limb. In a SIDE view the
+  // near limb always scores far above the far one, and that gap is the only
+  // reliable signal that the patient is facing the wrong way round.
+  if (wanted && overrides.view === 'side') {
+    const other = wanted === 'left' ? 'right' : 'left';
+    const conf = side => {
+      const vals = ['knee', 'ankle']
+        .map(part => kp(keypoints, `${side}_${part}`))
+        .filter(k => k && Number.isFinite(k.score))
+        .map(k => k.score);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : NaN;
+    };
+    const mine = conf(wanted);
+    const theirs = conf(other);
+    if (Number.isFinite(mine) && Number.isFinite(theirs)
+        && mine < FAR_LIMB_MAX_CONFIDENCE
+        && theirs - mine > FAR_LIMB_CONFIDENCE_GAP) {
+      return {
+        status: 'wrong_side',
+        message: `Turn around so your ${wanted} side faces the camera`,
+        side: wanted,
+        spanRatio: NaN,
+      };
+    }
+  }
 
   let sawCompleteFoot = false;
   let worst = { side: null, spanRatio: NaN };

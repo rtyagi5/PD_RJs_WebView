@@ -442,3 +442,55 @@ describe('checkFootTracking side selection', () => {
     expect(res.side).toBe('left');
   });
 });
+
+// ─── Facing the wrong way round ──────────────────────────────────────────────
+// Presence is not enough to tell a near limb from a far one. MediaPipe scores a
+// keypoint 1.0 whenever it omits `visibility`, so heel and foot_index are always
+// "present", and MIN_CONFIDENCE of 0.3 happily passes a knee at 0.43. Measured
+// on device with the patient sitting right-side-on and the activity set to
+// 'left': kneeL=0.43 kneeR=0.99, ankleL=0.48 ankleR=0.96. Every gate passed and
+// six reps were counted off the occluded leg.
+
+describe('checkFootTracking wrong-side detection', () => {
+  function leg(side, score) {
+    return [
+      { name: `${side}_knee`,       x: 100, y: 100, score },
+      { name: `${side}_ankle`,      x: 100, y: 180, score },
+      { name: `${side}_heel`,       x: 95,  y: 190, score: 1.0 },
+      { name: `${side}_foot_index`, x: 130, y: 188, score: 1.0 },
+    ];
+  }
+  const sideView = { requireFoot: true, view: 'side' };
+
+  it('tells the patient to turn round when measuring the far limb', () => {
+    const kps = [...leg('left', 0.45), ...leg('right', 0.98)];
+    const res = checkFootTracking(kps, { ...sideView, side: 'left' });
+    expect(res.status).toBe('wrong_side');
+    expect(res.message).toContain('left');
+    expect(res.message).toMatch(/turn/i);
+  });
+
+  it('is happy when the measured limb is the near one', () => {
+    const kps = [...leg('left', 0.45), ...leg('right', 0.98)];
+    expect(checkFootTracking(kps, { ...sideView, side: 'right' }).status).toBe('good');
+  });
+
+  it('does not fire when both limbs track well', () => {
+    // Front-on, or a side view with an unusually visible far leg.
+    const kps = [...leg('left', 0.93), ...leg('right', 0.96)];
+    expect(checkFootTracking(kps, { ...sideView, side: 'left' }).status).toBe('good');
+  });
+
+  it('only applies to side-view exercises', () => {
+    // In a front view a confidence gap means something else, and telling the
+    // patient to turn round would be wrong.
+    const kps = [...leg('left', 0.45), ...leg('right', 0.98)];
+    const res = checkFootTracking(kps, { requireFoot: true, side: 'left' });
+    expect(res.status).not.toBe('wrong_side');
+  });
+
+  it('does not fire on a small confidence difference', () => {
+    const kps = [...leg('left', 0.74), ...leg('right', 0.84)];
+    expect(checkFootTracking(kps, { ...sideView, side: 'left' }).status).toBe('good');
+  });
+});
