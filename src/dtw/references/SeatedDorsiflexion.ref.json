@@ -2389,15 +2389,15 @@
   },
   "feedback": {
     "phase": {
-      "lowered": "Start raising your toe",
-      "dorsiflexing": "keep raising",
+      "lowered": "Start lifting your toes",
+      "dorsiflexing": "Keep lifting",
       "raised": "raised enough, start lowering",
-      "lowering": "keep lowering"
+      "lowering": "Lower slowly"
     },
     "form": [],
     "range": {
-      "tooLittle": "try raise higher",
-      "tooMuch": "raised too higher"
+      "tooLittle": "Try to lift your toes a little higher",
+      "tooMuch": "That's far enough"
     },
     "tempo": {
       "tooFast": "Slow down, control the movement",

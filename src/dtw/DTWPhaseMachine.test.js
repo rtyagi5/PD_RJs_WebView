@@ -846,9 +846,23 @@ describe('feedback pacing', () => {
     const out = drive(eng, [...slowRep, ...slowRep, ...slowRep, ...slowRep],
       { feature: 'shoulderAngleL' });
 
-    const spanMs = out.length * FRAME_MS;
-    const perSecond = cueChanges(out).length / (spanMs / 1000);
-    expect(perSecond).toBeLessThan(1.2);
+    // The guarantee is per-cue, not aggregate: a routine cue must get long
+    // enough to be spoken. Asserting a session-wide rate instead made this test
+    // sensitive to fixture timing to three decimal places, which says nothing
+    // about whether a patient can hear anything.
+    const changeTimes = [];
+    let last = null;
+    out.forEach((r, i) => {
+      if (r.feedback && r.feedback !== last) {
+        changeTimes.push(i * FRAME_MS);
+        last = r.feedback;
+      }
+    });
+    const gaps = changeTimes.slice(1).map((t, i) => t - changeTimes[i]);
+    const median = gaps.sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+    // On device, before pacing, the median gap was ~420ms against utterances
+    // needing 1100-2300ms.
+    expect(median).toBeGreaterThanOrEqual(900);
   });
 
   it('does not repeat a phase cue while the phase is unchanged', () => {
@@ -1056,17 +1070,43 @@ describe('tempo', () => {
   // reference and the recorded .ref.json word this cue differently.
   const TOO_FAST = EXERCISE_CONFIGS.SideArmRaise.feedback.tempo.tooFast;
 
-  it('derives the demonstrated pace from the template', () => {
-    // Half a rep sweeps the primary feature's full range.
+  it('judges a rep against how long the demonstration took', () => {
     const eng = makeArmRaiseEngine();
-    const expected = eng.primaryFeatureRange / (eng.repDurationMs / 2 / 1000);
-    expect(eng.templateSweepRate).toBeCloseTo(expected, 3);
-    expect(eng.templateSweepRate).toBeGreaterThan(0);
+    expect(eng.repDurationMs).toBeGreaterThan(0);
+
+    // Two reps a comfortable distance apart: not fast.
+    eng._judgeTempo(10000);
+    eng._judgeTempo(10000 + eng.repDurationMs);
+    expect(eng._movingTooFast(10000 + eng.repDurationMs)).toBe(false);
+
+    // Two reps closer together than the demonstration: fast.
+    eng._judgeTempo(20000);
+    eng._judgeTempo(20000 + eng.repDurationMs * 0.4);
+    expect(eng._movingTooFast(20000 + eng.repDurationMs * 0.4)).toBe(true);
+  });
+
+  it('ignores a pause between reps rather than calling it speed', () => {
+    // Measured on SeatedDorsiflexion: reps 3.3-13.7s apart against a 4.1s
+    // demonstration - mostly SLOWER - yet the old instantaneous-rate test called
+    // it "too fast" 14 times, the most frequent cue in the session.
+    const eng = makeArmRaiseEngine();
+    eng._judgeTempo(10000);
+    eng._judgeTempo(10000 + eng.repDurationMs * 3);
+    expect(eng._movingTooFast(10000 + eng.repDurationMs * 3)).toBe(false);
+  });
+
+  it('cannot be triggered by keypoint jitter', () => {
+    // The old signal was a smoothed |d(primary)/dt|, which on a 3-10 pixel
+    // feature spikes on noise alone. Rep duration cannot be moved by it.
+    const eng = makeArmRaiseEngine();
+    eng._featureRate = 99999;
+    expect(eng._movingTooFast(performance.now())).toBe(false);
   });
 
   it('stays quiet at the demonstrated pace', () => {
     const eng = makeArmRaiseEngine();
-    const out = drive(eng, armRaiseRep(), { feature: 'shoulderAngleL', frameMs: 133 });
+    const out = drive(eng, [...armRaiseRep(), ...armRaiseRep()],
+      { feature: 'shoulderAngleL', frameMs: 133 });
     expect(out.some(r => r.feedback === TOO_FAST)).toBe(false);
   });
 
@@ -1102,10 +1142,9 @@ describe('tempo', () => {
   });
 
   it('does not fire on a stationary limb', () => {
-    // A resting arm has a rate of zero, not an undefined one.
     const eng = makeArmRaiseEngine();
     const out = drive(eng, hold(20, 30), { feature: 'shoulderAngleL', frameMs: 133 });
-    expect(eng._movingTooFast()).toBe(false);
+    expect(eng._movingTooFast(performance.now())).toBe(false);
     expect(out.some(r => r.feedback === TOO_FAST)).toBe(false);
   });
 
@@ -1114,8 +1153,8 @@ describe('tempo', () => {
     // tempo sits above phase in the ladder - so a fast patient hears the useful
     // cue instead of the obvious one, not both.
     const eng = makeArmRaiseEngine();
-    eng._featureRate = eng.templateSweepRate * 5;
-    expect(eng._movingTooFast()).toBe(true);
+    eng._tooFastUntil = 100000; // a rep just closed faster than the demonstration
+    expect(eng._movingTooFast(99999)).toBe(true);
     const said = eng._pickFeedback(
       { deviations: {}, quality: 1, templatePosition: 0.2 }, {}, 99999
     );
@@ -1128,7 +1167,7 @@ describe('tempo', () => {
     // rather than falling through to a stale phase cue.
     const eng = makeArmRaiseEngine();
     eng.feedback = { ...eng.feedback, tempo: undefined };
-    eng._featureRate = eng.templateSweepRate * 5;
+    eng._tooFastUntil = 100000;
     eng.lastFeedback = 'previous';
     const held = eng._pickFeedback(
       { deviations: {}, quality: 1, templatePosition: 0.2 }, {}, 99999
@@ -1145,5 +1184,64 @@ describe('tempo', () => {
     const breaching = out.filter(r => r.capBreaches.length > 0);
     expect(breaching.length).toBeGreaterThan(0);
     expect(breaching.some(r => r.feedbackPriority === 'safety')).toBe(true);
+  });
+});
+
+// ─── Phase hysteresis ────────────────────────────────────────────────────────
+// Reported from a SeatedDorsiflexion set: "it was giving me feedback lower down
+// when I already lowered". The dwell test measured how long we had been in the
+// OLD phase, so once the current phase was older than dwellMs a single noisy
+// sample committed a switch instantly, and the next one switched back dwellMs
+// later. footPitchNorm is a 3-10 pixel signal, so that was most of what the
+// phase machine did — and every flip is a fresh phase cue about a movement the
+// patient had already finished.
+
+describe('phase hysteresis', () => {
+  /** A settled signal with a single-sample spike part way through. */
+  function withSpike(base, spikeAt, spikeTo, n) {
+    return Array.from({ length: n }, (_, i) => (i === spikeAt ? spikeTo : base));
+  }
+
+  it('does not commit a phase on one stray sample', () => {
+    const eng = makeArmRaiseEngine();
+    drive(eng, hold(25, 20), { feature: 'shoulderAngleL' });
+    const settled = eng.phase;
+
+    drive(eng, withSpike(25, 3, 88, 8), { feature: 'shoulderAngleL', startT: 5000 });
+    expect(eng.phase).toBe(settled);
+  });
+
+  it('still commits when the new phase is genuinely sustained', () => {
+    // Hysteresis must not become deafness: a real movement has to get through.
+    const eng = makeArmRaiseEngine();
+    drive(eng, hold(25, 20), { feature: 'shoulderAngleL' });
+    const settled = eng.phase;
+
+    drive(eng, [...ramp(25, 90, 10), ...hold(90, 30)],
+      { feature: 'shoulderAngleL', startT: 5000 });
+    expect(eng.phase).not.toBe(settled);
+  });
+
+  it('abandons a candidate that does not persist', () => {
+    // Two separate spikes toward different phases must not accumulate into one
+    // confirmed switch.
+    const eng = makeArmRaiseEngine();
+    drive(eng, hold(25, 20), { feature: 'shoulderAngleL' });
+    const settled = eng.phase;
+
+    drive(eng, [25, 88, 25, 60, 25, 88, 25, 25],
+      { feature: 'shoulderAngleL', startT: 5000 });
+    expect(eng.phase).toBe(settled);
+    expect(eng._candidatePhase).toBeNull();
+  });
+
+  it('cuts the cue churn a jittery signal produces', () => {
+    // The user-visible payoff: fewer phase flips means fewer cues about a
+    // movement that already happened.
+    const eng = makeArmRaiseEngine();
+    const jittery = Array.from({ length: 120 }, (_, i) =>
+      (i % 2 === 0 ? 28 : 24) + (i % 7 === 0 ? 40 : 0));
+    const out = drive(eng, jittery, { feature: 'shoulderAngleL' });
+    expect(cueChanges(out).length).toBeLessThanOrEqual(3);
   });
 });

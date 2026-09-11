@@ -68,7 +68,23 @@ const MAX_REJECT_STREAK_MS = 250;
 // the primary feature's full range, so range / (repDuration/2) is the pace the
 // exercise was demonstrated at. Anything far above that is not a rep the engine
 // can measure - which is exactly the regime where reps were being lost.
-const TOO_FAST_RATIO = 2.0;
+// Tempo is judged on REP DURATION, not on instantaneous rate.
+//
+// The first implementation compared a smoothed |d(primary)/dt| against the
+// template's AVERAGE sweep rate. That is a category error, and SeatedDorsiflexion
+// exposed it: a sine-like movement's peak rate is ~1.6x its own average even at
+// identical pace, and footPitchNorm is a 3-10 pixel signal whose |delta|/dt
+// spikes on noise alone. Measured on device, a patient whose reps took
+// 3.3-13.7s against a 4.1s demonstration - i.e. mostly SLOWER - was told to slow
+// down 14 times, making it the most frequent cue in the session.
+//
+// Rep duration compares like with like, is unit-free, and cannot be moved by
+// keypoint jitter.
+const TOO_FAST_FRACTION = 0.6;
+
+// How long a "too fast" verdict stands after the rep that earned it. Long enough
+// to be spoken and acted on, short enough that slowing down clears it.
+const TOO_FAST_HOLD_MS = 2500;
 
 // Cue importance, low number = more important. The routine gap is per-cue, but a
 // cooldown started by a trivial cue must not silence an important one: a phase
@@ -84,10 +100,10 @@ const TIER_RANK = {
   safety: 0, tempo: 1, rep: 2, guardrail: 3, form: 4, range: 5, phase: 6,
 };
 
-// Rate is noisy per sample; smooth it before comparing, and require the patient
-// to be genuinely moving before calling anything "too fast".
+// _featureRate is kept purely as a diagnostic now - it is what made the old
+// instantaneous comparison look plausible, and seeing it next to repDur in the
+// logs is how that mistake was caught.
 const RATE_EMA = 0.4;
-const MIN_RATE_FOR_TEMPO = 1e-6;
 
 // Resolve a startCue against the active side. Accepts either a plain string (returned
 // as-is) or an object keyed by side ('left' | 'right' | 'alternating' | 'both').
@@ -186,6 +202,10 @@ export class DTWPhaseMachine {
     this._featureRate = 0;      // smoothed |d(primary)/dt|, feature-units per second
     this._lastCueTier = 'phase'; // importance of the cue that started the cooldown
     this._announcedRep = -1;     // rep number already spoken
+    this._lastRepAt = 0;         // when the previous rep closed
+    this._candidatePhase = null; // phase waiting to be confirmed
+    this._candidateSince = 0;
+    this._tooFastUntil = 0;      // verdict stands until this time
 
     // Time-mode timers
     this.holdStartMs = null;
@@ -401,6 +421,10 @@ export class DTWPhaseMachine {
     this._featureRate = 0;
     this._lastCueTier = 'phase';
     this._announcedRep = -1;
+    this._lastRepAt = 0;
+    this._tooFastUntil = 0;
+    this._candidatePhase = null;
+    this._candidateSince = 0;
     this.dtw.reset();
     // Don't reset patient baseline on counter reset — it persists across the session
   }
@@ -519,7 +543,7 @@ export class DTWPhaseMachine {
         ` quality=${(result.quality ?? 0).toFixed(3)} tPos=${(result.templatePosition ?? 0).toFixed(2)}` +
         ` pf=${pf}=${pVal} (ref ${rMin}→${rMax}) rom=${(this.cycleFeatureMax - this.cycleFeatureMin).toFixed(1)}` +
         ` minRom=${this.minRomForRep.toFixed(1)} reps=${this.repCount}` +
-        ` rate=${this._featureRate.toFixed(0)}/s ref=${this.templateSweepRate.toFixed(0)}/s${this._movingTooFast() ? ' FAST' : ''}`
+        ` rate=${this._featureRate.toFixed(3)}/s repDur=${this.repDurationMs}ms${this._movingTooFast(now) ? ' FAST' : ''}`
       );
     }
 
@@ -538,11 +562,27 @@ export class DTWPhaseMachine {
         this.activeSideDuringCycle = null;
       }
     } else if (newPhase !== this.phase) {
-      if (now - this.lastPhaseEnterAt >= this.dwellMs) {
+      // Hysteresis: the CANDIDATE has to persist, not merely the incumbent.
+      //
+      // This used to test `now - lastPhaseEnterAt >= dwellMs`, which measures how
+      // long we have been in the OLD phase - so once the current phase was older
+      // than dwellMs, a single noisy sample committed a switch immediately, and
+      // the next noisy sample could switch back dwellMs later. On a 3-10 pixel
+      // signal like footPitchNorm that is most of what the phase machine did,
+      // and it is why a patient who had already lowered kept being told to lower:
+      // the phase was flipping under jitter, and each flip is a fresh phase cue.
+      if (newPhase !== this._candidatePhase) {
+        this._candidatePhase = newPhase;
+        this._candidateSince = now;
+      } else if (now - this._candidateSince >= this.dwellMs) {
         this.prevPhase = this.phase;
         this.phase = newPhase;
         this.lastPhaseEnterAt = now;
+        this._candidatePhase = null;
       }
+    } else {
+      // Back to where we already are: whatever was building is not happening.
+      this._candidatePhase = null;
     }
 
     // Track actual ROM of primary feature during current cycle
@@ -649,6 +689,7 @@ export class DTWPhaseMachine {
           // completed vs attempt is metadata for telemetry, not a counting gate.
           this.repCount++;
           repDelta = 1;
+          this._judgeTempo(now);
           this.lastActiveSide = this.activeSideDuringCycle;
           console.log(`[DTW] Rep ${this.repCount} | classification=${repClassification.completed ? 'completed' : 'attempt'} romPct=${((repClassification.romPct ?? 0) * 100).toFixed(0)}% details=`, repClassification.details);
         }
@@ -690,6 +731,7 @@ export class DTWPhaseMachine {
           // Always count — see primary-path comment above.
           this.repCount++;
           repDelta = 1;
+          this._judgeTempo(now);
           this.lastActiveSide = this.activeSideDuringCycle;
           console.log(`[DTW-backup] Rep ${this.repCount} | classification=${repClassification.completed ? 'completed' : 'attempt'} romPct=${((repClassification.romPct ?? 0) * 100).toFixed(0)}% details=`, repClassification.details);
         }
@@ -885,11 +927,26 @@ export class DTWPhaseMachine {
     return this.primaryFeatureRange / half;
   }
 
-  /** True when the patient is moving well above the demonstrated pace. */
-  _movingTooFast() {
-    const ref = this.templateSweepRate;
-    if (!ref || this._featureRate <= MIN_RATE_FOR_TEMPO) return false;
-    return this._featureRate > TOO_FAST_RATIO * ref;
+  /**
+   * Judge the rep that just closed. Called on the frame a rep is counted.
+   *
+   * Duration is measured rep-to-rep rather than from the cycle start, because a
+   * patient who pauses between reps is not moving fast - the pause is part of
+   * their cadence and counting it is what keeps this honest.
+   */
+  _judgeTempo(now) {
+    const prev = this._lastRepAt;
+    this._lastRepAt = now;
+    if (!prev || !this.repDurationMs) return;
+    const took = now - prev;
+    if (took < TOO_FAST_FRACTION * this.repDurationMs) {
+      this._tooFastUntil = now + TOO_FAST_HOLD_MS;
+    }
+  }
+
+  /** True while the most recent rep was completed faster than the demonstration. */
+  _movingTooFast(now = performance.now()) {
+    return now < this._tooFastUntil;
   }
 
   _formKeysFor(bodyPart) {
@@ -947,7 +1004,7 @@ export class DTWPhaseMachine {
     // reps landed 0.6-0.8s apart against a 1200ms latch, and "slow down" was
     // never once selected. Hearing why you are outrunning the tracker matters
     // more than hearing the number.
-    if (this._movingTooFast() && fb.tempo?.tooFast) {
+    if (this._movingTooFast(now) && fb.tempo?.tooFast) {
       return { say: fb.tempo.tooFast, tier: 'tempo' };
     }
 
@@ -1081,7 +1138,7 @@ export class DTWPhaseMachine {
     if (tier === 'phase') {
       // Someone moving fast does not need telling they are going up; the cue is
       // stale before it finishes being spoken.
-      if (this._movingTooFast()) return this.lastFeedback;
+      if (this._movingTooFast(now)) return this.lastFeedback;
       if (this.phase === this._lastPhaseCued) return this.lastFeedback;
       if (now - this._lastCueAt < PHASE_CUE_MIN_GAP_MS) return this.lastFeedback;
       this._lastPhaseCued = this.phase;
