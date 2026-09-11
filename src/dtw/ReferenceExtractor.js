@@ -531,7 +531,13 @@ export default function ReferenceExtractor() {
     // Exact rather than approximate: every universal feature is invariant under
     // a left-right reflection. Runs BEFORE labelling and before feature ranges
     // are computed, so both see the symmetric template.
-    const mirror = mirrorTemplateSides(template);
+    // `unilateral` for anything but a genuinely alternating exercise: the range
+    // test alone declared every foot family two-sided on a real recording,
+    // because an occluded far foot's tracking noise spans as much as the near
+    // foot's real movement. See mirrorTemplateSides for the measured numbers.
+    const mirror = mirrorTemplateSides(template, {
+      unilateral: EXERCISE_CONFIGS[exerciseName]?.side !== 'alternating',
+    });
 
     // Label the averaged template directly from its own signal.
     //

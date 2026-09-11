@@ -210,10 +210,10 @@ describe('clinical safety caps (the "raised too high" regression)', () => {
     const eng = new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
     const out = drive(eng, floorSession(-0.3), { feature: 'footPitchNormL' });
     const cues = out.map(r => r.feedback);
-    expect(cues.some(c => /check your phone position/i.test(c || ''))).toBe(true);
+    expect(cues.some(c => /having trouble tracking/i.test(c || ''))).toBe(true);
     // Silent for the grace window first - a patient who has not started yet is
     // not evidence of anything.
-    const firstAt = cues.findIndex(c => /check your phone position/i.test(c || ''));
+    const firstAt = cues.findIndex(c => /having trouble tracking/i.test(c || ''));
     expect(firstAt * FRAME_MS).toBeGreaterThanOrEqual(4000);
   });
 
@@ -224,7 +224,7 @@ describe('clinical safety caps (the "raised too high" regression)', () => {
     const out = drive(eng, floorSession(-0.3), { feature: 'footPitchNormL', frameMs: FRAME_MS });
     const emissions = out
       .map(r => r.feedback)
-      .filter((c, i, a) => c && c !== a[i - 1] && /check your phone position/i.test(c));
+      .filter((c, i, a) => c && c !== a[i - 1] && /having trouble tracking/i.test(c));
     expect(emissions.length).toBeLessThanOrEqual(2);
   });
 

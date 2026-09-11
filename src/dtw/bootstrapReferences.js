@@ -11,6 +11,7 @@ import { loadRefJsonFiles } from './references/index.js';
 import { getCachedReference, cacheReference } from './referenceStorage.js';
 import { getServiceUrl } from '../config.js';
 import { checkPhaseSeparation } from './referenceHealth.js';
+import { mirrorTemplateSides } from './videoFeatureExtractor.js';
 
 let _initialized = false;
 
@@ -81,6 +82,65 @@ export function applyCanonicalPolicy(ref, canonical) {
   return merged;
 }
 
+/**
+ * Repair a recorded reference whose idle side was never mirrored.
+ *
+ * mirrorTemplateSides used to decide per feature family whether both sides had
+ * genuinely been used, by comparing their ranges. On a real SeatedDorsiflexion
+ * recording that test declared every foot family two-sided - the occluded far
+ * foot's range reached 0.665 of the near foot's - and none of it was movement.
+ * A left-sided patient then ran against a template whose left foot was
+ * MediaPipe's guesses at a limb it could not see.
+ *
+ * The extractor no longer makes that guess, but references recorded before the
+ * fix are already on disk. Rather than ask for the demonstration to be recorded
+ * again - the recording is fine; only what was done with it was wrong - mirror
+ * at load and recompute the ranges, which are exactly the template's own spread.
+ *
+ * Only for exercises performed one side at a time. An alternating exercise is a
+ * genuinely two-sided recording and must be left alone.
+ */
+function repairUnmirroredSides(ref, canonical) {
+  if (!Array.isArray(ref?.template) || !ref.template.length) return ref;
+  if (!ref.provenance) return ref;                       // synthetic: already symmetric
+  if (canonical?.side === 'alternating') return ref;
+  if (!ref.provenance.bilateralFamilies?.length) return ref;
+
+  const template = ref.template.map(f => ({ ...f, features: { ...f.features } }));
+  const mirror = mirrorTemplateSides(template, { unilateral: true });
+  if (!mirror.mirrored.length) return ref;
+
+  const featureRanges = {};
+  for (const f of template) {
+    for (const [key, val] of Object.entries(f.features || {})) {
+      if (!Number.isFinite(val)) continue;
+      const r = featureRanges[key];
+      if (!r) featureRanges[key] = { min: val, max: val, range: 0 };
+      else { r.min = Math.min(r.min, val); r.max = Math.max(r.max, val); }
+    }
+  }
+  for (const r of Object.values(featureRanges)) r.range = r.max - r.min;
+
+  console.warn(
+    `[Bootstrap] "${ref.name}" — recorded on the ${ref.provenance.recordedSide} side with ` +
+    `${mirror.mirrored.length} famil${mirror.mirrored.length === 1 ? 'y' : 'ies'} left unmirrored ` +
+    `(${mirror.mirrored.map(m => m.base).join(', ')}). Mirroring at load: the idle side of a ` +
+    `one-sided recording is occlusion noise, not a second demonstration.`
+  );
+
+  return {
+    ...ref,
+    template,
+    featureRanges,
+    provenance: {
+      ...ref.provenance,
+      mirroredFamilies: mirror.mirrored.map(m => m.base),
+      bilateralFamilies: mirror.bilateral,
+      repairedAtLoad: true,
+    },
+  };
+}
+
 export function bootstrapAllReferences() {
   if (_initialized) return 0;
   _initialized = true;
@@ -102,7 +162,7 @@ export function bootstrapAllReferences() {
   const fileRefs = loadRefJsonFiles();
   let fileCount = 0;
 
-  for (const ref of fileRefs) {
+  for (let ref of fileRefs) {
     if (!ref?.name) {
       console.warn('[Bootstrap] Skipping .ref.json without "name" field');
       continue;
@@ -118,6 +178,11 @@ export function bootstrapAllReferences() {
       );
       continue;
     }
+    // Mirror before the health check and before registration, so phase
+    // separation and the engine both see the same symmetric template the
+    // extractor would produce today.
+    ref = repairUnmirroredSides(ref, refs[ref.name]);
+
     // Shape validation cannot catch a MIS-SEGMENTED recording. The engine derives
     // refStartValue and templateDirection from the phase labels, so a reference
     // whose effort phase has swallowed the whole movement inverts the direction

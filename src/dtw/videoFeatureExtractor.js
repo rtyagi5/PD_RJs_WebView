@@ -338,14 +338,41 @@ export function getTopFeatures(frames, topN = 5) {
  * A genuinely two-sided recording is left alone: if both sides moved comparably
  * there is nothing to copy and real data must not be overwritten.
  *
+ * `unilateral` exists because the range test above cannot do that job alone,
+ * and on a real recording it did not. A SeatedDorsiflexion demonstration
+ * recorded with the right side to camera produced these idle/active ratios
+ * against a 0.3 threshold:
+ *
+ *     footPitchNorm  0.176 / 0.265 = 0.665
+ *     ankleAngleToe   20.3 /  26.5 = 0.767
+ *     ankleAngleHeel  15.8 /  40.6 = 0.388
+ *
+ * so every foot family was declared "both sides genuinely used" and left
+ * unmirrored. None of it was movement. The far foot is occluded side-on, and
+ * MediaPipe's guesses at an occluded limb wander far enough to look like a real
+ * sweep - a range test cannot tell motion from noise, because both are range.
+ *
+ * A left-sided patient then ran against a template whose left foot was that
+ * noise: live footPitchNormL read -0.3 against a -0.077..0.099 band, DTW
+ * quality was 0.000 for the whole set, and reps were counted off jitter.
+ *
+ * For an exercise performed one side at a time the question does not arise -
+ * only one side was exercised, by definition, so the recorded side is the only
+ * valid template and the guess must not be made at all. Only genuinely
+ * alternating exercises are two-sided recordings.
+ *
  * @param {Array} template from buildTemplateFromReps (mutated in place)
  * @param {Object} [opts]
+ * @param {boolean} [opts.unilateral=false] the exercise is performed one side at
+ *   a time, so mirror every family from the recorded side without guessing
  * @param {number} [opts.dominanceRatio=0.3] quiet side must be under this share
- *   of the active side's range before it is treated as idle
+ *   of the active side's range before it is treated as idle. Ignored when
+ *   `unilateral`.
  * @returns {{ mirrored: Array<{base,from,to}>, bilateral: string[] }}
  */
 export function mirrorTemplateSides(template, opts = {}) {
   const dominanceRatio = opts.dominanceRatio ?? 0.3;
+  const unilateral = opts.unilateral === true;
   const result = { mirrored: [], bilateral: [] };
   if (!template?.length) return result;
 
@@ -369,18 +396,36 @@ export function mirrorTemplateSides(template, opts = {}) {
     if (/[LR]$/.test(key)) bases.add(key.slice(0, -1));
   }
 
+  // The demonstrator sat one way round for the whole recording, so which side
+  // they exercised is a single fact about the clip - not something to re-decide
+  // per feature family. Deciding it per family lets one noisy family mirror the
+  // wrong way. Each family votes by how lopsided it is, normalised so degrees
+  // and dimensionless ratios carry equal weight.
+  let recordedSide = null;
+  if (unilateral) {
+    let vote = 0;
+    for (const base of bases) {
+      const spanL = spanOf(`${base}L`);
+      const spanR = spanOf(`${base}R`);
+      const wider = Math.max(spanL, spanR);
+      if (wider <= 0) continue;
+      vote += (spanL - spanR) / wider;
+    }
+    if (vote !== 0) recordedSide = vote > 0 ? 'L' : 'R';
+  }
+
   for (const base of bases) {
     const L = `${base}L`;
     const R = `${base}R`;
     const spanL = spanOf(L);
     const spanR = spanOf(R);
-    const active = spanL >= spanR ? L : R;
+    const active = recordedSide ? `${base}${recordedSide}` : (spanL >= spanR ? L : R);
     const idle = active === L ? R : L;
     const activeSpan = Math.max(spanL, spanR);
     const idleSpan = Math.min(spanL, spanR);
 
     if (activeSpan <= 0) continue;                       // nothing moved either side
-    if (idleSpan / activeSpan >= dominanceRatio) {        // both sides genuinely used
+    if (!unilateral && idleSpan / activeSpan >= dominanceRatio) { // both sides genuinely used
       result.bilateral.push(base);
       continue;
     }

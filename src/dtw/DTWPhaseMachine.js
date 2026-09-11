@@ -125,9 +125,12 @@ const OFF_CALIBRATION_RANGE_MULTIPLE = 1.0;
 const BREACH_REPORT_MS = 1500;
 const SUSTAINED_BREACH_REPEAT_MS = 6000;
 
-// Names the action before the reason. A patient who hears only "that isn't
-// reading" does not know what to do about it.
-const OFF_CALIBRATION_CUE = 'Check your phone position, the movement is not reading correctly';
+// Deliberately does NOT name a cause. The engine can see that the numbers do
+// not describe the movement, but not why: a moved camera and a reference whose
+// idle side is occlusion noise look identical from here, and the first version
+// of this cue confidently blamed the phone when the phone was fine. Report the
+// symptom, tell them to stop, and leave the diagnosis to the logs.
+const OFF_CALIBRATION_CUE = 'Hold on, I am having trouble tracking this movement';
 
 // _featureRate is kept purely as a diagnostic now - it is what made the old
 // instantaneous comparison look plausible, and seeing it next to repDur in the
