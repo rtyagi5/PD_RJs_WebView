@@ -367,6 +367,9 @@ export class DTWPhaseMachine {
       phases: this.phaseOrder.map(id => ({ id })),
       rep: { from: this.repCycle.start, to: this.repCycle.effort },
       framing: reference.framing || undefined,
+      // The quality gates need to know which limb is being measured, or they
+      // will happily pass a well-tracked foot that the engine is not using.
+      side: this.side,
       startCue: resolveStartCue(reference.startCue, this.side) || undefined,
     };
 

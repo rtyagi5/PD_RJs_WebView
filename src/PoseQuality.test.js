@@ -381,3 +381,64 @@ describe('drawTargetBox agrees with checkDistance', () => {
     expect(heights[1]).toBeCloseTo(H * 0.60, 5);
   });
 });
+
+// ─── The foot gate must check the foot being MEASURED ────────────────────────
+// Measured on device during SeatedDorsiflexion: the patient sat side-on with
+// their right toward the camera while the activity was configured for 'left'.
+// Right tracked at 0.98 confidence and satisfied the gate; left - the far,
+// occluded foot - was at 0.65, and the engine counted ten reps off it. The
+// session looked clean and was measuring a limb the model could barely see.
+
+describe('checkFootTracking side selection', () => {
+  /** knee/ankle/heel/toe for one side, with a plausible foot span. */
+  function foot(side, { score = 0.9, x = 100 } = {}) {
+    return [
+      { name: `${side}_knee`,       x, y: 100, score },
+      { name: `${side}_ankle`,      x, y: 180, score },
+      { name: `${side}_heel`,       x: x - 5, y: 190, score },
+      { name: `${side}_foot_index`, x: x + 30, y: 188, score },
+    ];
+  }
+
+  const opts = { requireFoot: true };
+
+  it('refuses when the measured foot is missing, however good the other is', () => {
+    const kps = foot('right', { score: 0.98 });
+    const res = checkFootTracking(kps, { ...opts, side: 'left' });
+    expect(res.status).toBe('no_foot');
+    expect(res.message).toContain('left');
+  });
+
+  it('passes when the measured foot is the one that is visible', () => {
+    const kps = foot('left', { score: 0.9 });
+    expect(checkFootTracking(kps, { ...opts, side: 'left' }).status).toBe('good');
+  });
+
+  it('names the side so the patient knows which foot to move', () => {
+    const kps = [...foot('right', { score: 0.98 }), ...foot('left', { score: 0.1 })];
+    const res = checkFootTracking(kps, { ...opts, side: 'left' });
+    expect(res.message).toContain('left');
+    expect(res.message).not.toContain('right');
+  });
+
+  it('still accepts either foot when no side is specified', () => {
+    // Bilateral exercises keep the old behaviour.
+    const kps = foot('right', { score: 0.9 });
+    expect(checkFootTracking(kps, opts).status).toBe('good');
+  });
+
+  it('does not let the other foot mask an implausible measured one', () => {
+    // A foot span wider than the shank means the keypoints have latched onto
+    // something that is not a foot - a chair leg, typically.
+    const bad = [
+      { name: 'left_knee',       x: 100, y: 100, score: 0.9 },
+      { name: 'left_ankle',      x: 100, y: 120, score: 0.9 },
+      { name: 'left_heel',       x: 60,  y: 125, score: 0.9 },
+      { name: 'left_foot_index', x: 200, y: 125, score: 0.9 },
+    ];
+    const kps = [...foot('right', { score: 0.98 }), ...bad];
+    const res = checkFootTracking(kps, { ...opts, side: 'left' });
+    expect(res.status).toBe('implausible');
+    expect(res.side).toBe('left');
+  });
+});

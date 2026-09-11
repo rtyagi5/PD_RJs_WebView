@@ -287,10 +287,26 @@ export function checkFootTracking(keypoints, overrides = {}) {
     ? overrides.footSpanMaxRatio
     : FOOT_SPAN_MAX_RATIO;
 
+  // Which foot the exercise actually measures. A one-sided exercise must verify
+  // THAT foot, not any foot.
+  //
+  // This gate used to accept the first complete foot it found. Measured on
+  // device: a patient sat side-on with their right toward the camera while the
+  // activity was configured for 'left'. The right foot tracked at 0.98
+  // confidence and satisfied the gate; the left - the far, occluded one - was at
+  // 0.65, and the engine counted ten reps off a foot it could barely see. A
+  // session that looks clean and is measuring the wrong limb is worse than one
+  // that refuses to start.
+  const wanted = overrides.side === 'left' || overrides.side === 'right'
+    ? overrides.side
+    : null;
+  const groups = wanted ? FOOT_GROUPS.filter(g => g.side === wanted) : FOOT_GROUPS;
+  const sideWord = wanted ? `${wanted} ` : '';
+
   let sawCompleteFoot = false;
   let worst = { side: null, spanRatio: NaN };
 
-  for (const g of FOOT_GROUPS) {
+  for (const g of groups) {
     const knee  = kp(keypoints, g.knee);
     const ankle = kp(keypoints, g.ankle);
     const heel  = kp(keypoints, g.heel);
@@ -306,7 +322,7 @@ export function checkFootTracking(keypoints, overrides = {}) {
     sawCompleteFoot = true;
     const spanRatio = span / shank;
 
-    // One good foot is all the exercise needs.
+    // Good enough: for a one-sided exercise this is the measured foot.
     if (spanRatio <= maxRatio) {
       return { status: 'good', message: '', side: g.side, spanRatio };
     }
@@ -318,7 +334,7 @@ export function checkFootTracking(keypoints, overrides = {}) {
   if (!sawCompleteFoot) {
     return {
       status: 'no_foot',
-      message: 'Make sure your whole foot is in view, from knee to toes',
+      message: `Make sure your whole ${sideWord}foot is in view, from knee to toes`,
       side: null,
       spanRatio: NaN,
     };
@@ -326,7 +342,7 @@ export function checkFootTracking(keypoints, overrides = {}) {
 
   return {
     status: 'implausible',
-    message: 'Move your foot away from the chair legs so it can be tracked',
+    message: `Move your ${sideWord}foot away from the chair legs so it can be tracked`,
     side: worst.side,
     spanRatio: worst.spanRatio,
   };
@@ -360,7 +376,7 @@ export function runAllChecks(keypoints, frameW, frameH, spec) {
   const angle      = checkCameraAngle(keypoints, frameW, frameH, view, framing.instruction);
   const roll       = checkCameraRoll(keypoints, view, framing);
   const visibility = checkVisibility(keypoints, framing.requiredKeypoints);
-  const foot       = checkFootTracking(keypoints, framing);
+  const foot       = checkFootTracking(keypoints, { ...framing, side: spec?.side });
   const lighting   = checkLighting(keypoints);
 
   const checks = [
