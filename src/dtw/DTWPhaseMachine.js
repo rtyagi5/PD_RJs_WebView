@@ -100,6 +100,35 @@ const TIER_RANK = {
   safety: 0, tempo: 1, rep: 2, guardrail: 3, form: 4, range: 5, phase: 6,
 };
 
+// A patient cannot hold a posture a third of a range past the reference for a
+// whole set, so a reading that is NEVER inside the envelope is not a patient
+// exceeding a limit - it is the wrong instrument pointed at the right movement.
+// Measured on device: the phone was moved from a table to the floor (which
+// genuinely improved foot keypoint confidence), and footPitchNormL - a raw
+// image-space vertical ratio, not a viewpoint-invariant angle - then sat at
+// -0.3 against a reference band of -0.077..0.099 and a clinical floor of -0.12
+// for the entire set. The safety check therefore fired on essentially every
+// frame, and because safety sits above the rep announcement in the ladder it
+// starved the count: the patient heard "1" and then "4".
+//
+// So a cap breach only counts once the feature has been seen INSIDE its limits
+// at least once. Until then the setup is what is wrong, and saying
+// "that's far enough" to someone who has not moved is worse than saying
+// nothing - it teaches them to distrust the coaching.
+const OFF_CALIBRATION_GRACE_MS = 4000;
+const OFF_CALIBRATION_RANGE_MULTIPLE = 1.0;
+
+// A breach that is continuously true is one fact, not one fact per frame. Speak
+// it for a window, go quiet, and repeat only if it is still true much later -
+// which also lets the rest of the ladder (the rep number especially) through in
+// between, instead of being starved by a latched safety cue.
+const BREACH_REPORT_MS = 1500;
+const SUSTAINED_BREACH_REPEAT_MS = 6000;
+
+// Names the action before the reason. A patient who hears only "that isn't
+// reading" does not know what to do about it.
+const OFF_CALIBRATION_CUE = 'Check your phone position, the movement is not reading correctly';
+
 // _featureRate is kept purely as a diagnostic now - it is what made the old
 // instantaneous comparison look plausible, and seeing it next to repDur in the
 // logs is how that mistake was caught.
@@ -310,6 +339,7 @@ export class DTWPhaseMachine {
     this.cycleFeatureMax = -Infinity;
     this.cycleSummary = {};
     this.cycleCapBreaches = []; // { <featureKey>: { min, max } } for the in-flight rep
+    this._capState = new Map(); // featureKey -> { seenInside, firstSampleAt, breachStartedAt }
     console.log(`[DTW] Primary feature: ${bestKey} range=${bestRange.toFixed(1)} minROM=${this.minRomForRep.toFixed(1)} side=${this.side}`);
 
     // Effort-adjacent phases: include transition phases leading to the effort phase
@@ -411,6 +441,7 @@ export class DTWPhaseMachine {
     this.cycleFeatureMax = -Infinity;
     this.cycleSummary = {};
     this.cycleCapBreaches = []; // { <featureKey>: { min, max } } for the in-flight rep
+    this._capState = new Map(); // featureKey -> { seenInside, firstSampleAt, breachStartedAt }
     this.lastActiveSide = null;
     this.activeSideDuringCycle = null;
     this._repAnnouncedUntil = 0;
@@ -518,6 +549,7 @@ export class DTWPhaseMachine {
     // A spoken cue alone is not enough here: it is gone as soon as the next one
     // replaces it, and a patient looking at their own skeleton will not hear it
     // over the sound of the exercise.
+    this._updateCapState(features, now);
     const liveCapBreaches = this._capBreaches(features);
     if (this.cycleState !== 'idle') {
       for (const b of liveCapBreaches) {
@@ -961,33 +993,127 @@ export class DTWPhaseMachine {
     return sided.length ? sided : all;
   }
 
-  _capBreaches(features) {
+  /** The breaches this one cap records for one value. Pure - no state touched. */
+  _breachesForCap(cap, v) {
     const out = [];
-    for (const cap of this.clinicalCaps) {
-      const v = features[cap.key];
-      if (!Number.isFinite(v)) continue;
-      if (cap.max !== null && v > cap.max) {
-        out.push({ key: cap.key, value: v, bound: 'max', limit: cap.max, source: 'clinicalCap' });
-      } else if (cap.min !== null && v < cap.min) {
-        out.push({ key: cap.key, value: v, bound: 'min', limit: cap.min, source: 'clinicalCap' });
-      }
+    if (cap.max !== null && v > cap.max) {
+      out.push({ key: cap.key, value: v, bound: 'max', limit: cap.max, source: 'clinicalCap' });
+    } else if (cap.min !== null && v < cap.min) {
+      out.push({ key: cap.key, value: v, bound: 'min', limit: cap.min, source: 'clinicalCap' });
     }
     // Patient-specific envelope (only meaningful once the baseline has locked).
     if (this.patientBaseline && !this.patientBaseline.isCalibrating) {
-      for (const cap of this.clinicalCaps) {
-        const v = features[cap.key];
-        if (!Number.isFinite(v)) continue;
-        const verdict = this.patientBaseline.checkSafety(cap.key, v);
-        if (verdict && verdict.safe === false) {
-          out.push({ key: cap.key, value: v, bound: 'envelope', limit: null, source: 'baselineEnvelope' });
-        }
+      const verdict = this.patientBaseline.checkSafety(cap.key, v);
+      if (verdict && verdict.safe === false) {
+        out.push({ key: cap.key, value: v, bound: 'envelope', limit: null, source: 'baselineEnvelope' });
       }
     }
     return out;
   }
 
-  _exceedsClinicalCap(features) {
-    return this._capBreaches(features).length > 0;
+  /**
+   * Track, per capped feature, whether the live signal has ever read inside its
+   * limits, and when the current excursion began.
+   *
+   * Called exactly once per step, before anything reads the result, so that the
+   * two readers below - `_capBreaches` for the skeleton and rep flagging,
+   * `_exceedsClinicalCap` for speech - stay pure and agree with each other. An
+   * earlier draft latched inside `_capBreaches` itself, which is called twice
+   * per step, so the second call would have seen the first call's latch and
+   * silently suppressed a real breach.
+   */
+  _updateCapState(features, now = performance.now()) {
+    for (const cap of this.clinicalCaps) {
+      const v = features[cap.key];
+      if (!Number.isFinite(v)) continue;
+      let state = this._capState.get(cap.key);
+      if (!state) {
+        state = { seenInside: false, firstSampleAt: now, breachStartedAt: 0 };
+        this._capState.set(cap.key, state);
+      }
+      if (this._breachesForCap(cap, v).length === 0) {
+        state.seenInside = true;
+        state.breachStartedAt = 0;
+      } else if (!state.breachStartedAt) {
+        state.breachStartedAt = now;
+      }
+    }
+  }
+
+  /**
+   * How far outside its reference range a feature currently sits, measured in
+   * whole reference ranges. 0 while inside, and 0 when we have no range to
+   * judge against - which keeps the unknown case warning rather than silent.
+   */
+  _excursionRanges(key, v) {
+    const r = this.featureRanges[key];
+    if (!r || !(r.range > 0) || !Number.isFinite(v)) return 0;
+    if (v > r.max) return (v - r.max) / r.range;
+    if (v < r.min) return (r.min - v) / r.range;
+    return 0;
+  }
+
+  /**
+   * True when this reading is better explained by the wrong camera than by the
+   * patient: it has never once been inside the limit, AND it sits further
+   * outside the reference range than the movement's own full range.
+   *
+   * Both halves are load-bearing, and an earlier draft that used only the first
+   * half was wrong. A patient who begins a set already holding their arm above
+   * the cap has also "never been inside", and they genuinely need telling - at
+   * 110 degrees against a 30-90 template that is a third of a range out, an
+   * entirely believable posture. The device failure was 1.7 ranges out, which
+   * no ankle can reach. The size of the excursion is what separates a hurt
+   * patient from an instrument measuring a different quantity.
+   */
+  _misreading(key, v) {
+    if (this._capState.get(key)?.seenInside === true) return false;
+    return this._excursionRanges(key, v) >= OFF_CALIBRATION_RANGE_MULTIPLE;
+  }
+
+  /**
+   * The primary feature has been misread for long enough that the patient not
+   * having started yet cannot explain it.
+   */
+  _offCalibration(features, now = performance.now()) {
+    if (!this.primaryFeature) return false;
+    const state = this._capState.get(this.primaryFeature);
+    if (!state || state.seenInside) return false;
+    if (now - state.firstSampleAt < OFF_CALIBRATION_GRACE_MS) return false;
+    return this._misreading(this.primaryFeature, features?.[this.primaryFeature]);
+  }
+
+  _capBreaches(features) {
+    const out = [];
+    for (const cap of this.clinicalCaps) {
+      const v = features[cap.key];
+      if (!Number.isFinite(v)) continue;
+      // A reading this far outside the reference band, that has never once been
+      // inside it, describes the camera rather than the patient. Honouring it
+      // would paint the skeleton red for the entire set and flag every rep, on
+      // evidence that says nothing about how they moved.
+      if (this._misreading(cap.key, v)) continue;
+      out.push(...this._breachesForCap(cap, v));
+    }
+    return out;
+  }
+
+  /**
+   * The speech-facing view of the same breaches. A breach that stays true is one
+   * fact, not one fact per frame: say it for a window, go quiet, and repeat only
+   * if it is still true much later. The silence matters as much as the cue -
+   * safety sits above the rep announcement in the ladder, so a permanently
+   * latched warning starves the count, which on device is why the patient heard
+   * "1" and then "4".
+   */
+  _exceedsClinicalCap(features, now = performance.now()) {
+    const breaches = this._capBreaches(features);
+    if (!breaches.length) return false;
+    return breaches.some(b => {
+      const startedAt = this._capState.get(b.key)?.breachStartedAt || 0;
+      if (!startedAt) return true;
+      return ((now - startedAt) % SUSTAINED_BREACH_REPEAT_MS) < BREACH_REPORT_MS;
+    });
   }
 
   _selectFeedback(dtwResult, features, now = performance.now()) {
@@ -997,8 +1123,21 @@ export class DTWPhaseMachine {
     // 0. Safety ceiling — HIGHEST priority, above the rep announcement. A patient
     // moving past a clinical limit needs to hear it immediately; suppressing it
     // behind the rep number is how "don't raise above 90°" went silent.
-    if (this._exceedsClinicalCap(features) && fb.range?.tooMuch) {
+    if (this._exceedsClinicalCap(features, now) && fb.range?.tooMuch) {
       return { say: fb.range.tooMuch, tier: 'safety' };
+    }
+
+    // 0a. Setup fault. Said at safety tier because it is the only thing worth
+    // hearing while it is true - nothing measured from this camera means what
+    // the reference says it means, so every cue below would be coaching noise.
+    // Paced by the same sustained-breach window as an envelope breach, for the
+    // same reason: it is one fact, not one fact per frame.
+    if (this._offCalibration(features, now)) {
+      const startedAt = this._capState.get(this.primaryFeature)?.firstSampleAt || 0;
+      const elapsed = now - startedAt - OFF_CALIBRATION_GRACE_MS;
+      if ((elapsed % SUSTAINED_BREACH_REPEAT_MS) < BREACH_REPORT_MS) {
+        return { say: OFF_CALIBRATION_CUE, tier: 'safety' };
+      }
     }
 
     // 0b. Tempo. This sits ABOVE the rep announcement on purpose. A patient

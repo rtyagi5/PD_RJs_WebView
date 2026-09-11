@@ -186,6 +186,91 @@ describe('clinical safety caps (the "raised too high" regression)', () => {
     expect(eng._exceedsClinicalCap({ footPitchNormL: -0.05 })).toBe(false);
   });
 
+  // ---- The dorsiflexion-on-the-floor session ------------------------------
+  //
+  // The patient moved the phone from a table to the floor, which genuinely
+  // improved foot keypoint confidence, and footPitchNormL - a raw image-space
+  // vertical ratio rather than a viewpoint-invariant angle - then read -0.3 for
+  // the whole set against a reference band of -0.077..0.099 and a clinical
+  // floor of -0.12. They heard "That's far enough" twenty times without moving
+  // their toes, and the count jumped from 1 to 4.
+
+  const floorSession = v => Array(160).fill(v);
+
+  it('does not warn about a limit the signal has never been inside', () => {
+    const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+    const eng = new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
+    const out = drive(eng, floorSession(-0.3), { feature: 'footPitchNormL' });
+    const tooMuch = EXERCISE_CONFIGS.SeatedDorsiflexion.feedback.range.tooMuch;
+    expect(out.filter(r => r.feedback === tooMuch)).toHaveLength(0);
+  });
+
+  it('names the setup fault instead, once it is not explainable by a slow start', () => {
+    const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+    const eng = new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
+    const out = drive(eng, floorSession(-0.3), { feature: 'footPitchNormL' });
+    const cues = out.map(r => r.feedback);
+    expect(cues.some(c => /check your phone position/i.test(c || ''))).toBe(true);
+    // Silent for the grace window first - a patient who has not started yet is
+    // not evidence of anything.
+    const firstAt = cues.findIndex(c => /check your phone position/i.test(c || ''));
+    expect(firstAt * FRAME_MS).toBeGreaterThanOrEqual(4000);
+  });
+
+  it('says the setup fault a handful of times, not once per frame', () => {
+    const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+    const eng = new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
+    // 30 seconds at 30fps. The device log had 20 safety cues in 26 seconds.
+    const out = drive(eng, floorSession(-0.3), { feature: 'footPitchNormL', frameMs: FRAME_MS });
+    const emissions = out
+      .map(r => r.feedback)
+      .filter((c, i, a) => c && c !== a[i - 1] && /check your phone position/i.test(c));
+    expect(emissions.length).toBeLessThanOrEqual(2);
+  });
+
+  it('still warns when the patient really does cross a limit they were inside', () => {
+    const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+    const eng = new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
+    const tooMuch = EXERCISE_CONFIGS.SeatedDorsiflexion.feedback.range.tooMuch;
+    // Rest at a normal flat-foot value first, then dorsiflex well past -0.12.
+    const out = drive(eng, [...hold(0.05, 20), ...ramp(0.05, -0.25, 20), ...hold(-0.25, 20)],
+      { feature: 'footPitchNormL' });
+    expect(out.some(r => r.feedback === tooMuch)).toBe(true);
+  });
+
+  it('lets the rep number through instead of being starved by a latched warning', () => {
+    // The count jumping 1 -> 4 was not a counting bug: safety sits above the rep
+    // announcement in the ladder, so a permanently true warning meant reps 2 and
+    // 3 never reached the announce branch at all.
+    const eng = makeArmRaiseEngine();
+    const overshootRep = [
+      ...hold(30, 8), ...ramp(30, 130, 12), ...hold(130, 40), ...ramp(130, 30, 12), ...hold(30, 8),
+    ];
+    const out = drive(eng, [...overshootRep, ...overshootRep], { feature: 'shoulderAngleL' });
+    const spoken = out.map(r => r.feedback).filter((c, i, a) => c && c !== a[i - 1]);
+    expect(eng.repCount).toBe(2);
+    // Every rep the engine counted was also announced.
+    for (let n = 1; n <= eng.repCount; n += 1) {
+      expect(`rep ${n} announced: ${spoken.includes(String(n))}`).toBe(`rep ${n} announced: true`);
+    }
+  });
+
+  it('still warns on a believable overshoot held from the very first frame', () => {
+    // The boundary is the SIZE of the excursion, not merely "never inside".
+    // 110 degrees against a 30-90 template is a third of a range out: an
+    // arm someone can really be holding. -0.3 on a 0.2 foot-pitch range is not.
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, hold(110, 40), { feature: 'shoulderAngleL' });
+    expect(out.some(r => r.capBreaches.length > 0)).toBe(true);
+  });
+
+  it('keeps the skeleton honest: no red for a reading that describes the camera', () => {
+    const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+    const eng = new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
+    drive(eng, floorSession(-0.3), { feature: 'footPitchNormL' });
+    expect(eng._capBreaches({ footPitchNormL: -0.3 })).toHaveLength(0);
+  });
+
   it('defines a tooMuch message for every exercise', () => {
     for (const [name, cfg] of Object.entries(EXERCISE_CONFIGS)) {
       expect(`${name}:${!!cfg.feedback?.range?.tooMuch}`).toBe(`${name}:true`);
