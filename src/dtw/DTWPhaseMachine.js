@@ -68,14 +68,20 @@ const MAX_REJECT_STREAK_MS = 250;
 // the primary feature's full range, so range / (repDuration/2) is the pace the
 // exercise was demonstrated at. Anything far above that is not a rep the engine
 // can measure - which is exactly the regime where reps were being lost.
-const TOO_FAST_RATIO = 2.5;
+const TOO_FAST_RATIO = 2.0;
 
 // Cue importance, low number = more important. The routine gap is per-cue, but a
 // cooldown started by a trivial cue must not silence an important one: a phase
 // cue fired at the top of a set was holding back "slow down" for 2.5s, which is
 // exactly the window in which the patient's speed was costing them reps.
+// Even an important cue has to let the previous one be heard. Without this the
+// priority bypass below turns into a floodgate: measured on device, rep numbers
+// (rank 1) jumped the queue at 82ms, 141ms and 149ms after the previous cue.
+// Safety is the only thing allowed to cut in with no floor at all.
+const MIN_CUE_FLOOR_MS = 900;
+
 const TIER_RANK = {
-  safety: 0, rep: 1, guardrail: 2, form: 3, range: 4, tempo: 5, phase: 6,
+  safety: 0, tempo: 1, rep: 2, guardrail: 3, form: 4, range: 5, phase: 6,
 };
 
 // Rate is noisy per sample; smooth it before comparing, and require the patient
@@ -179,6 +185,7 @@ export class DTWPhaseMachine {
     this._rejectingSince = 0;   // start of the current rejection streak, 0 when clear
     this._featureRate = 0;      // smoothed |d(primary)/dt|, feature-units per second
     this._lastCueTier = 'phase'; // importance of the cue that started the cooldown
+    this._announcedRep = -1;     // rep number already spoken
 
     // Time-mode timers
     this.holdStartMs = null;
@@ -393,6 +400,7 @@ export class DTWPhaseMachine {
     this._rejectingSince = 0;
     this._featureRate = 0;
     this._lastCueTier = 'phase';
+    this._announcedRep = -1;
     this.dtw.reset();
     // Don't reset patient baseline on counter reset — it persists across the session
   }
@@ -933,6 +941,16 @@ export class DTWPhaseMachine {
       return { say: fb.range.tooMuch, tier: 'safety' };
     }
 
+    // 0b. Tempo. This sits ABOVE the rep announcement on purpose. A patient
+    // moving too fast counts reps fast, so the announce latch was open almost
+    // continuously and masked this cue exactly when it was needed - on device,
+    // reps landed 0.6-0.8s apart against a 1200ms latch, and "slow down" was
+    // never once selected. Hearing why you are outrunning the tracker matters
+    // more than hearing the number.
+    if (this._movingTooFast() && fb.tempo?.tooFast) {
+      return { say: fb.tempo.tooFast, tier: 'tempo' };
+    }
+
     // 0a. Rep just counted: announce the number for REP_ANNOUNCE_MS.
     // Uses the caller-supplied clock (same one that set _repAnnouncedUntil) rather
     // than wall time, so the window is consistent and deterministic under test.
@@ -982,12 +1000,9 @@ export class DTWPhaseMachine {
       }
     }
 
-    // 3. Tempo. Above the demonstrated pace the patient is outrunning what the
-    // engine can measure, and reps start being dropped rather than miscounted -
-    // so this is a correction with real consequences, not a style note.
-    if (this._movingTooFast() && fb.tempo?.tooFast) {
-      return { say: fb.tempo.tooFast, tier: 'tempo' };
-    }
+    // 3. Tempo is handled above, with the safety ceiling - see _selectFeedback's
+    //    opening. A fast patient counts reps fast, and the rep-announce latch
+    //    below would otherwise mask the one cue that explains why.
 
     // 4. Phase feedback (default)
     if (fb.phase && this.phase) {
@@ -1029,6 +1044,13 @@ export class DTWPhaseMachine {
     // paced, but it does not reset the routine clock either - it is not coaching.
     if (tier === 'rep') {
       this._lastPriority = 'normal';
+      // Announce each number once. The rep-announce window re-wins the ladder
+      // whenever another cue interrupts it, which on device said "9" twice
+      // 141ms apart.
+      if (this._announcedRep === this.repCount) return this.lastFeedback;
+      this._announcedRep = this.repCount;
+      this._lastCueAt = now;
+      this._lastCueTier = 'rep';
       return say;
     }
 
@@ -1072,7 +1094,15 @@ export class DTWPhaseMachine {
     // important one.
     const outranksCooldown =
       (TIER_RANK[tier] ?? 9) < (TIER_RANK[this._lastCueTier] ?? 9);
-    if (!outranksCooldown && now - this._lastCueAt < FEEDBACK_MIN_GAP_MS) {
+    const since = now - this._lastCueAt;
+    // Tempo is exempt from the floor, as safety is. Measured: it was being
+    // selected correctly and then held 300ms behind a phase cue, so the one cue
+    // that explains why a fast patient is losing reps never reached them. The
+    // host coalesces on "latest wins" rather than interrupting, so an early
+    // tempo cue simply supersedes the phase cue that was queued - which is the
+    // right outcome, not a collision.
+    const floor = tier === 'tempo' ? 0 : MIN_CUE_FLOOR_MS;
+    if (outranksCooldown ? since < floor : since < FEEDBACK_MIN_GAP_MS) {
       return this.lastFeedback;
     }
 

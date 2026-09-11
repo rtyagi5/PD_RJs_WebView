@@ -58,6 +58,20 @@ export function applyCanonicalPolicy(ref, canonical) {
     }
     merged[field] = canonical[field];
   }
+
+  // timing is canonical because dwellMs/refractoryMs/matchThreshold are ENGINE
+  // TUNING and must not drift per recording. repDurationMs and fps are not
+  // tuning - they are measurements OF the recording, and the canonical default
+  // (2000ms) is simply wrong for a clip that took 3422ms. Using it made the
+  // tempo baseline 83 units/s where the real demonstrated pace was 48, so a
+  // patient moving at 2.5x the demonstration measured as only 1.4x and never
+  // triggered "slow down".
+  if (ref.timing && merged.timing) {
+    const observed = {};
+    if (ref.timing.repDurationMs != null) observed.repDurationMs = ref.timing.repDurationMs;
+    if (ref.timing.fps != null) observed.fps = ref.timing.fps;
+    if (Object.keys(observed).length) merged.timing = { ...merged.timing, ...observed };
+  }
   if (overridden.length) {
     console.warn(
       `[Bootstrap] "${ref.name}" — ignoring ${overridden.join(', ')} from the .ref.json; ` +

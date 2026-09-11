@@ -1071,11 +1071,34 @@ describe('tempo', () => {
   });
 
   it('says so when the patient outruns the template', () => {
+    // Three fast reps rather than one: a tempo cue still waits out
+    // MIN_CUE_FLOOR_MS behind whatever spoke last, and a single 720ms rep ends
+    // before that floor expires. Being a little late is correct for this cue -
+    // it is a correction, not a safety warning.
     const eng = makeArmRaiseEngine();
-    const out = drive(eng, [
+    const fast = [
       ...hold(25, 2), ...ramp(25, 92, 3), ...hold(92, 2), ...ramp(92, 25, 3), ...hold(25, 2),
-    ], { feature: 'shoulderAngleL', frameMs: 60 });
+    ];
+    const out = drive(eng, [...fast, ...fast, ...fast],
+      { feature: 'shoulderAngleL', frameMs: 60 });
     expect(out.some(r => r.feedback === TOO_FAST)).toBe(true);
+  });
+
+  it('reads the demonstrated pace off the recording, not a default', () => {
+    // timing is canonical because dwellMs/refractoryMs are engine tuning, but
+    // repDurationMs is a measurement OF the recording. Taking the 2000ms default
+    // for a clip that ran 3422ms put the baseline at 83 units/s instead of 48,
+    // so a patient at 2.5x the demonstration measured as 1.4x and stayed silent.
+    const canonical = { timing: { dwellMs: 200, refractoryMs: 300, repDurationMs: 2000 } };
+    const recorded = {
+      name: 'SideArmRaise',
+      timing: { dwellMs: 999, refractoryMs: 999, repDurationMs: 3422, fps: 15 },
+    };
+    const merged = applyCanonicalPolicy(recorded, canonical);
+    expect(merged.timing.dwellMs).toBe(200);        // tuning stays canonical
+    expect(merged.timing.refractoryMs).toBe(300);   // tuning stays canonical
+    expect(merged.timing.repDurationMs).toBe(3422); // observation survives
+    expect(merged.timing.fps).toBe(15);
   });
 
   it('does not fire on a stationary limb', () => {
