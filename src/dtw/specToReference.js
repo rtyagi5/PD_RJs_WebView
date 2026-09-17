@@ -856,40 +856,78 @@ export const EXERCISE_CONFIGS = {
     // rather than the two least reliable landmarks, and it is roll-invariant by
     // construction. The switch waits on measured values from a capture; the last
     // attempt failed because the template numbers were guessed.
-    primaryFeatureBase: 'footPitchNorm',
+    // Switched from footPitchNorm on measured evidence, which is what the note
+    // below always said this was waiting for.
+    //
+    // footPitchNorm is (toe.y - heel.y) / shank: a raw IMAGE-SPACE ratio. It
+    // reports how tilted the foot looks in the picture, not how far the ankle
+    // moved, so anything that changes the view changes the number. It caused
+    // three separate on-device failures - a phone moved to the floor reading
+    // -0.3 against a -0.077..0.099 band, a reference whose occluded far foot
+    // had to be mirrored, and finally a patient who extended their leg for
+    // seven reps and then sat back to a right angle, at which point the same
+    // ankle movement stopped registering and reps went uncounted.
+    //
+    // ankleAngleToe is the three-point angle knee->ankle->toe: the ankle joint
+    // angle itself. It is invariant to camera height, to camera roll, and to
+    // where the patient puts their leg, because it is measured AT the joint
+    // rather than against the image's vertical.
+    primaryFeatureBase: 'ankleAngleToe',
     // Direction only, no magnitudes. Which way ankleAngleToe moves follows from
     // anatomy and is true of every body; how FAR it moves does not, and guessing
     // that is what sank the previous attempt at this feature. Declaring the
     // direction lets the labeller anchor ankleAngleToe well enough to be trialled
     // on real footage, which is how the magnitudes should be obtained.
     // dorsiflexion: the toes come up toward the shin, closing the knee-ankle-toe angle.
-    featureDirections: { ankleAngleToe: -1, ankleAngleHeel: -1 },
+    // ankleAngleToe is now swept by the template itself, so its direction is read
+    // from there; these remain for the features the template does NOT sweep, so
+    // the labeller can still anchor them instead of refusing outright with
+    // "cannot tell which end of footPitchNormL is the rest posture".
+    featureDirections: { ankleAngleToe: -1, ankleAngleHeel: -1, footPitchNorm: -1 },
     minRomPct: 0.80,
     timing: { dwellMs: 400 },
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
-    // Dorsiflexion drives footPitchNorm NEGATIVE (toes up), so the ceiling is a `min`.
-    // Target is -0.05; past -0.12 the patient is lifting the whole leg rather than
-    // dorsiflexing the ankle. TODO clinical review.
-    clinicalCaps: { footPitchNorm: { min: -0.12 } },
+    // Dorsiflexion CLOSES the knee-ankle-toe angle (toes toward shin), so the
+    // ceiling is a `min` in degrees.
+    //
+    // The old footPitchNorm cap guarded against "lifting the whole leg rather
+    // than dorsiflexing", a failure this feature cannot have: lifting the leg
+    // moves knee and ankle together and leaves the angle at the ankle alone.
+    //
+    // 95 is provisional and deliberately generous - 10 degrees clear of the
+    // 104.7 the demonstration itself reaches. The previous cap sat 0.014 BELOW
+    // its own reference's peak, so every rep by a patient matching the demo was
+    // flagged; on one set "That's far enough" fired nine times in ten reps.
+    // A limit the demonstration breaches is not a limit. TODO clinical review.
+    clinicalCaps: { ankleAngleToe: { min: 95 } },
+    // Magnitudes measured from the recorded reference, per labelled phase
+    // (ankleAngleToeR): lowered 127.4-131.1, dorsiflexing down to 110.2,
+    // raised 104.7-107.6, lowering back to 128.6. Not guessed - guessing them
+    // is what sank the previous attempt at this feature.
     phases: [
       {
         id: 'lowered', weight: 1,
-        features: { footPitchNorm: { from: 0.12, to: 0.12 } },
+        features: { ankleAngleToe: { from: 129, to: 129 } },
       },
       {
         id: 'dorsiflexing', weight: 2,
-        features: { footPitchNorm: { from: 0.12, to: -0.05, easing: 'sine' } },
+        features: { ankleAngleToe: { from: 129, to: 105, easing: 'sine' } },
       },
       {
         id: 'raised', weight: 1,
-        features: { footPitchNorm: { from: -0.05, to: -0.05 } },
+        features: { ankleAngleToe: { from: 105, to: 105 } },
       },
       {
         id: 'lowering', weight: 2,
-        features: { footPitchNorm: { from: -0.05, to: 0.12, easing: 'sine' } },
+        features: { ankleAngleToe: { from: 105, to: 129, easing: 'sine' } },
       },
     ],
     repCycle: { from: 'lowered', to: 'raised' },
+    // The recorded demonstration sits at a knee of 97-110deg, not a right angle.
+    // Left at 90 because staticFeatures are posture HINTS for the synthetic
+    // template, and which knee angle this exercise should be performed at is a
+    // clinical question that has not been settled. It no longer changes what is
+    // measured: ankleAngleToe reports the same dorsiflexion either way.
     staticFeatures: { kneeAngle: 90, hipAngle: 90, trunkAngle: 168 },
     feedback: {
       phase: { lowered: 'Lift your toes up', raised: 'Nice — lower slowly' },

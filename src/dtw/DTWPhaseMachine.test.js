@@ -248,25 +248,31 @@ describe('clinical safety caps (the "raised too high" regression)', () => {
   it('honours a negative-direction cap (dorsiflexion uses min, not max)', () => {
     const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
     const eng = new DTWPhaseMachine(ref, { targetReps: 5, side: 'left' });
-    expect(eng._exceedsClinicalCap({ footPitchNormL: -0.2 })).toBe(true);
-    expect(eng._exceedsClinicalCap({ footPitchNormL: -0.05 })).toBe(false);
+    // Dorsiflexion CLOSES the knee-ankle-toe angle, so the ceiling is a `min`
+    // in degrees: 129 flat, 105 at the demonstrated peak, 95 the cap.
+    expect(eng._exceedsClinicalCap({ ankleAngleToeL: 90 })).toBe(true);
+    expect(eng._exceedsClinicalCap({ ankleAngleToeL: 110 })).toBe(false);
   });
 
-  // ---- The dorsiflexion-on-the-floor session ------------------------------
+  // ---- A primary feature reading far outside its own band -----------------
   //
-  // The patient moved the phone from a table to the floor, which genuinely
-  // improved foot keypoint confidence, and footPitchNormL - a raw image-space
-  // vertical ratio rather than a viewpoint-invariant angle - then read -0.3 for
-  // the whole set against a reference band of -0.077..0.099 and a clinical
-  // floor of -0.12. They heard "That's far enough" twenty times without moving
-  // their toes, and the count jumped from 1 to 4.
+  // Recorded against footPitchNormL, which read -0.3 all set against a band of
+  // -0.077..0.099 after the phone was moved to the floor: "That's far enough"
+  // twenty times without the patient moving their toes, and a count that jumped
+  // from 1 to 4. Dorsiflexion is counted on ankleAngleToe now, partly BECAUSE
+  // an angle at the joint cannot drift like that - but the guard is about any
+  // primary feature reading implausibly far outside its reference band, so it
+  // is exercised on whatever the engine actually counts.
+  //
+  // The band is ~105..129 (range 24), so 65 sits about 1.7 ranges below it -
+  // the same distance out as the -0.3 that prompted this.
 
   const floorSession = v => Array(160).fill(v);
 
   it('does not warn about a limit the signal has never been inside', () => {
     const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
     const eng = new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
-    const out = drive(eng, floorSession(-0.3), { feature: 'footPitchNormL' });
+    const out = drive(eng, floorSession(65), { feature: 'ankleAngleToeL' });
     const tooMuch = EXERCISE_CONFIGS.SeatedDorsiflexion.feedback.range.tooMuch;
     expect(out.filter(r => r.feedback === tooMuch)).toHaveLength(0);
   });
@@ -274,7 +280,7 @@ describe('clinical safety caps (the "raised too high" regression)', () => {
   it('names the setup fault instead, once it is not explainable by a slow start', () => {
     const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
     const eng = new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
-    const out = drive(eng, floorSession(-0.3), { feature: 'footPitchNormL' });
+    const out = drive(eng, floorSession(65), { feature: 'ankleAngleToeL' });
     const cues = out.map(r => r.feedback);
     expect(cues.some(c => /having trouble tracking/i.test(c || ''))).toBe(true);
     // Silent for the grace window first - a patient who has not started yet is
@@ -287,7 +293,7 @@ describe('clinical safety caps (the "raised too high" regression)', () => {
     const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
     const eng = new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
     // 30 seconds at 30fps. The device log had 20 safety cues in 26 seconds.
-    const out = drive(eng, floorSession(-0.3), { feature: 'footPitchNormL', frameMs: FRAME_MS });
+    const out = drive(eng, floorSession(65), { feature: 'ankleAngleToeL', frameMs: FRAME_MS });
     const emissions = out
       .map(r => r.feedback)
       .filter((c, i, a) => c && c !== a[i - 1] && /having trouble tracking/i.test(c));
@@ -298,9 +304,9 @@ describe('clinical safety caps (the "raised too high" regression)', () => {
     const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
     const eng = new DTWPhaseMachine(ref, { targetReps: 10, side: 'left' });
     const tooMuch = EXERCISE_CONFIGS.SeatedDorsiflexion.feedback.range.tooMuch;
-    // Rest at a normal flat-foot value first, then dorsiflex well past -0.12.
-    const out = drive(eng, [...hold(0.05, 20), ...ramp(0.05, -0.25, 20), ...hold(-0.25, 20)],
-      { feature: 'footPitchNormL' });
+    // Rest at a normal flat-foot angle first, then dorsiflex well past the 95 cap.
+    const out = drive(eng, [...hold(129, 20), ...ramp(129, 88, 20), ...hold(88, 20)],
+      { feature: 'ankleAngleToeL' });
     expect(out.some(r => r.feedback === tooMuch)).toBe(true);
   });
 
@@ -324,7 +330,7 @@ describe('clinical safety caps (the "raised too high" regression)', () => {
   it('still warns on a believable overshoot held from the very first frame', () => {
     // The boundary is the SIZE of the excursion, not merely "never inside".
     // 110 degrees against a 30-90 template is a third of a range out: an
-    // arm someone can really be holding. -0.3 on a 0.2 foot-pitch range is not.
+    // arm someone can really be holding. 1.7 ranges out is not.
     const eng = makeArmRaiseEngine();
     const out = drive(eng, hold(110, 40), { feature: 'shoulderAngleL' });
     expect(out.some(r => r.capBreaches.length > 0)).toBe(true);
@@ -568,16 +574,20 @@ describe('baseline-driven ROM gate', () => {
   });
 
   it('SeatedDorsiflexion: real limited ROM is uncountable on the template, countable on a baseline', () => {
-    // The exercise the spec calls out. minRomPct is 0.80 against a template that
-    // sweeps ~0.17, demanding ~0.14 of footPitchNorm, while real limited
-    // dorsiflexion produces 0.05-0.15.
+    // The exercise the spec calls out. minRomPct is 0.80, so the template gate
+    // demands four fifths of the demonstrated sweep - out of reach for genuinely
+    // limited dorsiflexion, which is the whole reason the baseline exists.
+    // Amplitude is derived from the gate rather than written in feature units,
+    // so this keeps testing the same thing if the feature changes again.
     const ref = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
     const probe = new DTWPhaseMachine(ref, { targetReps: 5, side: 'left' });
     const feature = probe.primaryFeature;
     const start = probe.refStartValue;
     const dir = probe.templateDirection || -1;
 
-    const amp = 0.06; // deliberately limited dorsiflexion
+    // Comfortably under the template gate but still above the absolute ROM floor,
+    // so this exercises the baseline rather than the floor that backstops it.
+    const amp = probe.minRomForRep * 0.65; // deliberately limited dorsiflexion
     expect(probe.minRomForRep).toBeGreaterThan(amp); // the template gate is out of reach
 
     const peak = start + dir * amp;
@@ -706,39 +716,78 @@ function withAnkleAngles(ref, range = 20) {
   };
 }
 
+/** Add an unrelated family with an enormous raw range, as a seated clip really has. */
+function withWildElbow(ref, range = 120) {
+  return {
+    ...ref,
+    featureRanges: {
+      ...ref.featureRanges,
+      elbowAngleL: { min: 40, max: 40 + range, range },
+      elbowAngleR: { min: 40, max: 40 + range, range },
+    },
+  };
+}
+
 describe('primary feature family pinning', () => {
   const dorsi = () => generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+  const calf  = () => generateReference(EXERCISE_CONFIGS.CalfRaisesSeated);
 
-  it('leaves the shipped foot exercises on footPitchNorm', () => {
-    const eng = new DTWPhaseMachine(dorsi(), { targetReps: 5, side: 'left' });
-    expect(eng.primaryFeature).toBe('footPitchNormL');
+  it('counts dorsiflexion on the ankle angle and calf raises on foot pitch', () => {
+    // Different instruments on purpose. Dorsiflexion rotates the foot about the
+    // ankle, which is what ankleAngleToe measures. A calf raise pivots the foot
+    // about the TOE, so the knee-ankle-toe angle is the wrong instrument there
+    // and footPitchNorm stays.
+    expect(new DTWPhaseMachine(dorsi(), { targetReps: 5, side: 'left' }).primaryFeature)
+      .toBe('ankleAngleToeL');
+    expect(new DTWPhaseMachine(calf(), { targetReps: 5, side: 'left' }).primaryFeature)
+      .toBe('footPitchNormL');
   });
 
-  it('would be hijacked by an angle family without the pin', () => {
-    // The hazard, demonstrated. Strip the pin and the bigger raw range wins.
-    const ref = withAnkleAngles(dorsi());
-    const unpinned = { ...ref, primaryFeatureBase: null };
-    const eng = new DTWPhaseMachine(unpinned, { targetReps: 5, side: 'left' });
-    expect(eng.primaryFeature).toBe('ankleAngleToeL');
+  it('would be hijacked by a bigger raw range without the pin', () => {
+    // The hazard, demonstrated. Raw ranges are not comparable across families -
+    // a 120-degree elbow beats any foot signal on magnitude alone - so stripping
+    // the pin hands each exercise the arm the patient happened to move.
+    for (const ref of [withWildElbow(dorsi()), withWildElbow(calf())]) {
+      const unpinned = { ...ref, primaryFeatureBase: null };
+      const eng = new DTWPhaseMachine(unpinned, { targetReps: 5, side: 'left' });
+      expect(eng.primaryFeature).toBe('elbowAngleL');
+    }
   });
 
-  it('holds the family when a recorded reference adds an angle', () => {
-    const eng = new DTWPhaseMachine(withAnkleAngles(dorsi()), { targetReps: 5, side: 'left' });
+  it('holds each family against that range with the pin in place', () => {
+    expect(new DTWPhaseMachine(withWildElbow(dorsi()), { targetReps: 5, side: 'left' }).primaryFeature)
+      .toBe('ankleAngleToeL');
+    expect(new DTWPhaseMachine(withWildElbow(calf()), { targetReps: 5, side: 'left' }).primaryFeature)
+      .toBe('footPitchNormL');
+  });
+
+  it('keeps the calf raises off an ankle angle a recording adds', () => {
+    // Exactly the silent switch the pin exists to prevent: a recorded reference
+    // carries every universal feature, and the ankle angle's raw range dwarfs
+    // footPitchNorm's.
+    const eng = new DTWPhaseMachine(withAnkleAngles(calf()), { targetReps: 5, side: 'left' });
     expect(eng.primaryFeature).toBe('footPitchNormL');
   });
 
   it('still resolves the side within the pinned family', () => {
     // What an exact primaryFeature pin could not do.
-    const eng = new DTWPhaseMachine(withAnkleAngles(dorsi()), { targetReps: 5, side: 'right' });
-    expect(eng.primaryFeature).toBe('footPitchNormR');
+    expect(new DTWPhaseMachine(withWildElbow(dorsi()), { targetReps: 5, side: 'right' }).primaryFeature)
+      .toBe('ankleAngleToeR');
+    expect(new DTWPhaseMachine(withAnkleAngles(calf()), { targetReps: 5, side: 'right' }).primaryFeature)
+      .toBe('footPitchNormR');
   });
 
-  it('pins every foot exercise, not just the dorsiflexion pair', () => {
-    for (const name of ['CalfRaisesSeated', 'CalfRaisesStanding',
-      'SeatedDorsiflexion', 'StandingDorsiflexion']) {
-      const ref = withAnkleAngles(generateReference(EXERCISE_CONFIGS[name]));
+  it('pins every foot exercise to the family it declares', () => {
+    const expected = {
+      CalfRaisesSeated:     'footPitchNormL',
+      CalfRaisesStanding:   'footPitchNormL',
+      SeatedDorsiflexion:   'ankleAngleToeL',
+      StandingDorsiflexion: 'footPitchNormL',
+    };
+    for (const [name, want] of Object.entries(expected)) {
+      const ref = withWildElbow(generateReference(EXERCISE_CONFIGS[name]));
       const eng = new DTWPhaseMachine(ref, { targetReps: 5, side: 'left' });
-      expect(`${name}:${eng.primaryFeature}`).toBe(`${name}:footPitchNormL`);
+      expect(`${name}:${eng.primaryFeature}`).toBe(`${name}:${want}`);
     }
   });
 
@@ -779,19 +828,49 @@ describe('velocity jump filter', () => {
     expect(eng._prevPrimaryValue).toBe(45);
   });
 
-  it('cannot fire at all for footPitchNorm, whose whole range is 0.17', () => {
-    // Documents a real gap rather than asserting correctness: the four foot
-    // exercises have NO velocity gate today. A chair-leg latch that throws
-    // footPitchNorm from 0.12 to 5.0 - roughly thirty times the entire range
-    // of the movement - is passed straight through, because 4.88 < 20.
+  it('is still inert for the calf raises, whose whole range is a 0.17 ratio', () => {
+    // Documents a real gap rather than asserting correctness. The budget is
+    // rate-based but floored at MIN_ARTEFACT_BUDGET, and for a dimensionless
+    // ratio that floor is about nineteen times the entire movement - so a
+    // chair-leg latch throwing footPitchNorm from 0.12 to 5.0 sails through.
     const eng = new DTWPhaseMachine(
-      generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion),
+      generateReference(EXERCISE_CONFIGS.CalfRaisesSeated),
       { targetReps: 5, side: 'left' }
     );
     expect(eng.primaryFeature).toBe('footPitchNormL');
     stepOnce(eng, 'footPitchNormL', 0.12, 1000);
     stepOnce(eng, 'footPitchNormL', 5.0, 1033);
     expect(eng._prevPrimaryValue).toBe(5.0);
+  });
+
+  it('now guards dorsiflexion, which the ratio feature never could', () => {
+    // The gap above closes for dorsiflexion by moving it onto an angle: degrees
+    // and the rate budget are in the same units, so a chair-leg latch that
+    // throws the ankle angle 40 degrees in one frame is finally rejected.
+    const eng = new DTWPhaseMachine(
+      generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion),
+      { targetReps: 5, side: 'left' }
+    );
+    expect(eng.primaryFeature).toBe('ankleAngleToeL');
+    stepOnce(eng, 'ankleAngleToeL', 129, 1000);
+    stepOnce(eng, 'ankleAngleToeL', 89, 1033);
+    expect(eng._prevPrimaryValue).toBe(129);
+  });
+
+  it('still passes a real dorsiflexion sweep at device frame rates', () => {
+    // The other half: the guard must not reject the movement itself. Poses
+    // arrive at ~10/s, so a brisk rep covers the 24-degree sweep in a few
+    // samples, and none of them may be masked.
+    const eng = new DTWPhaseMachine(
+      generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion),
+      { targetReps: 5, side: 'left' }
+    );
+    let t = 1000;
+    for (const v of [129, 121, 113, 105, 113, 121, 129]) {
+      stepOnce(eng, 'ankleAngleToeL', v, t);
+      t += 100; // 10 poses/s, as measured on device
+    }
+    expect(eng._prevPrimaryValue).toBe(129);
   });
 
   it('activates for a foot exercise the moment its primary is an angle', () => {
@@ -829,7 +908,7 @@ describe('canonical policy overlay', () => {
   it('keeps the feature pin a recording does not know about', () => {
     const recorded = { name: 'SeatedDorsiflexion', template: [], featureRanges: {} };
     expect(recorded.primaryFeatureBase).toBeUndefined();
-    expect(applyCanonicalPolicy(recorded, canonical).primaryFeatureBase).toBe('footPitchNorm');
+    expect(applyCanonicalPolicy(recorded, canonical).primaryFeatureBase).toBe('ankleAngleToe');
   });
 
   it('refuses to let a recording redefine the clinical caps', () => {

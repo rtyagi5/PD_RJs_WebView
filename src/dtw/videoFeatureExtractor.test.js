@@ -15,14 +15,25 @@ import { DTWPhaseMachine } from './DTWPhaseMachine';
 // labeller correctly refusing to guess, on a feature it should never have been
 // handed.
 
-/** Frames where the arms move a lot and the foot moves a little, as when seated. */
-function seatedDorsiflexionClip({ footSwing = 0.17, elbowSwing = 100 } = {}) {
+/**
+ * Frames where the arms move a lot and the foot moves a little, as when seated.
+ *
+ * Carries BOTH foot families, as a real clip does. The exercise declares
+ * ankleAngleToe - the angle at the ankle, which is what the resolver must pick -
+ * and footPitchNorm is present alongside it, sweeping a numerically tiny 0.17
+ * against an elbow's 100 degrees. That spread across families is the whole
+ * reason raw-range ranking is invalid.
+ */
+function seatedDorsiflexionClip({ ankleSwing = 24, footSwing = 0.17, elbowSwing = 100 } = {}) {
   const frames = [];
   for (let i = 0; i < 120; i++) {
-    const cycle = Math.sin((i / 120) * Math.PI * 6);
+    const cycle = Math.max(0, Math.sin((i / 120) * Math.PI * 6));
     frames.push({
       features: {
-        footPitchNormL: 0.12 - footSwing * Math.max(0, cycle),
+        // Dorsiflexion CLOSES the knee-ankle-toe angle: 129 flat, 105 toes-up.
+        ankleAngleToeL: 129 - ankleSwing * cycle,
+        ankleAngleToeR: 129,                        // far foot, barely tracked
+        footPitchNormL: 0.12 - footSwing * cycle,
         footPitchNormR: 0.12,                       // far foot, barely tracked
         elbowAngleL: 90 + (elbowSwing / 2) * Math.sin(i / 9),
         elbowAngleR: 90 + (elbowSwing / 2) * Math.sin(i / 11),
@@ -40,7 +51,7 @@ describe('resolvePrimaryFeatureKey', () => {
 
   it('picks the foot for a dorsiflexion clip where the arms move far more', () => {
     const key = resolvePrimaryFeatureKey(EXERCISE_CONFIGS.SeatedDorsiflexion, frames);
-    expect(key).toBe('footPitchNormL');
+    expect(key).toBe('ankleAngleToeL');
   });
 
   it('picks the side that actually moved', () => {
@@ -54,7 +65,7 @@ describe('resolvePrimaryFeatureKey', () => {
     // The whole point: no elbow range can outvote the declared family.
     const wild = seatedDorsiflexionClip({ elbowSwing: 100000 });
     expect(resolvePrimaryFeatureKey(EXERCISE_CONFIGS.SeatedDorsiflexion, wild))
-      .toBe('footPitchNormL');
+      .toBe('ankleAngleToeL');
   });
 
   it('honours an exact primaryFeature pin over the family', () => {
@@ -65,11 +76,20 @@ describe('resolvePrimaryFeatureKey', () => {
     expect(resolvePrimaryFeatureKey(cfg, f)).toBe('kneeAngleMin');
   });
 
-  it('resolves every foot exercise to its foot feature', () => {
-    for (const name of ['CalfRaisesSeated', 'CalfRaisesStanding',
-      'SeatedDorsiflexion', 'StandingDorsiflexion']) {
+  it('resolves every foot exercise to the foot feature IT declares', () => {
+    // Not all the same feature any more. SeatedDorsiflexion measures the angle
+    // at the ankle, which is invariant to where the patient puts their leg; the
+    // calf raises stay on footPitchNorm, where an ankle angle is documented as
+    // the wrong instrument because the foot pivots about the toe.
+    const expected = {
+      CalfRaisesSeated:     'footPitchNormL',
+      CalfRaisesStanding:   'footPitchNormL',
+      SeatedDorsiflexion:   'ankleAngleToeL',
+      StandingDorsiflexion: 'footPitchNormL',
+    };
+    for (const [name, want] of Object.entries(expected)) {
       const key = resolvePrimaryFeatureKey(EXERCISE_CONFIGS[name], frames);
-      expect(`${name}:${key}`).toBe(`${name}:footPitchNormL`);
+      expect(`${name}:${key}`).toBe(`${name}:${want}`);
     }
   });
 
@@ -115,6 +135,13 @@ function oneSidedTemplate({ active = 'R', span = 0.17, idleJitter = 0 } = {}) {
     return {
       frame: t,
       features: {
+        // ankleAngleToe alongside footPitchNorm, because SeatedDorsiflexion -
+        // the exercise these mirroring tests build a reference for - is measured
+        // on the ankle angle. The mirroring property under test is the same for
+        // either, but the reference has to carry the one the engine will pick.
+        [`ankleAngleToe${active}`]: 129 - (0.12 - v) / span * 24,
+        [`ankleAngleToe${idle}`]: 129 + idleJitter * Math.sin(t / 3),
+        ankleAngleToeAvg: 129 - (0.12 - v) / span * 12,
         [`footPitchNorm${active}`]: v,
         [`footPitchNorm${idle}`]: 0.12 + idleJitter * Math.sin(t / 3),
         footPitchNormAvg: (v + 0.12) / 2,
@@ -240,8 +267,8 @@ describe('the runtime failure mirroring prevents', () => {
     // reference also tests it, on their own side.
     const unmirrored = referenceFrom(oneSidedTemplate({ active: 'R' }));
     const eng = new DTWPhaseMachine(unmirrored, { targetReps: 5, side: 'right' });
-    expect(eng.primaryFeature).toBe('footPitchNormR');
-    expect(eng.primaryFeatureRange).toBeGreaterThan(0.1);
+    expect(eng.primaryFeature).toBe('ankleAngleToeR');
+    expect(eng.primaryFeatureRange).toBeGreaterThan(1);
   });
 
   it('gives that patient the same window as the recorded side once mirrored', () => {
@@ -252,8 +279,8 @@ describe('the runtime failure mirroring prevents', () => {
     const left = new DTWPhaseMachine(mirrored, { targetReps: 5, side: 'left' });
     const right = new DTWPhaseMachine(mirrored, { targetReps: 5, side: 'right' });
 
-    expect(left.primaryFeature).toBe('footPitchNormL');
-    expect(right.primaryFeature).toBe('footPitchNormR');
+    expect(left.primaryFeature).toBe('ankleAngleToeL');
+    expect(right.primaryFeature).toBe('ankleAngleToeR');
     expect(left.primaryFeatureRange).toBeCloseTo(right.primaryFeatureRange, 5);
     expect(left.nearStartTolerance).toBeCloseTo(right.nearStartTolerance, 5);
     expect(left.nearStartTolerance).toBeGreaterThan(0);

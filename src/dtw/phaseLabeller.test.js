@@ -37,7 +37,7 @@ describe('direction resolution', () => {
   it('knows SeatedDorsiflexion moves down into effort', () => {
     // This is why direction cannot be guessed from a recording: the two
     // exercises rest at opposite ends of their feature range.
-    expect(resolveExpectedDirection('SeatedDorsiflexion', 'footPitchNormL')).toBe(-1);
+    expect(resolveExpectedDirection('SeatedDorsiflexion', 'ankleAngleToeL')).toBe(-1);
   });
 
   it('returns 0 for an unknown exercise rather than guessing', () => {
@@ -196,15 +196,18 @@ describe('rescuing the existing recorded reference', () => {
 
 describe('resolveExpectedDirection', () => {
   it('still prefers the canonical template where it has values', () => {
-    // footPitchNorm is swept by the template, so nothing about this changes.
-    expect(resolveExpectedDirection('SeatedDorsiflexion', 'footPitchNormL')).toBe(-1);
+    // Each exercise's OWN templated feature: dorsiflexion now sweeps the ankle
+    // angle, the calf raises still sweep footPitchNorm.
+    expect(resolveExpectedDirection('SeatedDorsiflexion', 'ankleAngleToeL')).toBe(-1);
     expect(resolveExpectedDirection('CalfRaisesSeated', 'footPitchNormL')).toBe(1);
   });
 
   it('falls back to a declared direction for a feature the template omits', () => {
     // Without this the labeller refuses outright: "cannot tell which end of
-    // ankleAngleToeR is the rest posture".
-    expect(resolveExpectedDirection('SeatedDorsiflexion', 'ankleAngleToeR')).toBe(-1);
+    // footPitchNormL is the rest posture". The two features have swapped roles -
+    // the ankle angle is templated now and footPitchNorm is the declared one -
+    // but the fallback is what is under test, not which feature uses it.
+    expect(resolveExpectedDirection('SeatedDorsiflexion', 'footPitchNormL')).toBe(-1);
     expect(resolveExpectedDirection('StandingDorsiflexion', 'ankleAngleToeL')).toBe(-1);
   });
 
@@ -225,25 +228,39 @@ describe('resolveExpectedDirection', () => {
     }
   });
 
-  it('declares direction only, never magnitude', () => {
-    // The guard against repeating the previous failure. The config must not
-    // acquire ankleAngleToe VALUES this way — those have to be measured.
-    const cfg = EXERCISE_CONFIGS.SeatedDorsiflexion;
-    expect(cfg.featureDirections.ankleAngleToe).toBe(-1);
-    for (const ph of cfg.phases) {
-      expect(Object.keys(ph.features)).not.toContain('ankleAngleToe');
-    }
-  });
-
-  it('leaves the counting feature unchanged', () => {
-    // Declaring a direction must not switch anything over. The switch is a
-    // separate, evidence-led decision.
-    expect(EXERCISE_CONFIGS.SeatedDorsiflexion.primaryFeatureBase).toBe('footPitchNorm');
+  it('counts dorsiflexion on the angle at the ankle', () => {
+    // Switched on measured evidence. footPitchNorm is (toe.y - heel.y) / shank,
+    // a raw image-space ratio that reports how tilted the foot LOOKS rather than
+    // how far the ankle moved, and it failed three distinct ways on device -
+    // a phone moved to the floor, an occluded far foot, and a patient who
+    // changed their knee angle mid-set and stopped being counted.
+    expect(EXERCISE_CONFIGS.SeatedDorsiflexion.primaryFeatureBase).toBe('ankleAngleToe');
     const eng = new DTWPhaseMachine(
       generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion),
       { targetReps: 5, side: 'left' }
     );
-    expect(eng.primaryFeature).toBe('footPitchNormL');
+    expect(eng.primaryFeature).toBe('ankleAngleToeL');
+  });
+
+  it('carries measured magnitudes, not guessed ones', () => {
+    // The invariant the old "never magnitude" guard was protecting, now that the
+    // switch has happened: a guessed 88->68 meeting a real 100-130 is what sank
+    // the previous attempt at this feature. So the synthetic template's values
+    // must agree with what the recorded reference actually demonstrates.
+    const cfg = EXERCISE_CONFIGS.SeatedDorsiflexion;
+    const vals = cfg.phases.flatMap(ph => {
+      const f = ph.features.ankleAngleToe;
+      return f ? [f.from, f.to] : [];
+    });
+    expect(vals.length).toBeGreaterThan(0);
+
+    // Range observed in the recorded reference (ankleAngleToeR): 104.65..131.14.
+    // Allow a little slack for rounding the template to whole degrees.
+    for (const v of vals) {
+      expect(`${v} within demonstrated range`).toBe(
+        `${v}${v >= 100 && v <= 135 ? '' : ' OUT OF RANGE'} within demonstrated range`
+      );
+    }
   });
 
   it('returns 0 for a feature with neither template values nor a declaration', () => {

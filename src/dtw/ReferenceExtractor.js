@@ -616,6 +616,17 @@ export default function ReferenceExtractor() {
       side: exerciseSide,
       mode: exerciseMode,
       detector: detectorType,
+      // The feature this recording was segmented and labelled on. It was used
+      // throughout extraction and then dropped from the export, so an operator
+      // who deliberately chose a feature here had no way to tell that the engine
+      // would go on counting something else - EXERCISE_CONFIGS decides that, and
+      // applyCanonicalPolicy overwrites this field at load precisely so a
+      // recording cannot change engine behaviour by accident.
+      //
+      // Recorded anyway, because a disagreement between the two is worth seeing:
+      // bootstrapReferences warns when they differ, which is the signal that the
+      // config needs a deliberate change rather than the recording being wrong.
+      primaryFeature,
       template,
       featureRanges,
       repCycle,

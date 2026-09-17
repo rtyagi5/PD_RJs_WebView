@@ -11,6 +11,7 @@ import { loadRefJsonFiles } from './references/index.js';
 import { getCachedReference, cacheReference } from './referenceStorage.js';
 import { getServiceUrl } from '../config.js';
 import { checkPhaseSeparation } from './referenceHealth.js';
+import { stripSideSuffix } from './universalFeatures.js';
 import { mirrorTemplateSides } from './videoFeatureExtractor.js';
 
 let _initialized = false;
@@ -77,6 +78,24 @@ export function applyCanonicalPolicy(ref, canonical) {
     console.warn(
       `[Bootstrap] "${ref.name}" — ignoring ${overridden.join(', ')} from the .ref.json; ` +
       `these come from EXERCISE_CONFIGS, not from a recording.`
+    );
+  }
+
+  // Say so loudly when the recording was segmented on one feature and the engine
+  // will count another. Both halves of this were silent: the extractor did not
+  // export the operator's choice at all, and this overlay would have replaced it
+  // if it had. An operator who deliberately picked the ankle angle during
+  // extraction had no way to discover that dorsiflexion was still being counted
+  // on footPitchNorm - the choice was discarded twice over, without a word.
+  const chosen = ref.primaryFeature ? stripSideSuffix(ref.primaryFeature) : null;
+  const counting = merged.primaryFeature
+    ? stripSideSuffix(merged.primaryFeature)
+    : merged.primaryFeatureBase || null;
+  if (chosen && counting && chosen !== counting) {
+    console.warn(
+      `[Bootstrap] "${ref.name}" — this recording was segmented on ${ref.primaryFeature}, ` +
+      `but the engine counts ${counting}. Whichever is right, the disagreement is not: ` +
+      `change primaryFeatureBase in EXERCISE_CONFIGS, or re-extract on ${counting}.`
     );
   }
   return merged;
