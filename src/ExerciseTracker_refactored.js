@@ -289,6 +289,41 @@ export default function ExerciseTrackerRefactored({
     return res.data;
   }
 
+  /**
+   * Upload one finished recording, and never let its failure become a generic
+   * "unexpected error" on the patient's screen.
+   *
+   * Both recorders used to hand an un-caught async function to
+   * onRecordingComplete. MediaRecorder fires `onstop` during teardown, so the
+   * upload starts as the WebView is being destroyed and the browser aborts it;
+   * the rejection then had nowhere to go but window.onunhandledrejection, which
+   * calls notifyHostOfError. Measured on a clean 10/10 set: rep data synced
+   * successfully at 20:11:13.893, the recorders unmounted at 13.971 and 14.116,
+   * and two "AxiosError: Request aborted" rejections surfaced at 14.215 - so a
+   * session that had already saved everything that matters ended by telling the
+   * patient something had gone wrong.
+   *
+   * An abort at teardown is not an error the patient can act on, and it is not
+   * a reason to doubt a set they completed. It is logged, not announced.
+   */
+  async function syncRecording(blob, type, label) {
+    setDisplayMessage(`Syncing ${label}. Please wait...`);
+    try {
+      await uploadVideo(blob, type);
+      setDisplayMessage(`Exercise ${label} synced successfully!!`);
+    } catch (err) {
+      // Axios reports both a teardown abort and a timeout as ECONNABORTED; only
+      // the abort means "the page went away", and only it is silent.
+      const aborted = err?.code === 'ECONNABORTED' && !/timeout/i.test(err?.message || '');
+      if (aborted) {
+        console.warn(`[Recording] ${label} upload aborted - the session view closed first.`);
+        return;
+      }
+      console.error(`[Recording] ${label} upload failed:`, err);
+      setDisplayMessage(`Could not save the ${label}. Your reps were recorded.`);
+    }
+  }
+
   // Records the keypoint stream in parallel with the webm recorders. Gated on the
   // same skeleton-recording consent, because it captures the same movement.
   const keypointRecorderRef = useRef(null);
@@ -1009,7 +1044,7 @@ export default function ExerciseTrackerRefactored({
         keypointColorsRef={keypointColorsRef}
         segmentColorsRef={segmentColorsRef}
         isVideoRecording={isVideoRecording}
-        onRecordingComplete={async (blob) => { setDisplayMessage('Syncing video. Please wait...'); await uploadVideo(blob, 'videoRecording'); setDisplayMessage('Exercise video synced successfully!!'); }}
+        onRecordingComplete={blob => syncRecording(blob, 'videoRecording', 'video')}
       />
       <SkeletonRecorder
         ref={skeletonRecorderRef}
@@ -1019,7 +1054,7 @@ export default function ExerciseTrackerRefactored({
         keypointColorsRef={keypointColorsRef}
         segmentColorsRef={segmentColorsRef}
         isSkeletonRecording={isSkeletonRecording}
-        onRecordingComplete={async (blob) => { setDisplayMessage('Syncing skeleton video. Please wait...'); await uploadVideo(blob, 'skeleton'); setDisplayMessage('Skeleton video synced successfully!!'); }}
+        onRecordingComplete={blob => syncRecording(blob, 'skeleton', 'skeleton video')}
       />
     </div>
   );
