@@ -240,3 +240,53 @@ describe('naming the check the patient is blocked on', () => {
     expect(out.blockingCheck).toBeNull();
   });
 });
+
+describe('holding a verdict that flickers', () => {
+  // MediaPipe's confidence on an occluded far limb swings hard. Measured during
+  // one setup, kneeL read 0.61, 0.55, 0.37, 0.21, 0.46, 0.25 on a patient who
+  // had not moved, and the foot check returned three verdicts in under two
+  // seconds: wrong_side, no_foot, good. Both consequences were wrong - the
+  // spoken instruction was replaced after 0.4s, and the momentary `good` waved
+  // the session through with the patient still facing the wrong way.
+
+  /** Alternate good and bad keypoints, as a noisy detector does. */
+  function flicker(sm, { n, startMs = 0, frameMs = 33 }) {
+    let last;
+    for (let i = 0; i < n; i++) {
+      last = sm.step({
+        keypoints: i % 2 === 0 ? invisibleKeypoints() : goodKeypoints(),
+        frameW: W, frameH: H, hasDetector: true, hasVideo: true,
+        now: startMs + i * frameMs,
+      });
+    }
+    return last;
+  }
+
+  it('does not start the countdown on a detector that keeps flickering', () => {
+    const sm = makeSM();
+    run(sm, { keypoints: goodKeypoints(), n: 1 });  // LOADING -> COACHING
+    const out = flicker(sm, { n: 200, startMs: 100 });
+    expect(out.state).toBe(SESSION_STATES.COACHING);
+  });
+
+  it('keeps naming the same fault while it flickers, instead of churning', () => {
+    const sm = makeSM();
+    run(sm, { keypoints: goodKeypoints(), n: 1 });
+    // Settle on a real fault first.
+    run(sm, { keypoints: invisibleKeypoints(), n: 40, startMs: 100 });
+    const held = sm.step({
+      keypoints: goodKeypoints(), frameW: W, frameH: H,
+      hasDetector: true, hasVideo: true, now: 1500,
+    });
+    // One good frame must not clear a fault that has been true for over a second.
+    expect(held.blockingCheck).toBe('visibility');
+  });
+
+  it('still commits a change once it genuinely persists', () => {
+    const sm = makeSM({ checkDwellMs: 300 });
+    run(sm, { keypoints: goodKeypoints(), n: 1 });
+    run(sm, { keypoints: invisibleKeypoints(), n: 40, startMs: 100 });
+    const out = run(sm, { keypoints: goodKeypoints(), n: 40, startMs: 2000 });
+    expect(out.blockingCheck).toBeNull();
+  });
+});

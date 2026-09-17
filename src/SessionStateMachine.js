@@ -30,7 +30,24 @@ const DEFAULTS = {
   maxInactiveMs:     15000,  // 15 s absent → fall back to COACHING
   minCoachingMs:     3000,   // coaching phase visible for at least 3 s
   countdownBadFramesAllowed: 30, // tolerate brief check failures during countdown (≈1s @ 30fps)
+  checkDwellMs:      700,    // a verdict must persist this long before it is acted on
 };
+
+// Quality checks are pure per-frame functions, and several of their inputs are
+// not stable frame to frame. MediaPipe's confidence on an occluded far limb
+// swings hard: measured during one setup, kneeL went 0.61, 0.55, 0.37, 0.21,
+// 0.46, 0.25 on a patient who had not moved. The foot check therefore returned
+// three different verdicts in under two seconds - wrong_side, then no_foot,
+// then good - and the consequences were both wrong.
+//
+// The message slot went to whichever verdict happened to be current, so "Turn
+// around so your left side faces the camera" was shown for 0.4s and then
+// replaced. And because one of the flickers was `good`, the session was waved
+// through to countdown with the patient still sitting the wrong way round.
+//
+// So a verdict has to hold before it counts, in both directions - the same
+// medicine that fixed phase thrash in the rep engine. Instantaneous truth about
+// a noisy signal is not truth.
 
 export class SessionStateMachine {
   /**
@@ -55,6 +72,9 @@ export class SessionStateMachine {
     this._missingFrames = 0;
     this._presentFrames = 0;
     this._inactiveSinceMs = null;
+
+    // Stabilised verdicts: name -> { status, candidate, candidateSince }
+    this._verdicts = new Map();
 
     // Latest coaching results (kept for overlay drawing)
     this._lastChecks = [];
@@ -106,7 +126,17 @@ export class SessionStateMachine {
     }
 
     // Run coaching quality checks (used by COACHING, COUNTDOWN, and INACTIVE→COACHING)
-    const { allGood, checks } = runAllChecks(keypoints, frameW, frameH, this.spec);
+    const raw = runAllChecks(keypoints, frameW, frameH, this.spec);
+
+    // Only COACHING uses the held verdicts. It is the one state with no
+    // hysteresis of its own, and the one where both failures happened: it picks
+    // the spoken message, and it decides whether to start the countdown at all.
+    // COUNTDOWN and ACTIVE already debounce on their own terms
+    // (countdownBadFramesAllowed, inactiveThreshold, reactivateFrames), and
+    // stacking a second layer there only makes the session slow to notice a
+    // patient who has genuinely stopped or left the frame.
+    const stable = this._stabilise(raw, now);
+    const { allGood, checks } = this.state === S.COACHING ? stable : raw;
     this._lastChecks = checks;
 
     // ── COACHING ───────────────────────────────────────────────────────────
@@ -249,6 +279,52 @@ export class SessionStateMachine {
       // on and must actually hear, while the fallback is ambient.
       blockingCheck,
     };
+  }
+
+  /**
+   * Hold each check's verdict until a different one has persisted for
+   * `checkDwellMs`, then commit it. Applies in both directions, so a momentary
+   * `good` cannot clear a real fault any more than a momentary fault can raise
+   * a false one.
+   *
+   * The returned checks carry the STABLE status and that status's message, so
+   * the spoken instruction and the drawn overlay agree with each other and with
+   * whatever the session is actually gated on.
+   */
+  _stabilise(raw, now) {
+    const checks = raw.checks.map(c => {
+      let v = this._verdicts.get(c.name);
+      if (!v) {
+        // First sight of this check: adopt it, with nothing to debounce against.
+        v = { status: c.status, candidate: null, candidateSince: 0, sample: c };
+        this._verdicts.set(c.name, v);
+      }
+      if (c.status === v.status) {
+        v.candidate = null;
+        v.sample = c;                       // keep the freshest reading of the held verdict
+      } else if (c.status !== v.candidate) {
+        v.candidate = c.status;
+        v.candidateSince = now;
+        v.candidateSample = c;
+      } else if (now - v.candidateSince >= this.cfg.checkDwellMs) {
+        v.status = c.status;
+        v.sample = c;
+        v.candidate = null;
+      } else {
+        v.candidateSample = c;
+      }
+      // Report the held verdict, with the most recent reading that produced it.
+      return { ...v.sample, name: c.name, status: v.status };
+    });
+
+    const by = name => checks.find(c => c.name === name);
+    const allGood = by('distance')?.status === 'good'
+      && by('angle')?.status === 'good'
+      && by('roll')?.status !== 'rolled'
+      && by('visibility')?.status === 'good'
+      && by('foot')?.status === 'good';
+
+    return { allGood, checks };
   }
 
   /** Pick the highest-priority failing check. */

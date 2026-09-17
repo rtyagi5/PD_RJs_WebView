@@ -271,6 +271,49 @@ function bodyWithFoot({ side = 'left', spanRatio = 0.65, ...rest } = {}) {
 
 const FOOT_SPEC = { framing: { view: 'side', requireFoot: true, maxRollDeg: 8 } };
 
+/** Knee and ankle tracked, but the foot itself unresolved - the chair-leg case. */
+function legWithoutFoot({ side = 'left' } = {}) {
+  const kps = body();
+  const ankle = kps.find(k => k.name === `${side}_ankle`);
+  return [
+    ...kps,
+    { name: `${side}_knee`, x: ankle.x, y: ankle.y - SHANK, score: 0.95 },
+    { name: `${side}_heel`, x: ankle.x, y: ankle.y, score: 0.05 },
+    { name: `${side}_foot_index`, x: ankle.x, y: ankle.y, score: 0.05 },
+  ];
+}
+
+
+describe('telling a lost foot from a lost patient', () => {
+  // "Make sure your whole foot is in view" is the right thing to say when the
+  // patient is out of shot, and useless when they are sitting correctly and the
+  // detector is losing the foot against a chair leg. The two have different
+  // fixes, so they need different instructions - the leg being tracked while the
+  // foot is not is what separates them.
+
+  it('asks the patient to clear the chair legs when the leg tracks but the foot does not', () => {
+    const out = checkFootTracking(legWithoutFoot({ side: 'left' }), {
+      ...FOOT_SPEC.framing, side: 'left',
+    });
+    expect(out.status).toBe('foot_obscured');
+    expect(out.message).toMatch(/chair legs/i);
+    expect(out.message).toMatch(/left/);
+  });
+
+  it('still asks for framing when the leg is not tracked either', () => {
+    const out = checkFootTracking(body(), { ...FOOT_SPEC.framing, side: 'left' });
+    expect(out.status).toBe('no_foot');
+    expect(out.message).toMatch(/in view/i);
+  });
+
+  it('does not fire when the foot is tracked normally', () => {
+    const out = checkFootTracking(bodyWithFoot({ side: 'left' }), {
+      ...FOOT_SPEC.framing, side: 'left',
+    });
+    expect(out.status).toBe('good');
+  });
+});
+
 describe('checkFootTracking', () => {
   it('passes straight through for exercises that do not declare requireFoot', () => {
     // The twelve MoveNet exercises have no heel or foot_index at all - COCO-17

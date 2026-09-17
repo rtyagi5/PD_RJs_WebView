@@ -345,6 +345,7 @@ export function checkFootTracking(keypoints, overrides = {}) {
   }
 
   let sawCompleteFoot = false;
+  let sawLegWithoutFoot = false;
   let worst = { side: null, spanRatio: NaN };
 
   for (const g of groups) {
@@ -354,7 +355,17 @@ export function checkFootTracking(keypoints, overrides = {}) {
     const toe   = kp(keypoints, g.toe);
 
     const complete = [knee, ankle, heel, toe].every(k => present(k, MIN_CONFIDENCE));
-    if (!complete) continue;
+    if (!complete) {
+      // Leg found, foot not. The limb is in frame and being tracked, so this is
+      // not a framing problem - the detector cannot resolve the foot itself,
+      // which seated and side-on is nearly always the chair leg competing with
+      // it. That has a different fix from "you are out of shot", so it gets a
+      // different instruction.
+      if (present(knee, MIN_CONFIDENCE) && present(ankle, MIN_CONFIDENCE)) {
+        sawLegWithoutFoot = true;
+      }
+      continue;
+    }
 
     const shank = Math.hypot(knee.x - ankle.x, knee.y - ankle.y);
     const span  = Math.hypot(heel.x - toe.x, heel.y - toe.y);
@@ -373,12 +384,19 @@ export function checkFootTracking(keypoints, overrides = {}) {
   }
 
   if (!sawCompleteFoot) {
-    return {
-      status: 'no_foot',
-      message: `Make sure your whole ${sideWord}foot is in view, from knee to toes`,
-      side: null,
-      spanRatio: NaN,
-    };
+    return sawLegWithoutFoot
+      ? {
+        status: 'foot_obscured',
+        message: `Slide your ${sideWord}foot forward, clear of the chair legs`,
+        side: wanted,
+        spanRatio: NaN,
+      }
+      : {
+        status: 'no_foot',
+        message: `Make sure your whole ${sideWord}foot is in view, from knee to toes`,
+        side: null,
+        spanRatio: NaN,
+      };
   }
 
   return {
