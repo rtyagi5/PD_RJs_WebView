@@ -125,8 +125,13 @@ export class SessionStateMachine {
       } else {
         this._goodFrames = 0;
       }
-      const msg = this._primaryCoachingMessage(checks);
-      return this._result(checks, msg || 'Position yourself in the frame');
+      const failing = this._primaryFailingCheck(checks);
+      return this._result(
+        checks,
+        failing?.message || 'Position yourself in the frame',
+        null,
+        failing?.name || null,
+      );
     }
 
     // ── COUNTDOWN ──────────────────────────────────────────────────────────
@@ -141,8 +146,13 @@ export class SessionStateMachine {
           this._goodFrames = 0;
           this._countdownStartMs = null;
           this._countdownBadFrames = 0;
-          const msg = this._primaryCoachingMessage(checks);
-          return this._result(checks, msg || 'Position yourself in the frame');
+          const failing = this._primaryFailingCheck(checks);
+          return this._result(
+            checks,
+            failing?.message || 'Position yourself in the frame',
+            null,
+            failing?.name || null,
+          );
         }
       } else {
         this._countdownBadFrames = 0;
@@ -227,21 +237,26 @@ export class SessionStateMachine {
 
   // ── Internal helpers ─────────────────────────────────────────────────────
 
-  _result(coachingChecks, message, countdownRemaining) {
+  _result(coachingChecks, message, countdownRemaining, blockingCheck = null) {
     return {
       state: this.state,
       coachingChecks: coachingChecks || this._lastChecks,
       countdownRemaining: countdownRemaining ?? null,
       message: message ?? '',
+      // Which failing check produced this message, if any. The generic
+      // "Position yourself in the frame" fallback leaves it null. The host needs
+      // the distinction: a named fault is an instruction the patient is blocked
+      // on and must actually hear, while the fallback is ambient.
+      blockingCheck,
     };
   }
 
-  /** Pick the highest-priority failing check message. */
-  _primaryCoachingMessage(checks) {
+  /** Pick the highest-priority failing check. */
+  _primaryFailingCheck(checks) {
     for (const name of CHECK_PRIORITY) {
       const c = checks.find(ch => ch.name === name);
-      if (c && c.status !== 'good' && c.message) return c.message;
+      if (c && c.status !== 'good' && c.message) return c;
     }
-    return '';
+    return null;
   }
 }

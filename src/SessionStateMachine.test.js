@@ -207,3 +207,36 @@ describe('coaching messages', () => {
     expect(Array.isArray(r.coachingChecks)).toBe(true);
   });
 });
+
+describe('naming the check the patient is blocked on', () => {
+  // The host needs to tell a real fault from ambient framing chatter: a named
+  // fault is an instruction the session cannot proceed without, and it has to be
+  // heard. On device "Turn around so your left side faces the camera" was sent
+  // as an ordinary cue, queued behind another, and then dropped for a generic
+  // tip - the patient sat in front of a yellow screen for 29 seconds.
+
+  it('names the failing check alongside its message', () => {
+    const sm = makeSM();
+    run(sm, { keypoints: goodKeypoints(), n: 1 });        // LOADING -> COACHING
+    const out = run(sm, { keypoints: invisibleKeypoints(), n: 1, startMs: 100 });
+    expect(out.state).toBe(SESSION_STATES.COACHING);
+    expect(out.message).toBeTruthy();
+    expect(out.blockingCheck).toBe('visibility');
+  });
+
+  it('leaves it null when nothing is failing and the message is the fallback', () => {
+    const sm = makeSM();
+    run(sm, { keypoints: goodKeypoints(), n: 1 });        // LOADING -> COACHING
+    const out = run(sm, { keypoints: goodKeypoints(), n: 1, startMs: 100 });
+    expect(out.state).toBe(SESSION_STATES.COACHING);
+    expect(out.message).toBe('Position yourself in the frame');
+    expect(out.blockingCheck).toBeNull();
+  });
+
+  it('reports no blocking check once the session is running', () => {
+    const sm = makeSM();
+    const out = reachActive(sm);
+    expect(out.state).toBe(SESSION_STATES.ACTIVE);
+    expect(out.blockingCheck).toBeNull();
+  });
+});

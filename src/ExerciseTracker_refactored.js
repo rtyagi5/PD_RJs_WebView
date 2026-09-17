@@ -79,6 +79,11 @@ const EXTRAPOLATION_DAMPING = 0.8;
 // fling the skeleton off the body.
 const MAX_EXTRAPOLATION_MS = 120;
 
+// How often to repeat a setup fault the patient has not cleared. Long enough not
+// to nag, short enough that someone staring at a blocked screen is told again
+// what to do rather than left to guess.
+const BLOCKING_REANNOUNCE_MS = 8000;
+
 // Velocity from samples this far apart describes unknown motion in between.
 const MAX_VELOCITY_BASIS_MS = 400;
 
@@ -224,6 +229,9 @@ export default function ExerciseTrackerRefactored({
   const feedbackRef = useRef('Initializing...');
   // 'safety' | 'normal' — travels with the string so the host knows what may interrupt.
   const feedbackPriorityRef = useRef('normal');
+  // Which setup check is currently blocking the session, and when we last said so.
+  const lastBlockingCheckRef = useRef(null);
+  const lastBlockingAnnouncedAt = useRef(0);
   // Timestamp of the pose the engine last consumed, so it sees each one once.
   const lastSteppedPoseRef = useRef(null);
   const prevPhaseRef = useRef(null);
@@ -741,6 +749,28 @@ export default function ExerciseTrackerRefactored({
         drawTargetBox(ctx, vw, vh, idealRatio, color);
         drawCoachingMessages(ctx, vw, vh, sessionResult.coachingChecks);
         feedbackRef.current = sessionResult.message || 'Position yourself in the frame';
+
+        // A named failing check is an instruction the patient is BLOCKED on, not
+        // ambient framing chatter, so it is sent as 'setup' - the host queues it
+        // and never drops it for a newer cue.
+        const blocking = sessionResult.blockingCheck || null;
+        feedbackPriorityRef.current = blocking ? 'setup' : 'normal';
+
+        // Re-announce a fault that will not clear. maybeSendUpdates only emits
+        // when the string CHANGES, so a setup fault is offered to the host
+        // exactly once - and if it is missed, nothing ever says it again.
+        // Measured on device: the patient sat in front of a yellow screen for 29
+        // seconds after the one "Turn around so your left side faces the camera"
+        // went unspoken, with no way to learn what was wrong.
+        const sameFault = blocking && blocking === lastBlockingCheckRef.current;
+        if (!sameFault) {
+          lastBlockingCheckRef.current = blocking;
+          lastBlockingAnnouncedAt.current = frameNow;
+        } else if (frameNow - lastBlockingAnnouncedAt.current >= BLOCKING_REANNOUNCE_MS) {
+          lastBlockingAnnouncedAt.current = frameNow;
+          lastFeedbackSentRef.current = null; // let the unchanged string through once
+        }
+
         try { maybeSendUpdates({ sessionState: 'coaching', coachingChecks: sessionResult.coachingChecks }); } catch { }
       }
 
