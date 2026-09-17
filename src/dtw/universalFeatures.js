@@ -122,7 +122,18 @@ export function computeUniversalFeatures(kps) {
       ` hipAnkLenL=${fin(hipAnkleLenL) ? hipAnkleLenL.toFixed(0) : 'NaN'}` +
       ` hipAnkLenR=${fin(hipAnkleLenR) ? hipAnkleLenR.toFixed(0) : 'NaN'}` +
       ` hipAngleL=${fin(hipAngleL) ? hipAngleL.toFixed(0) : 'NaN'}` +
-      ` hipAngleR=${fin(hipAngleR) ? hipAngleR.toFixed(0) : 'NaN'}`
+      ` hipAngleR=${fin(hipAngleR) ? hipAngleR.toFixed(0) : 'NaN'}` +
+      // Knee angle and ankle-toe angle are the two numbers that say what POSTURE
+      // the patient is in, as opposed to how well they are being tracked. The
+      // SeatedDorsiflexion reference was demonstrated at a knee of 97-110deg -
+      // a slightly extended leg, not a right angle - and footPitchNorm is a raw
+      // image-space ratio, so sitting differently moves the signal without
+      // moving the ankle. Without these logged, a patient changing posture
+      // mid-set is indistinguishable from a patient whose ankle stopped moving.
+      ` kneeAngleL=${fin(kneeAngleL) ? kneeAngleL.toFixed(0) : 'NaN'}` +
+      ` kneeAngleR=${fin(kneeAngleR) ? kneeAngleR.toFixed(0) : 'NaN'}` +
+      ` ankToeL=${fin(ankleAngleToeL) ? ankleAngleToeL.toFixed(0) : 'NaN'}` +
+      ` ankToeR=${fin(ankleAngleToeR) ? ankleAngleToeR.toFixed(0) : 'NaN'}`
     );
   }
 
