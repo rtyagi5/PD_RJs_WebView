@@ -231,9 +231,18 @@ export const EXERCISE_CONFIGS = {
     // single-spike false reps. 0.40 still allows a half-curl (~42° ROM) to count.
     minRomPct: 0.40,
     highlightKeypoints: ['shoulder', 'elbow', 'wrist'],
-    // Legacy spec treated elbowAngle <= 75 as a complete curl; below ~40° the
-    // forearm is jammed against the biceps with no useful load. TODO clinical review.
-    clinicalCaps: { elbowAngle: { min: 40 } },
+    // Loosened 40 -> 5 on 2026-10-11. The recorded demonstration reaches
+    // elbowAngleMin 11.93, so the old cap flagged a full, correct curl: every rep
+    // of a 10-rep device run was downgraded to 'attempt' and the patient heard the
+    // safety warning on all of them. Two separate reasons not to re-tighten it to a
+    // normative number: a full curl carries no injury risk (the elbow cannot be
+    // forced past its own soft-tissue stop by curling), and 11.93° included angle
+    // implies ~168° of flexion, beyond the AAOS normal maximum of 150° - so the 2D
+    // reading is inflated at end-range and is not comparable to a goniometric norm.
+    // 5 is a tripwire for nonsense readings, not a clinical limit. If this exercise
+    // needs a real guardrail it is probably on shoulder compensation, not elbow
+    // depth. See docs/CLINICAL_GUARDRAILS.md. TODO clinical review.
+    clinicalCaps: { elbowAngle: { min: 5 } },
     phases: [
       {
         id: 'lowered', weight: 1,
@@ -319,6 +328,18 @@ export const EXERCISE_CONFIGS = {
     detector: 'movenet',
     framing: { view: 'front', instruction: 'Face the camera, chair and full body visible' },
     startCue: 'Stand up from the chair',
+    // The template sweeps kneeAngle and hipToAnkleNorm, so those two are the
+    // only features the labeller can anchor from it. Hip extension is just as
+    // defining for a sit-to-stand, and an operator who picks hipAngle in the
+    // extractor was being refused outright - "cannot tell which end of hipAngleL
+    // is the rest posture" - with no way forward short of editing the template.
+    //
+    // Declaring the direction is safe where declaring magnitudes is not: seated
+    // the hip is flexed and standing it is extended, on every body. How far it
+    // travels depends on the person and the camera, and guessing that is what
+    // has sunk feature switches before, so it stays unstated and comes from the
+    // recording instead.
+    featureDirections: { hipAngle: 1 },
     highlightKeypoints: ['hip', 'knee', 'ankle'],
     // Standing tall is ~165-175°. Beyond 180° the knee is hyperextended (locked back),
     // a common compensation in stroke patients. TODO clinical review.
@@ -404,9 +425,32 @@ export const EXERCISE_CONFIGS = {
     framing: { view: 'front', instruction: 'Face the camera, both legs visible' },
     startCue: 'Lift your knees one at a time, alternating',
     highlightKeypoints: ['hip', 'knee', 'ankle'],
-    // Seated march target lift is kneeLiftNorm 0.25 / hipAngle 70°. Much beyond that the
-    // patient is hiking the hip or leaning back rather than marching. TODO clinical review.
-    clinicalCaps: { kneeLiftNorm: { max: 0.45 }, hipAngle: { min: 50 } },
+    // Loosened on 2026-10-11: kneeLiftNorm 0.45 -> 0.85, hipAngle 50 -> 5.
+    // Both old values flagged the recorded demonstration itself (kneeLiftNormMax
+    // reached 0.72, hipAngleMin reached 12.74), so every correctly-performed rep was
+    // downgraded to 'attempt'.
+    //
+    // Why the demonstrated numbers look so far outside the per-leg ranges: this is an
+    // ALTERNATING exercise, and buildTemplateFromReps averages reps positionally. At
+    // the peak-lift frame one rep has the left leg up and the next has the right, so
+    // the averaged kneeLiftNormL / hipAngleL channels are diluted toward the middle
+    // (0.42 / 78.8) while the aggregate max(L,R) / min(L,R) channels correctly track
+    // whichever leg is lifting (0.72 / 12.74). The aggregates are the honest reading
+    // here, and they are also what the cap resolves onto, so they are what it must be
+    // set against.
+    //
+    // hipAngle is additionally not trustworthy for this exercise at all: framing is
+    // 'front', so the lifting thigh points at the camera and foreshortens. 12.74°
+    // included angle implies ~167° of hip flexion against an AAOS normal of 120°.
+    // The new 5 is a nonsense tripwire, not a limit; kneeLiftNorm carries the real
+    // constraint. See docs/CLINICAL_GUARDRAILS.md. TODO clinical review.
+    // kneeLiftNorm re-normalised on torsoLen (2026-10-11), so 0.85 - which was set
+    // from a demonstration measured with the OLD coupled denominator - is in stale
+    // units. 0.70 is provisional: the corrected device readings for a normal seated
+    // march land near 0.26-0.45, so this leaves headroom without being unbounded.
+    // REQUIRES re-extraction of SeatedMarch.ref.json to confirm; the extractor
+    // validator will report a breach against the new demonstration if it is wrong.
+    clinicalCaps: { kneeLiftNorm: { max: 0.70 }, hipAngle: { min: 5 } },
     phases: [
       {
         id: 'resting', weight: 1,
@@ -627,6 +671,22 @@ export const EXERCISE_CONFIGS = {
     framing: { view: 'side', instruction: 'Stand sideways to the camera, facing the wall' },
     startCue: 'Lower your chest toward the wall, then push back',
     highlightKeypoints: ['shoulder', 'elbow', 'wrist'],
+    // Raised from the 0.25 default on 2026-10-11. This is a fraction of the
+    // PATIENT's own calibrated range (romGate.js), not an absolute angle, so a
+    // restricted shoulder is not penalised - their gate scales down with them.
+    //
+    // Measured on device: the 0.25 default put the gate at 22.0 degrees against a
+    // 99.2-degree template range, i.e. 22% of the movement. Straightening and
+    // bending the arms with no push-up at all counted as reps - rom 27.9, 30.6,
+    // 35.0, 41.8 and 43.6 all cleared it, while the genuine reps measured 64.1,
+    // 64.7, 71.6 and 87.9. 0.55 separates those two groups cleanly: 0.55 x the
+    // 88.0-degree calibrated range gives a 48.4-degree gate.
+    //
+    // The count gate is range plus phase order plus timing; DTW shape match does
+    // NOT gate a rep on the primary path, so an arm waggle with the right elbow
+    // signature is indistinguishable from a shallow push-up by range alone. This
+    // number is the only thing standing between the two.
+    minRomPct: 0.55,
     // Wall push-up bottoms at ~90° elbow flexion. Going deeper puts the shoulder
     // into an unsupported end-range position against the wall. TODO clinical review.
     clinicalCaps: { elbowAngle: { min: 75 } },
@@ -708,7 +768,19 @@ export const EXERCISE_CONFIGS = {
     highlightKeypoints: ['knee', 'ankle', 'heel', 'foot_index'],
     // Seated calf raise tops out at footPitchNorm 0.12. Well past that the patient is
     // pushing through the forefoot hard enough to lift off the chair. TODO clinical review.
-    clinicalCaps: { footPitchNorm: { max: 0.22 } },
+    // 0.22 was breached by the recorded demonstration itself, which reaches 0.299
+    // on both feet. A limit the demonstration crosses is not a limit: it fires on
+    // every patient who performs the exercise correctly, and that is precisely
+    // what flooded an early SeatedDorsiflexion session with "That's far enough"
+    // nine times in ten reps.
+    //
+    // Raised to sit clear of the measured peak. PROVISIONAL and not a clinical
+    // claim - the same standing as the ankleAngleToe cap below it. The engine
+    // now counts this exercise on ankleAngleToe (the recorded reference pins it),
+    // so this cap guards a feature that is measured but not gated on; whether a
+    // plantarflexion ceiling belongs here at all is the clinical question.
+    // TODO clinical review.
+    clinicalCaps: { footPitchNorm: { max: 0.36 } },
     // footPitchNorm = (toe.y - heel.y) / shankLen directly measures heel elevation.
     // For a seated calf raise, the foot pivots around the toe — the ankle joint barely
     // flexes (so ankleAngle features were producing only 5-15° of real change despite
