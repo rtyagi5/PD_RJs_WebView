@@ -1,6 +1,7 @@
 import {
   checkDistance, checkCameraAngle, checkCameraRoll, checkVisibility, checkLighting,
   checkFootTracking, runAllChecks, CHECK_PRIORITY,
+  checkCameraPitch, MIN_TORSO_SHOULDER_RATIO,
 } from './PoseQuality';
 import { drawTargetBox } from './CoachingOverlay';
 
@@ -535,5 +536,82 @@ describe('checkFootTracking wrong-side detection', () => {
   it('does not fire on a small confidence difference', () => {
     const kps = [...leg('left', 0.74), ...leg('right', 0.84)];
     expect(checkFootTracking(kps, { ...sideView, side: 'left' }).status).toBe('good');
+  });
+});
+
+// Camera HEIGHT was unchecked: the front-view branch of checkCameraAngle validates
+// only horizontal centering, and checkCameraRoll only tilt. On device the same
+// seated march counted correctly with the phone at table height and fired the
+// safety cue on every rep with the phone on the floor.
+describe('checkCameraPitch', () => {
+  // Front-on torso, with the apparent trunk length controllable. Anatomically the
+  // trunk runs ~1.1-1.3x shoulder width when the camera is level with it.
+  const torso = ({ shoulderWidth = 80, torsoLen = 100, score = 0.9 } = {}) => [
+    { name: 'left_shoulder', x: W / 2 - shoulderWidth / 2, y: 100, score },
+    { name: 'right_shoulder', x: W / 2 + shoulderWidth / 2, y: 100, score },
+    { name: 'left_hip', x: W / 2 - 30, y: 100 + torsoLen, score },
+    { name: 'right_hip', x: W / 2 + 30, y: 100 + torsoLen, score },
+  ];
+
+  it('accepts a camera level with the torso', () => {
+    const r = checkCameraPitch(torso({ shoulderWidth: 80, torsoLen: 100 }));
+    expect(r.status).toBe('good');
+    expect(r.ratio).toBeCloseTo(1.25, 2);
+  });
+
+  it('flags a torso foreshortened by an off-height camera', () => {
+    // Phone on the floor: the trunk is viewed obliquely and collapses, while
+    // shoulder width is barely affected.
+    const r = checkCameraPitch(torso({ shoulderWidth: 80, torsoLen: 40 }));
+    expect(r.status).toBe('oblique');
+    expect(r.ratio).toBeCloseTo(0.5, 2);
+    expect(r.message).toMatch(/chest height/i);
+  });
+
+  it('reports the measured ratio either way, so the limit can be calibrated', () => {
+    for (const torsoLen of [40, 100]) {
+      expect(checkCameraPitch(torso({ torsoLen })).ratio).toBeGreaterThan(0);
+    }
+  });
+
+  it('honours a per-exercise override', () => {
+    const kps = torso({ shoulderWidth: 80, torsoLen: 40 }); // ratio 0.5
+    expect(checkCameraPitch(kps, 'front', { minTorsoShoulderRatio: 0.4 }).status).toBe('good');
+    expect(checkCameraPitch(kps, 'front', { minTorsoShoulderRatio: 0.6 }).status).toBe('oblique');
+  });
+
+  it('does not judge pitch in a side or diagonal view', () => {
+    // The shoulders foreshorten by design there, so the ratio means nothing.
+    for (const view of ['side', 'diagonal']) {
+      expect(checkCameraPitch(torso({ torsoLen: 40 }), view).status).toBe('unknown');
+    }
+  });
+
+  it('returns unknown rather than guessing when the hips are not visible', () => {
+    const kps = torso().filter(k => !k.name.includes('hip'));
+    expect(checkCameraPitch(kps).status).toBe('unknown');
+  });
+
+  it('returns unknown when the shoulders are degenerate (actually side-on)', () => {
+    expect(checkCameraPitch(torso({ shoulderWidth: 0 })).status).toBe('unknown');
+  });
+
+  it('is advisory: an oblique camera does not block the session', () => {
+    // Promote it into p0Good only once MIN_TORSO_SHOULDER_RATIO is calibrated.
+    const kps = [...body({ ratio: 0.5 })];
+    const low = kps.map(k => k.name.includes('hip') ? { ...k, y: 120 } : k);
+    const res = runAllChecks(low, W, H, { framing: { view: 'front' } });
+    const pitch = res.checks.find(c => c.name === 'pitch');
+    expect(pitch).toBeDefined();
+    expect(pitch.status).toBe('oblique');
+    expect(res.checks.some(c => c.name === 'pitch')).toBe(true);
+  });
+
+  it('is in the spoken-cue priority order', () => {
+    expect(CHECK_PRIORITY).toContain('pitch');
+  });
+
+  it('exports a documented, permissive default limit', () => {
+    expect(MIN_TORSO_SHOULDER_RATIO).toBe(0.70);
   });
 });

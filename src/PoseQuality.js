@@ -19,6 +19,18 @@ export const FAR_LIMB_MAX_CONFIDENCE = 0.85;
 export const FAR_LIMB_CONFIDENCE_GAP = 0.2;
 export const LIGHTING_THRESHOLD = 0.25;
 export const MAX_ROLL_DEG        = 12;   // camera tilt beyond this rejects the setup  // avg score below this → poor lighting
+// Minimum apparent torso length as a multiple of shoulder width, front-on.
+// Anatomically the trunk (shoulder joint -> hip joint) runs about 1.1-1.3x
+// shoulder-joint width, and both are image distances, so the ratio is
+// independent of how far away the patient stands. Camera pitch is what moves it:
+// a phone on the floor or up on a shelf views the trunk obliquely and
+// foreshortens it, while shoulder width is barely affected.
+//
+// 0.70 is deliberately permissive - it only catches gross misplacement, and it is
+// NOT a calibrated value. It is advisory for now (see runAllChecks): the ratio is
+// reported on every setup so it can be tightened from real measurements across
+// known-good and known-bad placements before it is allowed to block a session.
+export const MIN_TORSO_SHOULDER_RATIO = 0.70;
 // Heel↔toe span may not exceed this fraction of shank length. Mirrors the
 // footValid guard in dtw/universalFeatures.js so setup and runtime agree.
 export const FOOT_SPAN_MAX_RATIO = 0.9;
@@ -26,7 +38,7 @@ export const FOOT_SPAN_MAX_RATIO = 0.9;
 // Which failing check the patient is told about first. Single source of truth:
 // both the spoken/among-message selection (SessionStateMachine) and the on-canvas
 // coaching text (CoachingOverlay) use this, so they can never disagree.
-export const CHECK_PRIORITY = ['visibility', 'foot', 'distance', 'angle', 'lighting'];
+export const CHECK_PRIORITY = ['visibility', 'foot', 'distance', 'angle', 'pitch', 'lighting'];
 
 // Default keypoints every exercise needs visible
 const DEFAULT_REQUIRED_KPS = [
@@ -424,6 +436,60 @@ export function checkLighting(keypoints) {
   return { status: 'good', message: '', avgScore };
 }
 
+// ── Check: Camera Pitch (height) ─────────────────────────────────────────────
+// Catches a camera placed well below or above the patient, which silently
+// distorts every feature derived from vertical image geometry.
+//
+// This exists because a seated march counted correctly with the phone at table
+// height and fired the safety cue on every rep with the phone on the floor, and
+// nothing in the setup checks noticed: the front-view branch of checkCameraAngle
+// only validates horizontal centering, and checkCameraRoll only validates tilt.
+// Camera HEIGHT was unchecked.
+//
+// Only meaningful front-on. In side and diagonal views the shoulders foreshorten
+// by design, so the ratio carries no information about pitch.
+//
+// Returns { status: 'good'|'oblique'|'unknown', message, ratio, limit }
+export function checkCameraPitch(keypoints, view = 'front', overrides = {}) {
+  const limit = Number.isFinite(overrides.minTorsoShoulderRatio)
+    ? overrides.minTorsoShoulderRatio
+    : MIN_TORSO_SHOULDER_RATIO;
+
+  if (view !== 'front') {
+    return { status: 'unknown', message: '', ratio: null, limit };
+  }
+
+  const lSh = kp(keypoints, 'left_shoulder');
+  const rSh = kp(keypoints, 'right_shoulder');
+  const lHip = kp(keypoints, 'left_hip');
+  const rHip = kp(keypoints, 'right_hip');
+  const hasSh = present(lSh, MIN_CONFIDENCE) && present(rSh, MIN_CONFIDENCE);
+  const hasHip = present(lHip, MIN_CONFIDENCE) && present(rHip, MIN_CONFIDENCE);
+  if (!hasSh || !hasHip) {
+    return { status: 'unknown', message: '', ratio: null, limit };
+  }
+
+  const shoulderWidth = Math.hypot(lSh.x - rSh.x, lSh.y - rSh.y);
+  if (shoulderWidth < 1e-6) {
+    // Degenerate front view (the patient is actually side-on); the rotation is
+    // the problem, and checkCameraAngle owns that.
+    return { status: 'unknown', message: '', ratio: null, limit };
+  }
+  const shMid = midpoint(lSh, rSh);
+  const hipMid = midpoint(lHip, rHip);
+  const torsoLen = Math.hypot(shMid.x - hipMid.x, shMid.y - hipMid.y);
+  const ratio = torsoLen / shoulderWidth;
+
+  if (ratio < limit) {
+    return {
+      status: 'oblique',
+      message: 'Raise your camera to about chest height',
+      ratio, limit,
+    };
+  }
+  return { status: 'good', message: '', ratio, limit };
+}
+
 // ── Aggregate: Run All Checks ────────────────────────────────────────────────
 // Returns { allGood, checks: [{ name, status, message, ...extras }] }
 
@@ -437,6 +503,7 @@ export function runAllChecks(keypoints, frameW, frameH, spec) {
   const visibility = checkVisibility(keypoints, framing.requiredKeypoints);
   const foot       = checkFootTracking(keypoints, { ...framing, side: spec?.side });
   const lighting   = checkLighting(keypoints);
+  const pitch      = checkCameraPitch(keypoints, view, framing);
 
   const checks = [
     { name: 'distance',   ...distance },
@@ -445,10 +512,17 @@ export function runAllChecks(keypoints, frameW, frameH, spec) {
     { name: 'visibility', ...visibility },
     { name: 'foot',       ...foot },
     { name: 'lighting',   ...lighting },
+    { name: 'pitch',      ...pitch },
   ];
 
   // P0 checks (distance, angle, visibility) must all be 'good'.
   // Lighting (P2) is advisory — we still flag it but don't block.
+  //
+  // Pitch is advisory too, for now, and deliberately so: MIN_TORSO_SHOULDER_RATIO
+  // has not been calibrated against real setups, and a blocking check on an
+  // uncalibrated threshold can lock a patient out of their session. It is surfaced
+  // in `checks` (so it reaches the setup UI and the logs with its measured ratio)
+  // and should be promoted into p0Good once there are numbers behind the limit.
   // 'unknown' does not block: when the keypoints needed to judge roll are absent,
   // the visibility check is the one that should stop the session, not this.
   const p0Good = distance.status === 'good'
