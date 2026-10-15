@@ -1,8 +1,25 @@
 # Clinical guardrails — intent, provenance, and what still needs signing
 
 **Status: none of the values in this document have clinical sign-off.**
-This is the evidence pack for that review, not the outcome of one. No cap value is changed by this
-document.
+This is the evidence pack for that review, not the outcome of one.
+
+## Where these caps did NOT come from
+
+Read this first if anyone has told you these limits came from clinical research. **They did not.**
+
+Every cap value in the engine was set from **template geometry** — the numbers chosen when the
+movement templates were authored — and then carried forward unchanged. The literature in
+[Sources](#sources) at the end of this document was gathered *afterwards, to review the caps
+against*. It is **not** the basis any cap was set from, and no entry in it was used to derive a
+specific coded number. Treat that list as the reviewer's reading material, not as citations.
+
+Two caps have since been reset from **measurement** instead of geometry (see
+[Change log](#change-log)). Measurement is a better basis than geometry, but it is still not a
+clinical basis: it records what one demonstrator did on one recording, not what is safe for a
+patient.
+
+The honest one-line summary for a physical therapist: *these are engineering placeholders that
+have never been clinically reviewed — please tell us what they should be.*
 
 ## Read this before comparing anything to published ROM
 
@@ -55,8 +72,88 @@ joint angle. Present ROM as **tracking and trending only**.
 which is itself now dead code. **There is no citation, clinician sign-off, or normative table
 anywhere in the repository.**
 
-Caps are enforced in `DTWPhaseMachine._capBreaches()`. A breach flags the rep and speaks a warning;
-it does not block counting. See the commit that introduced flagging for why.
+`git blame` on `src/dtw/specToReference.js` confirms the provenance is a single authoring
+session rather than a review process: 13 of the 16 cap values were written in one commit,
+`e46af809` ("checkpoint: in-progress DTW engine work before live retest", 2026-09-05).
+`SeatedDorsiflexion` changed in `3cccde62` (2026-09-16) when its feature became
+`ankleAngleToe`; `CalfRaisesSeated` and the two caps in the [Change log](#change-log) changed
+on 2026-10-11.
+
+### What a cap actually does, and what it costs
+
+Enforced in `DTWPhaseMachine._capBreaches()`. A breach does **not** block rep counting, but it is
+not cosmetic either — it has three visible effects:
+
+1. the spoken safety warning fires, at the **top** of the feedback priority ladder;
+2. the whole skeleton turns red (deliberately whole-body, not just the joint at fault);
+3. `_classifyRep` records the rep as an **`attempt`** rather than `completed`:
+
+```js
+const flagged = capBreaches.length > 0;
+// ... completed: !flagged
+```
+
+Effect 3 is the one that matters clinically: a cap set too tight does not merely nag the patient,
+it silently rewrites their adherence record. A 10-rep BicepCurls run on device produced 10
+`attempt`s and 0 `completed` — including one rep at 100% of target ROM — purely because of a cap.
+
+### A cap is written on one base feature but compared against several keys
+
+`clinicalCaps: { hipAngle: { min: 45 } }` (StandingMarch) does not watch one number. The constructor expands the
+base name into every side and aggregate variant the reference has ranges for — `hipAngleL`,
+`hipAngleR` and `hipAngleMin` — and a breach on **any** of them counts. Two consequences a
+reviewer needs to know:
+
+- On a one-sided session the *resting* limb is still watched, so it can trip a cap on its own.
+- A cap whose base feature has **no** sided or aggregate variant expands to keys that do not
+  exist, and therefore never fires at all. See "Three caps cannot fire" below.
+
+---
+
+## Measured: every cap against the recording it will judge
+
+Generated from `src/dtw/specToReference.js` and `src/dtw/references/*.ref.json` on
+**2026-10-11**, after the two changes in the [Change log](#change-log). "Demonstrated" is the
+extreme the recorded reference actually reaches, on the key the cap resolves onto.
+
+A cap that its own demonstration goes past is a defect regardless of what a clinician decides the
+number should be: the reference is the movement patients are coached to copy, so copying it
+correctly earns the warning and the `attempt`.
+
+| Exercise | Cap as coded | Key actually compared | Demonstrated | Verdict vs demonstration |
+| --- | --- | --- | --- | --- |
+| BicepCurls | `elbowAngle min 5` | `elbowAngleL` | 11.93 | inside |
+| CalfRaisesSeated | `footPitchNorm max 0.36` | `footPitchNormL` | 0.30 | inside |
+| CalfRaisesStanding | `footPitchNorm max 0.22` | `footPitchNormL` | 0.21 | inside |
+| LiftsAndChops | `handsHeightNorm max 1.3` | — | — | n/a |
+| LongArcQuad | `kneeAngle max 178` | `kneeAngleL` | 169.86 | inside |
+| MiniLunges | `kneeAngle min 90` | `kneeAngleL` | 112.25 | inside |
+| MiniSquats | `kneeAngle min 100` | `kneeAngleL` | 120.32 | inside |
+| SeatedDorsiflexion | `ankleAngleToe min 95` | `ankleAngleToeR` | 104.65 | inside |
+| SeatedMarch | `kneeLiftNorm max 0.85`<br>`hipAngle min 5` | `kneeLiftNormMax`<br>`hipAngleMin` | 0.72<br>12.74 | inside<br>inside |
+| SideArmRaise | `shoulderAngle max 95` | `shoulderAngleL` | 99.71 | **past by 4.71** |
+| SitToStand | `kneeAngle max 180` | `kneeAngleL` | 178.05 | inside |
+| StandingDorsiflexion | `footPitchNorm min -0.11` | `footPitchNormL` | -0.02 | inside |
+| StandingMarch | `kneeLiftNorm max 0.5`<br>`hipAngle min 45` | `kneeLiftNormL`<br>`hipAngleMin` | 0.02<br>103.88 | inert (range ~0)<br>inside |
+| StandingStraightUp | `kneeAngle max 182` | — | **no reference recorded** | cannot check |
+| StepUps | `kneeAngle min 95`<br>`kneeLiftNorm max 0.4` | `kneeAngleL`<br>`kneeLiftNormL` | 93.68<br>0.00 | **past by 1.32**<br>inert (range ~0) |
+| WallPushUp | `elbowAngle min 75` | `elbowAngleL` | 69.16 | **past by 5.84** |
+
+### Three caps cannot fire at all
+
+These are **not** safety limits today, whatever their number says. Changing the number changes
+nothing until the underlying feature is fixed.
+
+| Exercise | Cap | Why it cannot fire |
+| --- | --- | --- |
+| `LiftsAndChops` | `handsHeightNorm max 1.3` | `handsHeightNorm` is a single bilateral feature with no `L`/`R`/aggregate variant, so the cap expands only to `handsHeightNormL` and `handsHeightNormR` — neither of which exists in the reference. **Completely dead.** |
+| `StandingMarch` | `kneeLiftNorm max 0.5` | `kneeLiftNorm = max(0, hip.y − knee.y) / hipAnkleLen`. Image y grows downward, so standing — knee below hip — it is clamped to zero. Demonstrated range 0.00–0.02. |
+| `StepUps` | `kneeLiftNorm max 0.4` | Same clamp. Demonstrated range 0.00–0.00. |
+
+### One cap has never been checked
+
+`StandingStraightUp` (`kneeAngle max 182`) has no recorded reference yet, so its cap has not been
+compared against any demonstration.
 
 ---
 
@@ -73,7 +170,10 @@ it does not block counting. See the commit that introduced flagging for why.
 | Implied | Stop at roughly shoulder height |
 | Norm | AAOS shoulder abduction 0–180° |
 | Rationale | Abduction beyond ~90° without scapular upward rotation and humeral external rotation narrows the subacromial space. In hemiplegia this matters far more than in a healthy shoulder: glenohumeral subluxation affects up to 80% of stroke survivors, and passive or poorly-controlled ROM work is itself a documented mechanism of injury. |
-| Verdict | **Well-founded.** The most defensible cap in the set. |
+| Demonstrated | `shoulderAngleL` reaches **99.71** — past the cap by 4.71 |
+| Verdict | **Well-founded.** The most defensible cap in the set — and the one case where the
+recommendation is to keep the cap and **re-record the reference** staying at shoulder height, rather
+than loosen it. Left unchanged on 2026-10-11. |
 
 `LiftsAndChops` caps `handsHeightNorm: { max: 1.3 }` instead — a dimensionless ratio with no norm.
 It is a diagonal pattern loading the same shoulder; the reviewer should decide whether it needs a
@@ -109,31 +209,63 @@ the reviewer mainly needs to confirm the intent is depth-limiting rather than sa
 
 | Exercise | Coded | Implied flexion |
 | --- | --- | --- |
-| SeatedMarch | `hipAngle: { min: 50 }` | 130° |
+| SeatedMarch | `hipAngle: { min: 5 }` *(was 50)* | 175° |
 | StandingMarch | `hipAngle: { min: 45 }` | 135° |
 
-**Flag.** Both exceed the AAOS normal hip flexion of **0–120°**. As written they would only trigger
-beyond what a healthy hip achieves, so they cannot fire protectively. Note the seated case starts
-near 90° of flexion by definition, so the usable margin is smaller than it appears. Both also carry
-`kneeLiftNorm` caps (0.45 / 0.50) with no clinical unit.
+**Flag.** The StandingMarch value exceeds the AAOS normal hip flexion of **0–120°**, so as written
+it can only trigger beyond what a healthy hip achieves and cannot fire protectively. Note the
+seated case starts near 90° of flexion by definition, so the usable margin is smaller than it
+appears.
+
+**SeatedMarch was loosened to a tripwire on 2026-10-11** (see [Change log](#change-log)) because
+the old 50 flagged its own demonstration, which reaches 12.74. The deeper problem is that this
+reading is not credible for a seated march at all: framing is `front`, so the lifting thigh points
+at the camera and foreshortens, and 12.74° implies ~167° of hip flexion. **The reviewer should
+decide whether SeatedMarch needs a hip cap at all, or whether the feature should be dropped for
+this exercise.**
+
+Both exercises also carry `kneeLiftNorm` caps (0.85 seated / 0.50 standing) with no clinical unit.
+The standing one is inert — see [Three caps cannot fire](#three-caps-cannot-fire-at-all).
 
 ### Elbow — `BicepCurls`, `WallPushUp`
 
-| Exercise | Coded | Implied flexion | Norm |
-| --- | --- | --- | --- |
-| BicepCurls | `min: 40` | 140° | AAOS elbow flexion 0–150° |
-| WallPushUp | `min: 75` | 105° | as above |
+| Exercise | Coded | Implied flexion | Demonstrated | Norm |
+| --- | --- | --- | --- | --- |
+| BicepCurls | `min: 5` *(was 40)* | 175° | 11.93 (≈168° flexion) | AAOS elbow flexion 0–150° |
+| WallPushUp | `min: 75` | 105° | 69.16 (≈111° flexion) | as above |
 
-Both inside normal range. The BicepCurls comment ("do not jam your forearm") suggests the intent is
-end-range compression rather than ROM per se — worth confirming.
+**BicepCurls was loosened to a tripwire on 2026-10-11** (see [Change log](#change-log)). The old 40
+flagged a full, correct curl — all 10 reps of a device run were downgraded to `attempt`. Two
+reasons not to replace it with a normative number:
+
+- Curling carries no injury risk at end-range; the elbow cannot be forced past its own soft-tissue
+  stop by the biceps. The original comment ("do not jam your forearm") describes end-range
+  compression, not a ROM limit — **the reviewer should confirm whether that concern is real.**
+- The demonstrated 11.93° implies ~168° of flexion, **beyond** the AAOS normal maximum of 150°.
+  A 2D included angle cannot be compared to a goniometric norm at end-range, where the forearm
+  rotates toward the camera and the reading inflates. This is evidence the feature, not the
+  movement, is at fault.
+
+If BicepCurls needs a real guardrail it is most likely on **shoulder compensation** (swinging or
+hiking the shoulder to generate the curl), not elbow depth. That cap does not exist today.
+
+**WallPushUp is left at 75 and still goes past its own demonstration by 5.84.** Kept deliberately,
+pending review: the cap limits how much load passes through the shoulder, which is a real concern
+post-stroke. The reviewer should decide the safe depth; if 75 is right, the reference needs
+re-recording shallower.
 
 ### Ankle — `CalfRaisesSeated`, `CalfRaisesStanding`, `SeatedDorsiflexion`, `StandingDorsiflexion`
 
 | Exercise | Coded | Direction |
 | --- | --- | --- |
-| CalfRaises ×2 | `footPitchNorm: { max: 0.22 }` | plantarflexion ceiling |
-| SeatedDorsiflexion | `footPitchNorm: { min: −0.12 }` | dorsiflexion floor |
-| StandingDorsiflexion | `footPitchNorm: { min: −0.11 }` | dorsiflexion floor |
+| `CalfRaisesSeated` | `footPitchNorm: { max: 0.36 }` | plantarflexion ceiling |
+| `CalfRaisesStanding` | `footPitchNorm: { max: 0.22 }` | plantarflexion ceiling |
+| `SeatedDorsiflexion` | `ankleAngleToe: { min: 95 }` | dorsiflexion floor (angle at the ankle) |
+| `StandingDorsiflexion` | `footPitchNorm: { min: −0.11 }` | dorsiflexion floor |
+
+**Updated 2026-10-11.** `SeatedDorsiflexion` has since moved to `ankleAngleToe` (commit
+`3cccde62`), and `CalfRaisesSeated` was raised 0.22 → 0.36 to stop it flagging its own
+demonstration. The two remain inconsistent with each other and with the standing pair.
 
 **No published norm is applicable** — these are dimensionless ratios. For reference only, ankle ROM
 in able-bodied adults is roughly 50° plantarflexion to 20° dorsiflexion, with normal dorsiflexion
@@ -207,31 +339,73 @@ primary feature to an angle activates that filter for the first time on these ex
 4. **Quantify projection error** — measure the same movement from the declared `framing.view` and
    from a deliberately wrong angle, and record how far the reading moves. That number bounds every
    claim the product can make.
-5. **Have a licensed PT sign the table below**, with attribution recorded in the repo.
+5. **Fix the three caps that cannot fire** — `LiftsAndChops` (expands to keys that do not exist)
+   and the two inert `kneeLiftNorm` caps (clamped to zero when standing). An unreviewed cap is a
+   problem; a cap that silently does nothing while appearing in this table is worse.
+6. **Decide the three caps that still go past their own demonstration** — SideArmRaise (4.71),
+   WallPushUp (5.84), StepUps (1.32). For each the choice is: loosen the cap, or re-record the
+   reference. StepUps at 1.32 is within measurement noise and can be closed by rounding the cap.
+7. **Record a reference for `StandingStraightUp`** so its cap can be checked at all.
+8. **Have a licensed PT sign the table below**, with attribution recorded in the repo.
 
-Until 1–5 are done: present ROM as tracking and trending, never as measurement. "Your range improved
+Until 1–8 are done: present ROM as tracking and trending, never as measurement. "Your range improved
 8° from baseline" is defensible; "your shoulder flexion is 142°" is not.
+
+## Change log
+
+Changes to cap values, with the basis for each. **No entry here is a clinical decision** — each is
+an engineering correction made because the cap was flagging its own reference, and each still needs
+review in the [Sign-off](#sign-off) table.
+
+### 2026-10-11 — BicepCurls and SeatedMarch loosened
+
+Requested after a device run in which BicepCurls flagged all 10 reps. Basis for the new values:
+the measured demonstration extreme, with headroom, so a patient copying the reference is not
+flagged. The other three breaching caps (SideArmRaise, WallPushUp, StepUps) were deliberately
+left as they are.
+
+| Exercise | Cap | Was | Now | Demonstrated | Why |
+| --- | --- | --- | --- | --- | --- |
+| BicepCurls | `elbowAngle` | min 40 | **min 5** | 11.93 | A full curl is the correct movement and carries no injury risk — the elbow cannot be forced past its own soft-tissue stop by curling. Also 11.93° included angle implies ~168° of flexion, beyond the AAOS normal maximum of 150°, so the 2D reading is inflated at end-range and is not comparable to a goniometric norm. 5 is a tripwire for nonsense readings, not a limit. |
+| SeatedMarch | `kneeLiftNorm` | max 0.45 | **max 0.85** | 0.72 | Dimensionless ratio with no clinical norm; the only available basis is the measured distribution. 0.85 leaves ~17% headroom above the demonstration. |
+| SeatedMarch | `hipAngle` | min 50 | **min 5** | 12.74 | Not trustworthy for this exercise at all: framing is `front`, so the lifting thigh points at the camera and foreshortens. 12.74° implies ~167° of hip flexion against an AAOS normal of 120°. Set to a nonsense tripwire; `kneeLiftNorm` carries the real constraint. |
+
+**Why the SeatedMarch demonstrated values sit outside the per-leg ranges.** This is an
+**alternating** exercise, and `buildTemplateFromReps` averages reps positionally (each rep
+resampled to 60 frames, frame *t* = mean of frame *t* across reps). At the peak-lift frame one rep
+has the left leg up and the next has the right, so the averaged `kneeLiftNormL` / `hipAngleL`
+channels are diluted toward the middle (0.42 / 78.8) while the aggregate `max(L,R)` / `min(L,R)`
+channels correctly track whichever leg is lifting (0.72 / 12.74). The aggregates are the honest
+reading, and they are also what the cap resolves onto, so they are what it must be set against.
+
+Recorded correction: an earlier analysis in this project called the SeatedMarch
+`hipAngleMin = 12.74` figure a tracking artefact from an occluded far leg. That was wrong — it is
+the correctly-averaged lifting-leg channel. The open question about it is projection error in a
+front view, not landmark dropout.
 
 ## Sign-off
 
-| Exercise | Cap | Reviewer | Date | Decision (keep / change to / remove) |
+One row per cap set. A reviewer fills in the last three columns; record attribution here so
+the repo carries it.
+
+| Exercise | Cap as coded (2026-10-11) | Reviewer | Date | Decision (keep / change to / remove) |
 | --- | --- | --- | --- | --- |
-| SideArmRaise | `shoulderAngle max 95` | | | |
-| BicepCurls | `elbowAngle min 40` | | | |
-| MiniSquats | `kneeAngle min 100` | | | |
-| SitToStand | `kneeAngle max 180` | | | |
-| LongArcQuad | `kneeAngle max 178` | | | |
-| SeatedMarch | `kneeLiftNorm max 0.45`, `hipAngle min 50` | | | |
-| StandingMarch | `kneeLiftNorm max 0.50`, `hipAngle min 45` | | | |
-| MiniLunges | `kneeAngle min 90` | | | |
-| LiftsAndChops | `handsHeightNorm max 1.3` | | | |
-| StepUps | `kneeAngle min 95`, `kneeLiftNorm max 0.40` | | | |
-| WallPushUp | `elbowAngle min 75` | | | |
-| CalfRaisesSeated | `footPitchNorm max 0.22` | | | |
+| BicepCurls | `elbowAngle min 5` | | | |
+| CalfRaisesSeated | `footPitchNorm max 0.36` | | | |
 | CalfRaisesStanding | `footPitchNorm max 0.22` | | | |
-| SeatedDorsiflexion | `footPitchNorm min −0.12` | | | |
-| StandingDorsiflexion | `footPitchNorm min −0.11` | | | |
+| LiftsAndChops | `handsHeightNorm max 1.3` | | | |
+| LongArcQuad | `kneeAngle max 178` | | | |
+| MiniLunges | `kneeAngle min 90` | | | |
+| MiniSquats | `kneeAngle min 100` | | | |
+| SeatedDorsiflexion | `ankleAngleToe min 95` | | | |
+| SeatedMarch | `kneeLiftNorm max 0.85`, `hipAngle min 5` | | | |
+| SideArmRaise | `shoulderAngle max 95` | | | |
+| SitToStand | `kneeAngle max 180` | | | |
+| StandingDorsiflexion | `footPitchNorm min -0.11` | | | |
+| StandingMarch | `kneeLiftNorm max 0.5`, `hipAngle min 45` | | | |
 | StandingStraightUp | `kneeAngle max 182` | | | |
+| StepUps | `kneeAngle min 95`, `kneeLiftNorm max 0.4` | | | |
+| WallPushUp | `elbowAngle min 75` | | | |
 
 ## Sources
 
