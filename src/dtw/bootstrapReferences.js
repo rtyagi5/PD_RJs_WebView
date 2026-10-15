@@ -53,7 +53,22 @@ export function applyCanonicalPolicy(ref, canonical) {
   const merged = { ...ref };
   const overridden = [];
   for (const field of CANONICAL_FIELDS) {
-    if (canonical[field] === undefined) continue;
+    // `== null` catches null as well as undefined, and the null case is the one
+    // that mattered. bootstrapAllReferences passes a GENERATED reference as the
+    // canonical source, not the raw EXERCISE_CONFIGS entry, and generateReference
+    // emits `primaryFeature: null` for every exercise that does not pin one.
+    // null !== undefined, so the overlay copied that null straight over the
+    // feature the operator chose during extraction - on every recorded
+    // reference, silently.
+    //
+    // Measured on device: LiftsAndChops is pinned to handsHeightNorm (range
+    // 1.58) in its .ref.json, but the engine reported
+    //   [DTW] Primary feature: shoulderAngleL range=147.9 minROM=81.3
+    // because the nulled pin sent it to the widest-range auto-picker, which in
+    // an arm exercise is the shoulder. The disagreement warning below could not
+    // catch it either: it compares against merged.primaryFeature, which was the
+    // null being complained about.
+    if (canonical[field] == null) continue;
     // Only report a real disagreement, not the absence of a field.
     if (ref[field] !== undefined && JSON.stringify(ref[field]) !== JSON.stringify(canonical[field])) {
       overridden.push(field);
