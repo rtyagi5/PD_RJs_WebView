@@ -94,10 +94,29 @@ export function resolveRomGate({
   const safeTemplateRange = Number.isFinite(templateRange) ? templateRange : 0;
   const templateValue = pct * safeTemplateRange;
 
-  const floor = absoluteFloorFor(primaryFeature);
   // The template gate is the ceiling: a patient with an unusually large
   // calibration must not be able to make the gate HARDER than the original.
   const ceiling = templateValue;
+
+  // The floor exists to stop a baseline that captured almost no movement from
+  // shrinking the gate into sensor noise. It must never exceed the TEMPLATE
+  // gate, because that value is the demonstration's own definition of a full
+  // rep - a floor above it asserts that a correct repetition is not one.
+  //
+  // Measured: StandingDorsiflexion is a genuinely small movement. Its recorded
+  // reference separates the two postures by 4.02 degrees, with the plateaus
+  // holding to 0.23 - a 17.7:1 signal-to-wobble, in line with every other foot
+  // exercise in the set. minRomPct 0.80 puts its template gate at 3.87, and the
+  // flat 8-degree angle floor raised that to 8.00: nearly twice the entire
+  // demonstrated range. No patient could ever have scored a rep, and the logs
+  // would have shown a healthy engine counting nothing.
+  //
+  // ROM_FLOORS are documented as untuned starting values, so this does not
+  // change any number that was ever measured - it only stops one from being
+  // applied where it is incoherent. Exercises whose template gate already
+  // exceeds the floor (every other reference) are unaffected.
+  const rawFloor = absoluteFloorFor(primaryFeature);
+  const floor = templateValue > 0 ? Math.min(rawFloor, templateValue) : rawFloor;
 
   // Only a LOCKED baseline is trusted. Mid-calibration min/max is still growing,
   // so a gate derived from it would drift downward frame by frame.

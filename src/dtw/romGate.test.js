@@ -99,3 +99,33 @@ describe('resolveRomGate', () => {
     expect(Number.isFinite(g.value)).toBe(true);
   });
 });
+
+describe('the floor never exceeds the template gate', () => {
+  it('does not demand more movement than the demonstration showed', () => {
+    // StandingDorsiflexion: 4.84 degrees of range, minRomPct 0.80 -> 3.87.
+    // The flat 8-degree floor would raise the gate above the whole movement.
+    const gate = resolveRomGate({
+      primaryFeature: 'ankleAngleToeL', minRomPct: 0.80, templateRange: 4.84,
+    });
+    expect(gate.value).toBeCloseTo(3.872, 3);
+    expect(gate.value).toBeLessThan(4.84);
+  });
+
+  it('still floors a baseline that captured almost nothing', () => {
+    const gate = resolveRomGate({
+      primaryFeature: 'ankleAngleToeL', minRomPct: 0.80, templateRange: 4.84,
+      patientBaseline: lockedBaseline('ankleAngleToeL', 0.1),
+    });
+    expect(gate.value).toBeCloseTo(3.872, 3);
+    expect(gate.clamped).toBe('floor');
+  });
+
+  it('leaves exercises with a normal range untouched', () => {
+    // SeatedDorsiflexion: 26.49 range -> template gate 21.19, well above 8.
+    const gate = resolveRomGate({
+      primaryFeature: 'ankleAngleToeR', minRomPct: 0.80, templateRange: 26.49,
+    });
+    expect(gate.value).toBeCloseTo(21.192, 3);
+    expect(gate.floor).toBe(8);
+  });
+});
