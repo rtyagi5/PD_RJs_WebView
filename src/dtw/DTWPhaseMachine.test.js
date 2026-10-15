@@ -1475,3 +1475,72 @@ describe('phase hysteresis', () => {
     expect(cueChanges(out).length).toBeLessThanOrEqual(3);
   });
 });
+
+// On device (WallPushUp, 9 reps) reps 5 and 9 came back `attempt` at 80% and 90%
+// ROM. The completed threshold is 70% and no custom tolerance is passed, so the
+// only branch that can return completed:false there is the cap-breach branch —
+// the cap fired, downgraded both reps, and the whole run spoke only rep numbers.
+//
+// Cause: breaches are accumulated across the cycle for CLASSIFICATION
+// (`cycleCapBreaches`) but speech asked `_capBreaches(features)` about the CURRENT
+// frame. A brief excursion past the limit is already over by the time feedback is
+// next selected — at ~8.8 unique poses/s there may be no such frame left.
+describe('a cap breach during a rep is announced after the rep', () => {
+  const TOO_MUCH = EXERCISE_CONFIGS.SideArmRaise.feedback.range.tooMuch;
+
+  // SideArmRaise caps shoulderAngle at max 95. This rep peaks at 105 (a breach)
+  // and returns to 30, so by the time the rep closes nothing is breaching.
+  const breachingRep = () => [
+    ...hold(30, 8), ...ramp(30, 105, 12), ...hold(105, 4),
+    ...ramp(105, 30, 12), ...hold(30, 10),
+  ];
+
+  const cuesFor = values => {
+    const eng = makeArmRaiseEngine();
+    const out = drive(eng, values, { feature: 'shoulderAngleL' });
+    return { cues: out.map(r => r.feedback), eng };
+  };
+
+  it('speaks the safety cue even though the breach is over when the rep closes', () => {
+    const { cues, eng } = cuesFor(breachingRep());
+    expect(eng.repCount).toBe(1);
+    expect(cues).toContain(TOO_MUCH);
+  });
+
+  it('still counts the rep', () => {
+    const { eng } = cuesFor(breachingRep());
+    expect(eng.repCount).toBe(1);
+  });
+
+  it('stays silent for a rep that never breaches', () => {
+    const { cues, eng } = cuesFor(armRaiseRep());
+    expect(eng.repCount).toBe(1);
+    expect(cues).not.toContain(TOO_MUCH);
+  });
+
+  it('clears the latch once consumed, so one excursion is not a stream', () => {
+    const eng = makeArmRaiseEngine();
+    drive(eng, breachingRep(), { feature: 'shoulderAngleL' });
+    expect(eng._breachAnnouncedUntil).toBe(0);
+  });
+});
+
+describe('the rep log discloses why a rep was downgraded', () => {
+  it('names the breached cap, and serialises details', () => {
+    const eng = makeArmRaiseEngine();
+    const lines = [];
+    const spy = jest.spyOn(console, 'log').mockImplementation((...a) => lines.push(a.join(' ')));
+    try {
+      drive(eng, [...hold(30, 8), ...ramp(30, 105, 12), ...hold(105, 4),
+                  ...ramp(105, 30, 12), ...hold(30, 10)], { feature: 'shoulderAngleL' });
+    } finally {
+      spy.mockRestore();
+    }
+    const repLine = lines.find(l => l.includes('Rep 1 | classification='));
+    expect(repLine).toBeDefined();
+    expect(repLine).toContain('CAP BREACH');
+    expect(repLine).toContain('shoulderAngleL');
+    // "[object Object]" is what blocked diagnosis on device.
+    expect(repLine).not.toContain('[object Object]');
+  });
+});

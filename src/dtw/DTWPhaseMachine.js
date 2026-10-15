@@ -147,6 +147,21 @@ const speechDurationMs = text => SPEECH_LATENCY_MS + String(text || '').length *
 const BREACH_REPORT_MS = 1500;
 const SUSTAINED_BREACH_REPEAT_MS = 6000;
 
+// How long a cap breach stays announceable AFTER the rep it happened during.
+//
+// Measured on device (WallPushUp, 9 reps): reps 5 and 9 were classified `attempt`
+// at 80% and 90% ROM. The completed threshold is 70% and no custom tolerance is
+// passed, so the only branch that can return completed:false there is the
+// cap-breach branch - the cap fired, downgraded both reps, and said nothing. The
+// whole run spoke only rep numbers.
+//
+// The cause is that breaches are accumulated across the cycle for CLASSIFICATION
+// (`cycleCapBreaches`) but speech asks `_capBreaches(features)` about the CURRENT
+// frame. A brief dip past the limit at the bottom of a push-up flags the rep and
+// is already gone by the time feedback is next selected - at ~8.8 unique poses a
+// second there may be no frame left where it is still true.
+const BREACH_ANNOUNCE_MS = 1800;
+
 // Deliberately does NOT name a cause. The engine can see that the numbers do
 // not describe the movement, but not why: a moved camera and a reference whose
 // idle side is occlusion noise look identical from here, and the first version
@@ -189,6 +204,18 @@ export class DTWPhaseMachine {
     // Mode
     this.mode = reference.mode === 'time' ? 'time' : 'reps';
     this.isAlternating = reference.side === 'alternating';
+    // A reference recorded as 'both' means EITHER limb performing the movement is a
+    // rep. That is not the same as alternating (which additionally requires the side
+    // to change every rep), and it is not the same as a sided assignment.
+    //
+    // Measured on device: BicepCurls is recorded 'both' and pinned to elbowAngleR,
+    // but the session carried side=left, so the pin resolved to elbowAngleL and the
+    // engine watched only the left elbow:
+    //   [DTW] Primary feature: elbowAngleL range=166.4 minROM=66.6 side=left
+    // Right-arm curls moved nothing it was watching and counted no reps, while
+    // left-arm curls counted normally. 'both' was being dropped on the floor here -
+    // only 'alternating' ever got special treatment.
+    this.isBilateral = reference.side === 'both';
 
     // For alternating exercises, use 'alternating' mode in the DTW engine so it
     // compares only aggregate features (Min/Max/Avg), making both legs visible.
@@ -296,9 +323,10 @@ export class DTWPhaseMachine {
     // Otherwise fall back to the auto-picker: largest-range feature filtered by active side.
     let bestKey = null;
     let bestRange = 0;
-    if (reference.primaryFeature && this.featureRanges[reference.primaryFeature]) {
-      bestKey = reference.primaryFeature;
-      bestRange = this.featureRanges[reference.primaryFeature].range || 0;
+    const pinned = this._resolvePinnedFeature(reference.primaryFeature);
+    if (pinned && this.featureRanges[pinned]) {
+      bestKey = pinned;
+      bestRange = this.featureRanges[pinned].range || 0;
     } else {
       // `primaryFeatureBase` narrows the auto-picker to one feature FAMILY while
       // leaving its side/aggregate resolution intact — which an exact
@@ -377,6 +405,9 @@ export class DTWPhaseMachine {
     this.templateRomGate = this.minRomPct * bestRange;
     this.nearStartTolerance = this.templateRomGate;
     this.minRomForRep = this.templateRomGate; // refined below once a baseline exists
+    // Set when a rep completes carrying cap breaches, so the warning is spoken
+    // once the movement is over rather than requiring the breach to still be live.
+    this._breachAnnouncedUntil = 0;
     this.cycleFeatureMin = Infinity;
     this.cycleFeatureMax = -Infinity;
     this.cycleSummary = {};
@@ -776,7 +807,7 @@ export class DTWPhaseMachine {
           repDelta = 1;
           this._judgeTempo(now);
           this.lastActiveSide = this.activeSideDuringCycle;
-          console.log(`[DTW] Rep ${this.repCount} | classification=${repClassification.completed ? 'completed' : 'attempt'} romPct=${((repClassification.romPct ?? 0) * 100).toFixed(0)}% details=`, repClassification.details);
+          this._logRep('DTW', repClassification, now);
         }
         console.log(`[DTW] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
         if (repDelta > 0) {
@@ -818,7 +849,7 @@ export class DTWPhaseMachine {
           repDelta = 1;
           this._judgeTempo(now);
           this.lastActiveSide = this.activeSideDuringCycle;
-          console.log(`[DTW-backup] Rep ${this.repCount} | classification=${repClassification.completed ? 'completed' : 'attempt'} romPct=${((repClassification.romPct ?? 0) * 100).toFixed(0)}% details=`, repClassification.details);
+          this._logRep('DTW-backup', repClassification, now);
         }
         console.log(`[DTW-backup] Rep! rom=${actualRom.toFixed(1)} min=${this.minRomForRep.toFixed(1)} reps=${this.repCount} activeSide=${this.activeSideDuringCycle} lastSide=${this.lastActiveSide}`);
         if (repDelta > 0) {
@@ -962,6 +993,123 @@ export class DTWPhaseMachine {
         `baseline=${f(this.romGate.baselineValue)} clamp=${this.romGate.clamped ?? 'none'}`
       );
     }
+  }
+
+  /**
+   * Re-resolve a recorded `primaryFeature` onto the side THIS session is working.
+   *
+   * The override exists so a reference can name a side-agnostic aggregate and
+   * bypass the auto-picker's ranking. But it bypasses the auto-picker's SIDE
+   * FILTER at the same time, and the extractor records whichever concrete key
+   * the operator segmented on - so a BicepCurls reference recorded on the right
+   * arm pinned every session to `elbowAngleR`, including a patient assigned the
+   * left arm, whose right elbow hangs still. No reps, and nothing in the log
+   * that says why: the pin looked like a deliberate choice.
+   *
+   * A recording says which feature FAMILY the movement lives in. Which side to
+   * watch is a property of the assignment, not of the demonstration, so the
+   * side is re-derived here and only the family is taken from the file.
+   */
+  /**
+   * Which way the primary feature travels from the rest posture into the effort
+   * phase, read off the reference's own template: -1 if the value falls (a curl
+   * closing the elbow), +1 if it rises (an arm raise opening the shoulder), 0 if
+   * it cannot be determined.
+   *
+   * This decides which aggregate a bilateral exercise should watch. Hardcoding
+   * Min would be right for BicepCurls and wrong for SideArmRaise, where the
+   * resting arm holds the minimum and the aggregate would never move.
+   */
+  _effortDirection(key) {
+    const tpl = this.reference?.template;
+    if (!Array.isArray(tpl) || !tpl.length) return 0;
+    const meanOf = phase => {
+      const vals = tpl
+        .filter(f => f.phase === phase)
+        .map(f => f.features?.[key])
+        .filter(Number.isFinite);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : NaN;
+    };
+    const atStart = meanOf(this.repCycle.start);
+    const atEffort = meanOf(this.repCycle.effort);
+    if (!Number.isFinite(atStart) || !Number.isFinite(atEffort)) return 0;
+    return Math.sign(atEffort - atStart);
+  }
+
+  _resolvePinnedFeature(pin) {
+    if (!pin) return null;
+    if (/(?:Min|Max|Avg)$/.test(pin)) return pin;   // already side-agnostic
+    const recorded = /([LR])$/.exec(pin)?.[1];
+    if (!recorded) return pin;                       // bilateral key, no side to fix
+    const base = stripSideSuffix(pin);
+    const have = key => (this.featureRanges[key] ? key : null);
+
+    if (this.isBilateral) {
+      // Either limb counts, so the pin must follow whichever one is moving, and
+      // which aggregate does that depends on the direction of travel: a movement
+      // that CLOSES the joint puts the working limb at the Min, one that OPENS it
+      // puts the working limb at the Max. Hardcoding Min would be right for a
+      // curl and wrong for an arm raise, where the resting arm holds the minimum
+      // and the aggregate would never move. Unlike the alternating branch there
+      // is no side-change rule to enforce afterwards - order does not matter for
+      // a bilateral exercise.
+      const dir = this._effortDirection(pin);
+      // Only an aggregate that matches the direction will do. There is no
+      // shoulderAngleMax in universalFeatures, so a rising movement that fell back
+      // to Min would end up watching the RESTING arm, which holds the minimum and
+      // never moves - worse than not resolving at all. Avg is accepted as a second
+      // choice (it tracks the working limb at half amplitude); anything else keeps
+      // the pin and says so.
+      const order = dir > 0 ? ['Max', 'Avg'] : dir < 0 ? ['Min', 'Avg'] : ['Min', 'Max', 'Avg'];
+      const agg = order.map(suf => have(base + suf)).find(Boolean);
+      if (agg) {
+        const travel = dir > 0 ? 'rising' : dir < 0 ? 'falling' : 'unknown';
+        console.log(
+          '[DTW] primaryFeature "' + pin + '" -> "' + agg + '": bilateral exercise, ' +
+          'either side counts (effort direction ' + travel + ').'
+        );
+        return agg;
+      }
+      console.warn(
+        '[DTW] primaryFeature "' + pin + '" is bilateral but "' + base + '" has no ' +
+        'Min/Max/Avg aggregate in this reference. Counting on "' + pin + '" - only ' +
+        'that limb will register.'
+      );
+      return pin;
+    }
+
+    if (this.isAlternating) {
+      // Alternating needs an aggregate: the active limb changes every rep, so
+      // no single side can follow it. Fall through to the auto-picker (which
+      // enforces exactly this) when the family has no aggregate in range.
+      const agg = ['Max', 'Min', 'Avg'].map(suf => have(`${base}${suf}`)).find(Boolean);
+      if (agg) {
+        console.log(`[DTW] primaryFeature "${pin}" -> "${agg}": this exercise alternates sides.`);
+        return agg;
+      }
+      console.warn(
+        `[DTW] primaryFeature "${pin}" names one side but this exercise alternates, and ` +
+        `"${base}" has no Min/Max/Avg aggregate in this reference. Falling back to the auto-picker.`
+      );
+      return null;
+    }
+
+    const want = this.side === 'left' ? 'L' : (this.side === 'right' ? 'R' : null);
+    if (!want || want === recorded) return pin;
+    const swapped = have(`${base}${want}`);
+    if (swapped) {
+      console.log(
+        `[DTW] primaryFeature "${pin}" -> "${swapped}": recorded on the ` +
+        `${recorded === 'L' ? 'left' : 'right'}, session is ${this.side}.`
+      );
+      return swapped;
+    }
+    console.warn(
+      `[DTW] primaryFeature "${pin}" is recorded on the ${recorded === 'L' ? 'left' : 'right'} ` +
+      `but this session is ${this.side}, and "${base}${want}" is not in this reference. ` +
+      `Counting on "${pin}" — reps will be missed if that limb is not the one moving.`
+    );
+    return pin;
   }
 
   /**
@@ -1173,7 +1321,15 @@ export class DTWPhaseMachine {
     // 0. Safety ceiling — HIGHEST priority, above the rep announcement. A patient
     // moving past a clinical limit needs to hear it immediately; suppressing it
     // behind the rep number is how "don't raise above 90°" went silent.
-    if (this._exceedsClinicalCap(features, now) && fb.range?.tooMuch) {
+    // `_breachAnnouncedUntil` covers the breach that happened DURING the rep just
+    // counted. Without it the cue needs the patient to still be past the limit at
+    // the moment feedback is selected, which a brief dip at the bottom of a
+    // movement never is - the rep is silently downgraded instead. Safety stays
+    // above the rep number deliberately: a flagged rep is not a completed one, so
+    // the warning is the more useful of the two things to hear.
+    if ((this._exceedsClinicalCap(features, now) || now < this._breachAnnouncedUntil)
+        && fb.range?.tooMuch) {
+      this._breachAnnouncedUntil = 0; // one announcement per rep, not a stream
       return { say: fb.range.tooMuch, tier: 'safety' };
     }
 
@@ -1400,6 +1556,41 @@ export class DTWPhaseMachine {
    * Classify a detected rep as completed or attempt using PatientBaseline.
    * If no baseline is set, all reps count as completed.
    */
+  /**
+   * One place that reports a counted rep, so the primary and backup paths cannot
+   * drift apart in what they disclose.
+   *
+   * Two things used to be invisible here, and both blocked diagnosis of a real
+   * device run:
+   *   - `details` was passed as an object to console.log, which renders as
+   *     "[object Object]" in Android logcat, hiding the per-feature ROM breakdown
+   *     that explains WHY a rep scored what it did.
+   *   - cap breaches were never printed at all, so "the cap did not fire" and
+   *     "the cap fired and was not spoken" were indistinguishable.
+   *
+   * This also arms the breach announcement (see BREACH_ANNOUNCE_MS).
+   */
+  _logRep(tag, rc, now) {
+    const breaches = rc.capBreaches || [];
+    const pct = ((rc.romPct ?? 0) * 100).toFixed(0);
+    let line = `[${tag}] Rep ${this.repCount} | classification=`
+      + (rc.completed ? 'completed' : 'attempt')
+      + ` romPct=${pct}%`;
+    if (breaches.length) {
+      // The reason a rep was downgraded matters more than the fact of it.
+      line += ' | CAP BREACH: ' + breaches
+        .map(b => `${b.key} ${b.bound} ${b.limit} (was ${Number(b.value).toFixed(2)})`)
+        .join(', ');
+    }
+    let details = rc.details;
+    try { details = JSON.stringify(rc.details); } catch (e) { details = String(rc.details); }
+    console.log(`${line} details=${details}`);
+
+    if (breaches.length && Number.isFinite(now)) {
+      this._breachAnnouncedUntil = now + BREACH_ANNOUNCE_MS;
+    }
+  }
+
   _classifyRep(features, quality) {
     const capBreaches = this.cycleCapBreaches || [];
     const flagged = capBreaches.length > 0;
