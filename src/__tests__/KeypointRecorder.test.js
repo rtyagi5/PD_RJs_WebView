@@ -187,3 +187,86 @@ describe('failure containment', () => {
     await expect(rec.saveToDevServer({ liveRepCount: 1 })).resolves.toBe(false);
   });
 });
+
+// A capture used to be written only by onComplete, so an abandoned session left
+// nothing behind. Measured: a 9-of-10 WallPushUp run produced the logs that every
+// finding came from, and no .jsonl at all — the sessions worth replaying are
+// exactly the ones a tester stops early.
+describe('an abandoned recording is still usable', () => {
+  const abandoned = (frames, meta) => {
+    const rec = makeRecorder();
+    rec.start();
+    for (let i = 0; i < frames; i++) rec.recordFrame(KPS, {});
+    return JSON.parse(rec.finish(meta).jsonl.split('\n')[0]);
+  };
+
+  it('finalises the header even with no rep count', () => {
+    // The old guard was `if (meta.liveRepCount != null && ...)`, so a session with
+    // no rep count also lost endedAtIso and frames — the one capture that most
+    // needed to say "this set was not finished" said nothing at all.
+    const h = abandoned(7, { completed: false });
+    expect(h.frames).toBe(7);
+    expect(h.endedAtIso).toBeTruthy();
+  });
+
+  it('is marked not completed, so a replay knows not to assert a full set', () => {
+    expect(abandoned(7, { completed: false }).completed).toBe(false);
+    expect(abandoned(7, {}).completed).toBe(false);
+  });
+
+  it('marks a finished set completed', () => {
+    expect(abandoned(10, { liveRepCount: 10, completed: true }).completed).toBe(true);
+  });
+});
+
+describe('autosave keeps the file alive mid-session', () => {
+  const withDevEnv = fn => {
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development'; // maybeAutosave is a dev-only path
+    try { return fn(); } finally { process.env.NODE_ENV = prev; }
+  };
+
+  const atFrame = n => {
+    const rec = makeRecorder();
+    rec.start();
+    rec.frameCount = n;
+    return rec;
+  };
+
+  it('does not save before the interval has elapsed', () => withDevEnv(() => {
+    const rec = atFrame(50);
+    const spy = jest.spyOn(rec, 'saveToDevServer').mockResolvedValue(true);
+    rec.maybeAutosave({ liveRepCount: 2 });
+    expect(spy).not.toHaveBeenCalled();
+  }));
+
+  it('saves once the interval has elapsed, marked not completed', () => withDevEnv(() => {
+    const rec = atFrame(300);
+    const spy = jest.spyOn(rec, 'saveToDevServer').mockResolvedValue(true);
+    rec.maybeAutosave({ liveRepCount: 4 });
+    expect(spy).toHaveBeenCalledWith({ liveRepCount: 4, completed: false });
+  }));
+
+  it('does not queue a second save behind one still in flight', () => withDevEnv(() => {
+    const rec = atFrame(300);
+    // Never resolves: the guard must hold while the POST is outstanding.
+    const spy = jest.spyOn(rec, 'saveToDevServer').mockReturnValue(new Promise(() => {}));
+    rec.maybeAutosave({});
+    rec.frameCount += 600;
+    rec.maybeAutosave({});
+    expect(spy).toHaveBeenCalledTimes(1);
+  }));
+
+  it('never throws into the render loop when a save fails', () => withDevEnv(() => {
+    const rec = atFrame(300);
+    jest.spyOn(rec, 'saveToDevServer').mockRejectedValue(new Error('dev server down'));
+    expect(() => rec.maybeAutosave({})).not.toThrow();
+  }));
+
+  it('stays silent outside development', () => {
+    const rec = atFrame(300);
+    const spy = jest.spyOn(rec, 'saveToDevServer').mockResolvedValue(true);
+    rec.maybeAutosave({});
+    expect(spy).not.toHaveBeenCalled();
+  });
+});

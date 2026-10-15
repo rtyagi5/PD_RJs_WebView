@@ -336,6 +336,23 @@ export default function ExerciseTrackerRefactored({
   // same skeleton-recording consent, because it captures the same movement.
   const keypointRecorderRef = useRef(null);
 
+  // Last-chance flush for a session that ends without completing - the patient
+  // backs out, or the activity is closed. onComplete nulls the ref after its own
+  // flush, so a non-null ref here means the set did not finish.
+  //
+  // Empty deps on purpose: this must run on unmount only. Hanging it off the
+  // render-loop effect would fire on every engine or side change and flush a
+  // partial capture mid-session.
+  useEffect(() => () => {
+    const kpRec = keypointRecorderRef.current;
+    if (!kpRec) return;
+    keypointRecorderRef.current = null;
+    // Not awaited - React cannot await a cleanup, and the autosave above means
+    // losing this one costs at most the final few seconds.
+    kpRec.saveToDevServer({ liveRepCount: repCountRef.current, completed: false })
+      .catch(e => console.warn('[KeypointRecorder] unmount flush failed:', e));
+  }, []);
+
   const onComplete = useCallback(async () => {
     // Save patient baseline & session summary (DTW mode)
     const eng = engine;
@@ -366,7 +383,7 @@ export default function ExerciseTrackerRefactored({
     const kpRec = keypointRecorderRef.current;
     if (kpRec) {
       try {
-        await kpRec.saveToDevServer({ liveRepCount: repCountRef.current });
+        await kpRec.saveToDevServer({ liveRepCount: repCountRef.current, completed: true });
       } catch (e) {
         console.warn('[KeypointRecorder] flush failed:', e);
       }
@@ -837,6 +854,8 @@ export default function ExerciseTrackerRefactored({
             kpRec.start();
           }
           kpRec.recordFrame(rawKps, feat);
+          // Throttled internally and fire-and-forget; see maybeAutosave.
+          kpRec.maybeAutosave({ liveRepCount: repCountRef.current });
         }
 
         const stepResult = engine.step({

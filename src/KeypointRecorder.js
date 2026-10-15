@@ -32,6 +32,10 @@ function makeSessionId() {
   return `s-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// ~10s at 30fps. Short enough that an abandoned session loses little, long
+// enough that the POST cost is negligible against the frame budget.
+const AUTOSAVE_EVERY_FRAMES = 300;
+
 export class KeypointRecorder {
   /**
    * @param {Object}   opts
@@ -143,9 +147,16 @@ export class KeypointRecorder {
   finish(meta = {}) {
     if (this.failed || !this.startedAtIso) return null;
     try {
-      if (meta.liveRepCount != null && this.lines.length > 0) {
+      // Finalised on EVERY finish, not only when a rep count is supplied. An
+      // abandoned session has no liveRepCount, and the old guard meant it also
+      // lost endedAtIso and frames - so the one capture that most needs to say
+      // "this set was not finished" said nothing at all.
+      if (this.lines.length > 0) {
         const header = JSON.parse(this.lines[0]);
-        header.liveRepCount = meta.liveRepCount;
+        if (meta.liveRepCount != null) header.liveRepCount = meta.liveRepCount;
+        // `completed` is what lets a replay tell a finished set from one that was
+        // stopped early, which changes what the recording can be asserted against.
+        header.completed = meta.completed === true;
         header.endedAtIso = new Date().toISOString();
         header.frames = this.frameCount;
         this.lines[0] = JSON.stringify(header);
@@ -178,6 +189,27 @@ export class KeypointRecorder {
    *
    * @returns {Promise<boolean>} true if the server accepted it
    */
+  /**
+   * Save periodically during the session, so an abandoned set still leaves a
+   * replayable file. The dev route overwrites by filename, so each autosave
+   * simply replaces the previous one with everything captured so far - at worst
+   * a stopped session loses the last AUTOSAVE_EVERY_FRAMES frames.
+   *
+   * Deliberately fire-and-forget: this is called from the render loop, and
+   * awaiting a ~300KB POST there would stall frames. An in-flight guard stops
+   * a slow save from queueing behind itself.
+   */
+  maybeAutosave(meta = {}) {
+    if (process.env.NODE_ENV !== 'development') return;
+    if (this.failed || !this.startedAtIso || this._autosaveInFlight) return;
+    if (this.frameCount - (this._lastAutosaveFrame || 0) < AUTOSAVE_EVERY_FRAMES) return;
+    this._lastAutosaveFrame = this.frameCount;
+    this._autosaveInFlight = true;
+    this.saveToDevServer({ ...meta, completed: false })
+      .catch(() => {})              // never surface this to the patient
+      .finally(() => { this._autosaveInFlight = false; });
+  }
+
   async saveToDevServer(meta = {}) {
     if (process.env.NODE_ENV !== 'development') return false;
     const out = this.finish(meta);
