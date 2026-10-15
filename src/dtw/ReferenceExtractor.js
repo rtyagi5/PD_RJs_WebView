@@ -15,7 +15,7 @@ import PoseOverlay from './PoseOverlay';
 import { PROCESSING_MAX_WIDTH } from '../captureConfig';
 import { MIRROR_SENSITIVE_FEATURES, stripSideSuffix } from './universalFeatures';
 import { labelPhasesBySignal, resolveCycle } from './phaseLabeller';
-import { checkPhaseSeparation } from './referenceHealth';
+import { checkReferenceHealth } from './referenceHealth';
 import { getServiceUrl } from '../config';
 import { clearCachedReference } from './referenceStorage';
 
@@ -124,6 +124,16 @@ function featureChoices(frames, cfg, topN = 8) {
   const wanted = new Set();
   if (cfg.primaryFeatureBase) wanted.add(cfg.primaryFeatureBase);
   for (const key of Object.keys(cfg.featureDirections || {})) wanted.add(key);
+  // Every feature this exercise's own template sweeps, whatever its units.
+  // getTopFeatures ranks by RAW range, which compares degrees against
+  // dimensionless ratios: a normalised feature can never reach the top N while
+  // any joint angle is in the list. SitToStand sweeps kneeAngle (75 deg) and
+  // hipToAnkleNorm (0.8), and the clip's angles span 85-104 - so the dropdown
+  // for a sit-to-stand offered eight angles and not one of the two features the
+  // exercise is actually defined by.
+  for (const ph of cfg.phases || []) {
+    for (const key of Object.keys(ph.features || {})) wanted.add(key);
+  }
   if (!wanted.size) return top;
 
   const have = new Set(top.map(f => f.key));
@@ -679,15 +689,36 @@ export default function ReferenceExtractor() {
     // do not separate the rest posture from the effort posture. Catch that here,
     // while the operator still has the video open, rather than at app startup on
     // someone's phone.
-    const health = checkPhaseSeparation(reference);
+    const health = checkReferenceHealth(reference, EXERCISE_CONFIGS[exerciseName]);
     if (!health.ok) {
+      // buildTemplateFromReps averages the reps POSITIONALLY: every rep is
+      // resampled to 60 frames and frame t is the mean of frame t across all of
+      // them. So the reps have to be aligned with EACH OTHER, not merely contain
+      // one repetition apiece. A rep cut half a movement later than its
+      // neighbours averages its ascent against their descent, and the mean
+      // crosses the movement twice - which reads as 'more than one repetition'
+      // without any rep boundary being wrong on its own. Printing where each
+      // marked rep begins is what makes that visible.
+      const starts = reps
+        .map(r => frames[r.start]?.features?.[primaryFeature])
+        .filter(Number.isFinite);
+      const spread = starts.length > 1 ? Math.max(...starts) - Math.min(...starts) : 0;
+      const alignment = starts.length > 1
+        ? `\n\n${primaryFeature} at the start of each marked rep: ` +
+          `${starts.map(v => v.toFixed(2)).join(', ')} (spread ${spread.toFixed(2)}). ` +
+          `The template averages your reps frame by frame, so these need to be close ` +
+          `to each other — every rep must begin at the same point in the movement, ` +
+          `not merely contain one repetition.`
+        : '';
       setStatusMsg(
-        `Reference is not usable: ${health.reason} ` +
-        `Nothing is lost — your reps, labels and cues are all still here. ` +
-        `This usually means the primary feature does not tell the two postures apart, ` +
-        `so try a different one on step 3, or widen the posture band on step 4.`
+        `Reference is not usable:\n` +
+        health.errors.map(e => `• ${e.check}: ${e.reason}`).join('\n') +
+        alignment +
+        `\n\nNothing is lost — your reps, labels and cues are all still here. ` +
+        `Go back to step 3 to re-cut the rep boundaries or pick a different primary feature, ` +
+        `or widen the posture band on step 4.`
       );
-      setStatusAction({ label: 'Back to Reps — change the primary feature', step: 3 });
+      setStatusAction({ label: 'Back to Reps — re-cut reps / change the primary feature', step: 3 });
       return;
     }
 
@@ -696,12 +727,17 @@ export default function ReferenceExtractor() {
 
     setExportedJSON(reference);
     setStatusMsg(
-      `Reference "${reference.name}" exported and registered! ` +
+      `Reference "${reference.name}" passed all checks, exported and registered. ` +
       `${template.length} template frames, ${Object.keys(featureRanges).length} features` +
       (mirror.mirrored.length
         ? `, ${reference.provenance.recordedSide} side mirrored to the other so a patient ` +
           `can sit either way round.`
-        : '.')
+        : '.') +
+      // Warnings are things the operator should see but that do not make the file
+      // unusable, so they ride along with the success message rather than blocking.
+      (health.warnings.length
+        ? `\n\nWorth knowing:\n` + health.warnings.map(w => `• ${w.check}: ${w.reason}`).join('\n')
+        : '')
     );
     setStep(6);
   }, [frames, reps, phases, repCycle, feedback, exerciseName, exerciseSide, exerciseMode,
@@ -763,7 +799,7 @@ export default function ReferenceExtractor() {
       {statusMsg && (
         <div style={{ ...S.card, background: '#1a1a33', padding: '10px 16px', fontSize: 13,
                       display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <span style={{ flex: 1, minWidth: 240 }}>{statusMsg}</span>
+          <span style={{ flex: 1, minWidth: 240, whiteSpace: 'pre-wrap' }}>{statusMsg}</span>
           {statusAction && (
             <button style={{ ...S.btn, whiteSpace: 'nowrap' }}
               onClick={() => { setStep(statusAction.step); setStatusAction(null); }}>

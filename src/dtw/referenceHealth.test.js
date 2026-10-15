@@ -99,3 +99,36 @@ describe('the recorded SideArmRaise reference', () => {
     expect(res.details.effortMax).toBeGreaterThan(85);
   });
 });
+
+// ---------------------------------------------------------------
+// The canonical overlay must not erase a recorded primaryFeature.
+// ---------------------------------------------------------------
+describe('applyCanonicalPolicy and a null canonical value', () => {
+  // eslint-disable-next-line global-require
+  const { applyCanonicalPolicy } = require('./bootstrapReferences');
+  // eslint-disable-next-line global-require
+  const { generateReference, EXERCISE_CONFIGS } = require('./specToReference');
+
+  it('keeps the operator-chosen feature when the config pins none', () => {
+    const canonical = generateReference(EXERCISE_CONFIGS.LiftsAndChops);
+    expect(canonical.primaryFeature).toBeNull();          // the trap
+    const merged = applyCanonicalPolicy(
+      { name: 'LiftsAndChops', primaryFeature: 'handsHeightNorm' }, canonical);
+    expect(merged.primaryFeature).toBe('handsHeightNorm');
+  });
+
+  it('still lets a config that DOES pin one win', () => {
+    const canonical = generateReference(EXERCISE_CONFIGS.MiniSquats);
+    const merged = applyCanonicalPolicy(
+      { name: 'MiniSquats', primaryFeature: 'kneeAngleL' }, canonical);
+    expect(merged.primaryFeature).toBe('kneeAngleMin');
+  });
+
+  it('still overrides policy fields the config does define', () => {
+    const canonical = generateReference(EXERCISE_CONFIGS.SeatedDorsiflexion);
+    const merged = applyCanonicalPolicy(
+      { name: 'SeatedDorsiflexion', minRomPct: 0.1, detector: 'movenet' }, canonical);
+    expect(merged.minRomPct).toBe(0.80);
+    expect(merged.detector).toBe('mediapipe');
+  });
+});

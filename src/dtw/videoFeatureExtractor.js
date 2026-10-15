@@ -124,6 +124,19 @@ export function detectRepBoundaries(frames, primaryFeature) {
   // If user specified a feature, use it directly
   if (primaryFeature) {
     const result = _detectRepsForFeature(frames, primaryFeature);
+    // The candidate sweep below reports peaks/valleys for everything it tried,
+    // but this path returned in silence - so an explicitly chosen feature that
+    // found zero reps gave the operator a bare "0 reps" and nothing to act on.
+    // Peaks and valleys separate the two causes that look identical in the UI:
+    // no extrema at all (the joint never moved, or was never tracked) versus
+    // extrema found but never paired into valley->peak->valley cycles.
+    console.log(
+      `[RepDetect] ${frames.length} frames, feature chosen explicitly. ` +
+      `${primaryFeature}: ${result.reps.length} reps ` +
+      `(${result.peaks} peaks, ${result.valleys} valleys, ` +
+      `range ${result.range.toFixed(1)}, prominence threshold ${result.threshold.toFixed(2)}, ` +
+      `${result.nonFinite} unusable frames)`
+    );
     return { ...result, primaryFeature };
   }
 
