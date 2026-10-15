@@ -204,3 +204,45 @@ describe('foot keypoint sanity check (MediaPipe chair-leg guard)', () => {
     expect(dorsi.footPitchNormL).toBeLessThan(0);
   });
 });
+
+// kneeLiftNorm's denominator used to be the hip->ankle distance, which is a POSE
+// distance rather than a body dimension: the leg folds as the knee rises, so the
+// normaliser collapsed by the very movement the numerator measures. On device the
+// normaliser more than halved at the top of a seated march (hipAnkLen 131 -> 59)
+// and the ratio read 0.834 for a lift that was really ~0.38, breaching the cap and
+// downgrading ten good reps to `attempt`.
+describe('kneeLiftNorm is decoupled from leg folding', () => {
+  // Seated, left knee raised above hip level. Only the ankle moves between cases,
+  // which is exactly what folding the leg does.
+  const liftedWithAnkleAt = ankleY => standingPose({
+    left_knee: [85, 110], right_knee: [115, 110],
+    left_ankle: [85, ankleY], right_ankle: [115, ankleY],
+  });
+
+  it('does not change when only the ankle moves', () => {
+    const extended = computeUniversalFeatures(liftedWithAnkleAt(200));
+    const folded = computeUniversalFeatures(liftedWithAnkleAt(160));
+    // Old behaviour: 40/50 = 0.80 vs 40/10 = 4.00 — a 5x swing from the ankle alone.
+    expect(folded.kneeLiftNormL).toBeCloseTo(extended.kneeLiftNormL, 10);
+    expect(folded.kneeLiftNormR).toBeCloseTo(extended.kneeLiftNormR, 10);
+  });
+
+  it('normalises by torso length', () => {
+    const f = computeUniversalFeatures(liftedWithAnkleAt(200));
+    // left torso: (80,50)->(85,150) = sqrt(25 + 10000) = 100.1249...
+    // numerator: hip.y - knee.y = 150 - 110 = 40
+    expect(f.kneeLiftNormL).toBeCloseTo(40 / Math.hypot(5, 100), 6);
+  });
+
+  it('still reads zero when the knee is below the hip', () => {
+    const f = computeUniversalFeatures(standingPose());
+    expect(f.kneeLiftNormL).toBe(0);
+    expect(f.kneeLiftNormR).toBe(0);
+  });
+
+  it('still grows as the knee rises', () => {
+    const low = computeUniversalFeatures(standingPose({ left_knee: [85, 140] }));
+    const high = computeUniversalFeatures(standingPose({ left_knee: [85, 100] }));
+    expect(high.kneeLiftNormL).toBeGreaterThan(low.kneeLiftNormL);
+  });
+});
